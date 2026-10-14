@@ -645,3 +645,48 @@ export const testProxySite = (body: ProxySitePayload) =>
     method: 'POST',
     body: JSON.stringify(body),
   })
+
+/** 网络唤醒：一台可被唤醒的机器 */
+export interface WolTarget {
+  id: string
+  name: string
+  mac: string
+  broadcast: string
+  port: number
+  note?: string
+  createdAt?: string
+}
+
+export const getWolTargets = () =>
+  request<{ targets: WolTarget[] }>('/api/wol/targets')
+
+export const addWolTarget = (body: Omit<WolTarget, 'createdAt'>) =>
+  requestWithMsg<unknown>('/api/wol/target/add', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const updateWolTarget = (body: WolTarget) =>
+  requestWithMsg<unknown>('/api/wol/target/update', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+
+export const deleteWolTarget = (id: string) =>
+  requestWithMsg<unknown>('/api/wol/target/delete', {
+    method: 'DELETE',
+    body: JSON.stringify({ id }),
+  })
+
+/**
+ * 发送唤醒包。
+ *
+ * 注意返回里的 `hint`：后端只保证「包发出去了」，**不能**确认目标是否醒来
+ * （目标可能没开 WOL、广播地址不对、或跨了网段）。所以这里不返回成功布尔值，
+ * 而是把那句提示原样交给界面转述，别让用户以为点完就该亮屏。
+ */
+export const wakeWolTarget = (id: string) =>
+  requestWithMsg<{ sent: boolean; hint: string }>('/api/wol/wake', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })

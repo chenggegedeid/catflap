@@ -6,6 +6,7 @@ import {
   FileText,
   Globe,
   LayoutDashboard,
+  Power,
   Repeat,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -21,6 +22,7 @@ import { Placeholder } from './Placeholder'
 import { ReverseProxy } from './ReverseProxy'
 import { Settings } from './Settings'
 import { Stun } from './Stun'
+import { Wol } from './Wol'
 
 /**
  * 后台页面注册表 —— **唯一**描述「后台有哪些页面」的地方。
@@ -107,6 +109,14 @@ export const pages = {
     component: 'cert',
     element: <Cert />,
   },
+  wol: {
+    label: '网络唤醒',
+    icon: Power,
+    subtitle: '发魔术包把局域网里的机器叫醒',
+    badge: 'NEW',
+    component: 'wol',
+    element: <Wol />,
+  },
 
   components: {
     label: '功能管理',
@@ -152,7 +162,7 @@ export interface NavGroupDef {
  */
 export const pageGroups = [
   { keys: ['dashboard'] },
-  { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'cert'] },
+  { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'cert', 'wol'] },
   { title: '系统与管理', keys: ['components', 'settings', 'logs', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]
 
