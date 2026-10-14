@@ -11,6 +11,30 @@ type DDNSRuntime struct {
 	Scheduler *Scheduler
 }
 
+// CountSyncable 数一数当前有多少条**真正会被同步**的解析记录。
+//
+// 判据是「记录开着，且能找到它所属的服务商」—— 服务商本身没有开关
+// （要么配了要么没配），所以只看记录这侧的开关与归属是否配得上。
+// 外部（比如计划任务）据此判断「这一轮到底有没有东西可做」，
+// 免得对着一个空调度器报成功。
+func (r *DDNSRuntime) CountSyncable() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	known := make(map[uint]bool, len(r.Config.Providers))
+	for _, p := range r.Config.Providers {
+		known[p.ID] = true
+	}
+
+	n := 0
+	for _, rec := range r.Config.Records {
+		if rec.Enabled && known[rec.ProviderID] {
+			n++
+		}
+	}
+	return n
+}
+
 var Runtime = &DDNSRuntime{}
 
 // RebuildScheduler 在 providers 变更后调用：停掉旧调度器，按当前配置重建
