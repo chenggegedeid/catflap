@@ -54,6 +54,45 @@ func normalizeServices(config *model.Config) {
 	}
 }
 
+// DefaultSTUNServers 内置的 STUN 服务器列表。
+//
+// 两处会用它：首次创建配置、以及用户在界面上点「恢复内置列表」。
+// 抽成变量是为了不让这两处各写一份、然后慢慢不一致。
+//
+// ⚠️ 这份列表的来历是「上游默认带的那批」，**不是我们实测过的**。
+// 实测要靠界面上那次测速：保存/恢复后程序会立即重测并选出最优，
+// 用户再把自己网络里连不上的剔掉。别把它当成「保证可用」的清单。
+var DefaultSTUNServers = []string{
+	"stun.annatel.net:3478",
+	"stun.antisip.com:3478",
+	"stun.commpeak.com:3478",
+	"stun.dcalling.de:3478",
+	"stun.freeswitch.org:3478",
+	"stun.ipfire.org:3478",
+	"stun.sip.us:3478",
+	"stun.siplogin.de:3478",
+	"stun.sonetel.net:3478",
+	"stun.voip.blackberry.com:3478",
+	"stun.nextcloud.com:443",
+	"stun.flashdance.cx:3478",
+	"fwa.lifesizecloud.com:3478",
+	"stun.nextcloud.com:3478",
+	"stun.radiojar.com:3478",
+	"stun.sonetel.com:3478",
+	"stun.voipgate.com:3478",
+}
+
+// DefaultSTUNServersCopy 返回内置列表的一份副本。
+//
+// 直接把 DefaultSTUNServers 赋给配置的话，用户后续编辑会**改到这个包级变量**，
+// 于是「恢复内置列表」恢复出来的会是上次被改过的那份 —— 这类 bug 只在
+// 「改过一次再恢复」时才出现，很难从现象倒推。
+func DefaultSTUNServersCopy() []string {
+	out := make([]string, len(DefaultSTUNServers))
+	copy(out, DefaultSTUNServers)
+	return out
+}
+
 func createConfig() (model.Config, error) {
 	var config model.Config
 	// 首次创建，设置创建时间
@@ -61,25 +100,7 @@ func createConfig() (model.Config, error) {
 	config.UpdatedAt = time.Now()
 
 	// 初始化stun服务器
-	config.StunServerList = []string{
-		"stun.annatel.net:3478",
-		"stun.antisip.com:3478",
-		"stun.commpeak.com:3478",
-		"stun.dcalling.de:3478",
-		"stun.freeswitch.org:3478",
-		"stun.ipfire.org:3478",
-		"stun.sip.us:3478",
-		"stun.siplogin.de:3478",
-		"stun.sonetel.net:3478",
-		"stun.voip.blackberry.com:3478",
-		"stun.nextcloud.com:443",
-		"stun.flashdance.cx:3478",
-		"fwa.lifesizecloud.com:3478",
-		"stun.nextcloud.com:3478",
-		"stun.radiojar.com:3478",
-		"stun.sonetel.com:3478",
-		"stun.voipgate.com:3478",
-	}
+	config.StunServerList = DefaultSTUNServersCopy()
 
 	// 确保 config 目录存在
 	if err := utilsFile.EnsurePrivateDir("config"); err != nil {

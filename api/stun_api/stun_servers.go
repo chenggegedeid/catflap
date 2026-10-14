@@ -29,6 +29,28 @@ func (StunApi) GetStunServersView(c *gin.Context) {
 	res.OkWithData(StunServersViewResponse{Servers: servers, Best: best}, c)
 }
 
+// StunServersResetView 把服务器列表恢复成内置的那一批。
+//
+// 什么时候会用到：用户为了排错把列表删得只剩一两个，或者加了一堆连不上的，
+// 想回到出厂状态。没有这个入口的话，他得手打 17 行 —— 而列表一旦被清空，
+// 打洞就彻底起不来，等于把自己锁在外面。
+func (StunApi) StunServersResetView(c *gin.Context) {
+	list := stun.DefaultSTUNServersCopy()
+
+	stun.Runtime.Config.StunServerList = list
+	if err := stun.UpdateConfig(stun.Runtime.Config); err != nil {
+		res.FailWithMsg("保存配置失败", c)
+		return
+	}
+
+	stun.RefreshSTUNService(list)
+	best := ""
+	if stun.Runtime.STUNService != nil {
+		best = stun.Runtime.STUNService.BestSTUNServer
+	}
+	res.OkWithData(StunServersViewResponse{Servers: list, Best: best}, c)
+}
+
 type StunServersUpdateRequest struct {
 	Servers []string `json:"servers"`
 }

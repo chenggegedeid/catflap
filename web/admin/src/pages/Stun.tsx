@@ -2277,6 +2277,21 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
     }
   }
 
+  // 恢复内置列表：把后端返回的默认列表填回输入框，不直接保存。
+  // 让用户先看一眼再决定 —— 一键覆盖掉他刚敲的内容会很烦人。
+  const resetDefault = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const result = await api.resetStunServers()
+      setText((result.data?.servers ?? []).join('\n'))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '恢复失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div
       className={modalBackdrop}
@@ -2327,6 +2342,17 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
           <span className="text-xs text-slate-400">保存前会逐行校验并去重</span>
           <div className="flex items-center gap-2">
+            {/* 恢复内置列表放在「取消」左边：它是个不常用但关键的回头路，
+                排在次要位置，避免和「保存」抢注意力 */}
+            <button
+              type="button"
+              onClick={resetDefault}
+              disabled={saving}
+              title="丢弃当前编辑，恢复成程序内置的默认列表并立即重测"
+              className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              恢复内置列表
+            </button>
             <button
               type="button"
               onClick={onClose}
