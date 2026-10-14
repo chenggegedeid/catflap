@@ -1,0 +1,81 @@
+package stun_api
+
+import (
+	"github.com/chenggegedeid/catflap/middleware"
+	"github.com/chenggegedeid/catflap/modules/stun"
+	"github.com/chenggegedeid/catflap/utils/res"
+
+	"github.com/gin-gonic/gin"
+)
+
+type StunServiceDeleteViewRequest struct {
+	DeviceID  uint `json:"deviceId"`  // 设备ID
+	ServiceID uint `json:"serviceId"` // 服务ID
+}
+
+func (StunApi) StunServiceDeleteView(c *gin.Context) {
+	cr := middleware.GetBindRequest[StunServiceDeleteViewRequest](c)
+
+	// 查找目标设备
+	deviceIndex := -1
+	for i, device := range stun.Runtime.Config.Devices {
+		if device.DeviceID == cr.DeviceID {
+			deviceIndex = i
+			break
+		}
+	}
+	if deviceIndex == -1 {
+		res.FailWithMsg("设备不存在", c)
+		return
+	}
+
+	// 查找目标服务
+	serviceIndex := -1
+	for i, svc := range stun.Runtime.Config.Devices[deviceIndex].Services {
+		if svc.ID == cr.ServiceID {
+			serviceIndex = i
+			break
+		}
+	}
+	if serviceIndex == -1 {
+		res.FailWithMsg("服务不存在", c)
+		return
+	}
+
+	// 先停止 STUN 穿透，再从切片删除
+	// 修复1：原版先删切片再 StopService，顺序颠倒（删了之后 StopService 其实无所谓，但语义上应先停再删）
+	// 修复2：原版调用已删除的全局函数 stun.StopService，改为调度器实例方法
+	stun.Runtime.Scheduler.StopService(cr.DeviceID, cr.ServiceID)
+
+	// 入口重定向配置和落地域名都得在摘掉之前留一份：删完就查不到了，
+	// 而 Cloudflare 那条规则还在，继续把人送到一个没了的端口
+	redirectCfg := stun.Runtime.Config.Devices[deviceIndex].Services[serviceIndex].Redirect
+	mcEntryCfg := stun.Runtime.Config.Devices[deviceIndex].Services[serviceIndex].MCEntry
+	landingHost := stun.Runtime.Config.Devices[deviceIndex].Services[serviceIndex].Domain
+
+	// 从切片中删除该服务
+	services := stun.Runtime.Config.Devices[deviceIndex].Services
+	stun.Runtime.Config.Devices[deviceIndex].Services = append(
+		services[:serviceIndex],
+		services[serviceIndex+1:]...,
+	)
+
+	// 持久化配置到文件
+	if err := stun.UpdateConfig(stun.Runtime.Config); err != nil {
+		res.FailWithMsg("保存配置失败", c)
+		return
+	}
+
+	// 通知订阅方（home 模块借此级联清掉对应卡片）
+	stun.NotifyServiceDeleted(cr.DeviceID, cr.ServiceID)
+	stun.CleanupRedirect(redirectCfg, cr.DeviceID, cr.ServiceID)
+	if mcEntryCfg.Enabled {
+		stun.CleanupMCEntry(mcEntryCfg)
+		// 只有「新建」那种是 Catflap 替联机域名补的 A 记录；指向现成域名的不归这里收
+		stun.CleanupLandingRecord(stun.MCEntryOwnedHost(mcEntryCfg))
+	}
+	// 当初替这个域名自动加的那条 DDNS 记录也收回去，别留一条谁也不认识的记录在那空转
+	stun.CleanupLandingRecord(landingHost)
+
+	res.OkWithMsg("删除成功", c)
+}

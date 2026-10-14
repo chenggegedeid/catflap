@@ -1,0 +1,62 @@
+name: 功能建议
+description: 提出新功能或改进想法
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        建议前请先看两处，避免重复：
+
+        - [`CHANGELOG.md`](https://github.com/chenggegedeid/catflap/blob/main/CHANGELOG.md) 里已经排期的功能
+        - [`docs/design/`](https://github.com/chenggegedeid/catflap/tree/main/docs/design) 下的路线图
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: |
+        请描述**场景和痛点**，而不是直接给方案。
+        比如「家里路由重启后 IP 变了，我得手动去面板点同步，希望它能自动发现」，
+        而不是「请加个定时任务功能」。
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: 你现在怎么绕过它
+      description: 临时方案是什么？绕不过去的点在哪？
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你设想的做法（可选）
+      description: 如果你有具体想法，写在这里；不确定就留空
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 你觉得这属于
+      options:
+        - 内网穿透
+        - 反向代理
+        - DDNS / 证书
+        - 面板界面
+        - 部署 / 运维
+        - 文档
+        - 其它
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: 你愿意参与吗
+      options:
+        - label: 我可以帮忙测试
+        - label: 我可以提 PR（请先读 CONTRIBUTING.md 的目录约定）

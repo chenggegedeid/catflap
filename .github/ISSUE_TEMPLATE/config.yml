@@ -1,0 +1,16 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 安全漏洞（不要开公开 Issue）
+    url: https://github.com/chenggegedeid/catflap/security/advisories/new
+    about: 请走私有漏洞报告渠道，细节见 SECURITY.md
+
+  - name: 参考的开源项目（不是我们的 Issue 区）
+    url: https://github.com/chenggegedeid/catflap/blob/main/NOTICE
+    about: >-
+      本项目参考/引用了若干开源项目的代码，清单见 NOTICE。那些项目各自的问题
+      请到它们自己的仓库反馈；本项目的问题请开在这里。
+
+  - name: 先读 README 的常见问题
+    url: https://github.com/chenggegedeid/catflap/blob/main/README.md
+    about: 安装、迁移、构建顺序等问题在 README 和 docs/ 里都有

@@ -1,0 +1,67 @@
+# ── 运行期数据：含明文凭据（DNS Token / JWT 密钥），绝不入库 ──────────────
+/config/
+/data/
+/logs/
+*.log
+
+# ── 测试运行时写进源码树的产物 ──────────────────────────────────────────
+# modules/stun 的测试以包目录为 CWD，会把 config/ 建在源码树里
+# （modules/stun/test/config/stunConfig.json）。它没有凭据，但每次跑测试都会
+# 重写 createdAt/updatedAt，入库只会制造无意义的 diff。
+/modules/stun/test/config/
+/modules/stun/test/data/
+/test/config/
+/test/data/
+
+
+# ── 构建产物 ────────────────────────────────────────────────────────
+/bin/
+/build/bin/
+/out/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 例外：Windows 桌面版的图标等资源要入库
+!build/windows/*.ico
+!build/windows/*.rc
+
+# ── 前端 ───────────────────────────────────────────────────────────
+node_modules/
+*.tsbuildinfo
+.vite/
+
+# 注意：web/admin/dist 与 web/home/dist **故意入库**。
+# 原因有二：
+#   1. app.go 用 //go:embed 嵌入它们，不入库会导致 clone 后直接 `go build` 失败；
+#   2. 上游也是这么做的，保持一致的目的是让 `git merge upstream` 干净。
+# 改前端后必须重新构建并提交 dist（Taskfile: task build:frontend）。
+
+# ── 编辑器与系统 ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# ── Go ────────────────────────────────────────────────────────────
+*.test
+*.out
+coverage.txt
+
+# ── 凭据 ——— 这是一道保险，不是推荐做法 ─────────────────────────────
+# 正确的做法是把令牌放在**仓库之外**（例如 E:\workbuddy\stun\04-构建工具链\.secrets\）。
+# 下面这些规则的作用是：万一有人图省事把令牌丢进源码树，git 也不会把它提交上去。
+# 已在库里的文件不受影响，规则只挡新增。
+.secrets/
+.gh-token
+gh_token*
+*credentials*.json
+*.pat
+.env
+.env.*
+!.env.example
+!.env.sample

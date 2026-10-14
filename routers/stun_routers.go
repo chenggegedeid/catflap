@@ -1,0 +1,162 @@
+package routers
+
+import (
+	"github.com/chenggegedeid/catflap/api/stun_api"
+	"github.com/chenggegedeid/catflap/core/component"
+	"github.com/chenggegedeid/catflap/middleware"
+	"github.com/chenggegedeid/catflap/modules/stun"
+
+	"github.com/gin-gonic/gin"
+)
+
+func StunRouters(g *gin.RouterGroup) {
+	var app = stun_api.StunApi{}
+
+	// 输出当前stun配置文件
+	g.GET(
+		"stun/config",
+		app.GetStunConfigView,
+	)
+
+	// 输出最近一次 UDP/TCP NAT 类型检测结果
+	g.GET(
+		"stun/nat-type",
+		app.GetNatTypeView,
+	)
+	g.POST(
+		"stun/nat-type/detect",
+		app.DetectNatTypeView,
+	)
+
+	// 运行时状态快照（一次性）
+	g.GET(
+		"stun/status",
+		app.GetStunStatusView,
+	)
+
+	// 运行时状态 SSE 推送
+	g.GET(
+		"stun/status/events",
+		app.StunStatusEventsView,
+	)
+
+	// 网络设置：打洞走哪张网卡、STUN 域名找谁解析
+	g.GET(
+		"stun/network",
+		app.GetStunNetworkView,
+	)
+	g.PUT(
+		"stun/network",
+		middleware.BindJsonMiddleware[stun_api.StunNetworkUpdateRequest],
+		app.StunNetworkUpdateView,
+	)
+
+	// STUN 服务器列表：查看 + 保存（保存后立即重测选优）
+	g.GET(
+		"stun/servers",
+		app.GetStunServersView,
+	)
+	g.PUT(
+		"stun/servers",
+		middleware.BindJsonMiddleware[stun_api.StunServersUpdateRequest],
+		app.StunServersUpdateView,
+	)
+
+	// 新增服务
+	g.POST(
+		"stun/service/add",
+		middleware.BindJsonMiddleware[stun_api.StunServiceAddViewRequest],
+		app.StunServiceAddView,
+	)
+
+	// 本机接在哪几个局域网上
+	g.GET(
+		"stun/lan/subnets",
+		app.StunLanSubnetListView,
+	)
+
+	// 扫一段局域网，找出在线的机器和它们开着的端口
+	g.POST(
+		"stun/lan/scan",
+		middleware.BindJsonMiddleware[stun_api.StunLanScanRequest],
+		app.StunLanScanView,
+	)
+
+	// 新增设备
+	g.POST(
+		"stun/device/add",
+		middleware.BindJsonMiddleware[stun_api.StunDeviceAddViewRequest],
+		app.StunDeviceAddView,
+	)
+
+	// 修改服务
+	g.PUT(
+		"stun/service/update",
+		middleware.BindJsonMiddleware[stun_api.StunServiceUpdateViewRequest],
+		app.StunServiceUpdateView,
+	)
+
+	// 删除服务
+	g.DELETE(
+		"stun/service/delete",
+		middleware.BindJsonMiddleware[stun_api.StunServiceDeleteViewRequest],
+		app.StunServiceDeleteView,
+	)
+
+	// 删除设备
+	g.DELETE(
+		"stun/device/delete",
+		middleware.BindJsonMiddleware[stun_api.StunDeviceDeleteViewRequest],
+		app.StunDeviceDeleteView,
+	)
+
+	// 修改设备
+	g.PUT(
+		"stun/device/update",
+		middleware.BindJsonMiddleware[stun_api.StunDeviceUpdateViewRequest],
+		app.StunDeviceUpdateView,
+	)
+
+	// 立即同步入口重定向
+	g.POST(
+		"stun/redirect/sync",
+		middleware.BindJsonMiddleware[stun_api.StunRedirectRequest],
+		app.StunRedirectSyncView,
+	)
+
+	// 入口/落地这两条解析记录现在各是什么样
+	g.POST(
+		"stun/redirect/inspect",
+		middleware.BindJsonMiddleware[stun_api.StunRedirectRequest],
+		app.StunRedirectInspectView,
+	)
+
+	// 删掉服务商那边的入口重定向规则
+	g.DELETE(
+		"stun/redirect",
+		middleware.BindJsonMiddleware[stun_api.StunRedirectRequest],
+		app.StunRedirectRemoveView,
+	)
+
+	// 立即同步 MC 入口（SRV 记录）
+	g.POST(
+		"stun/mc-entry/sync",
+		middleware.BindJsonMiddleware[stun_api.StunRedirectRequest],
+		app.StunMCEntrySyncView,
+	)
+
+	// 切换某个 service 是否在 home 显示（与 home 模块联动）
+	g.PUT(
+		"stun/service/show-on-home",
+		middleware.BindJsonMiddleware[stun_api.StunServiceShowOnHomeRequest],
+		app.StunServiceShowOnHomeView,
+	)
+
+}
+
+// 把本模块的挂载交给组件注册表，routers/enter.go 不再需要列它。
+func init() {
+	component.MustContributeRoutes(stun.Name, func(g component.RouterGroups) {
+		StunRouters(g.Protected)
+	})
+}

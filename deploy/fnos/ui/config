@@ -1,0 +1,18 @@
+{
+  ".url": {
+    "Catflap.Application": {
+      "noDisplay": false,
+      "allUsers": false,
+      "fileTypes": [],
+      "control": {
+        "accessPerm": "readonly"
+      },
+      "protocol": "http",
+      "title": "Catflap",
+      "icon": "images/icon_256.png",
+      "type": "url",
+      "port": "3791",
+      "url": "/catflap/"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "fixed": {
+    "file_version": "1.0.0",
+    "product_version": "1.0.0"
+  },
+  "info": {
+    "0409": {
+      "FileVersion": "1.0.0",
+      "ProductVersion": "1.0.0",
+      "OriginalFilename": "catflap-desktop.exe",
+      "InternalName": "catflap",
+      "CompanyName": "chenggegedeid",
+      "FileDescription": "Catflap 桌面控制台",
+      "LegalCopyright": "Copyright 2026 chenggegedeid",
+      "ProductName": "Catflap",
+      "Comments": "Catflap 桌面控制台。参考的开源项目见 NOTICE，许可 GPL-3.0-or-later。"
+    }
+  }
+}

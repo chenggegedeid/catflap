@@ -1,0 +1,22 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.go]
+indent_size = 4
+# Go 用 tab 缩进，gofmt 是唯一权威。这里不强制，交给 gofmt。
+indent_style = tab
+
+[*.{yml,yaml,json,ts,tsx,js,jsx,css,html}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Taskfile.yml]
+indent_size = 2

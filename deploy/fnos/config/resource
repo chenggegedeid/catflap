@@ -1,0 +1,28 @@
+{
+    "data-share":
+    {
+        "shares":
+        [
+            {
+                "name": "Catflap",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "Catflap"
+                    ]
+                }
+            },
+            {
+                "name": "Catflap/data",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "Catflap"
+                    ]
+                }
+            }
+        ]
+    }
+}

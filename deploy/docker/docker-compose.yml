@@ -1,0 +1,60 @@
+# Catflap 容器编排示例
+#
+# 用法：
+#   docker compose -f deploy/docker/docker-compose.yml up -d --build
+#
+# 构建上下文是**仓库根目录**（因为要先构建前端再编后端），
+# 所以这里把 context 设成 ../../ 并指定 dockerfile 路径。
+
+services:
+  catflap:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        # 裸版本号，不带 v —— 原因见 Dockerfile 里的注释与 docs/decisions/
+        VERSION: "1.0.0"
+    image: catflap:1.0.0
+    container_name: catflap
+
+    # ── 网络 ────────────────────────────────────────────────────────────────
+    # 用 host 网络。原因：内网穿透要通过 STUN 打洞、要探测本机 NAT 类型、
+    # 还要走真实物理网卡出去 —— 在 bridge 网络里这些都拿不到真实的网络视图，
+    # 表现为「NAT 类型检测结果不对」或「隧道建不起来」。
+    #
+    # 用 host 网络时下面的 ports 不生效（也无需生效），面板直接由 3791 端口对外。
+    network_mode: host
+    # ports:
+    #   - "3791:3791"
+    # ↑ 如果你确实必须用 bridge 网络（例如 macOS 上 host 网络不完整），
+    #   取消上面两行的注释、并删掉 network_mode。
+
+    # ── 数据 ────────────────────────────────────────────────────────────────
+    # 这两个目录必须持久化。config/ 里存着 DNS Token 等凭据，
+    # 丢了就得全部重配；data/ 里是图标、壁纸、证书。
+    volumes:
+      - ./config:/opt/catflap/config
+      - ./data:/opt/catflap/data
+
+    # ── 安全 ────────────────────────────────────────────────────────────────
+    # 镜像里已经是非 root（uid 10001）。再收紧一层：
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # 端口 3791 > 1024，不需要任何 capability。
+    # 若你同时用它的反向代理功能绑定 80/443，则需要放开：
+    # cap_add:
+    #   - NET_BIND_SERVICE
+
+    restart: unless-stopped
+
+    # ── 日志 ────────────────────────────────────────────────────────────────
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

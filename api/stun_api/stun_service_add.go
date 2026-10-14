@@ -1,0 +1,104 @@
+package stun_api
+
+import (
+	"github.com/chenggegedeid/catflap/middleware"
+	"github.com/chenggegedeid/catflap/modules/stun"
+	"github.com/chenggegedeid/catflap/modules/stun/model"
+	"github.com/chenggegedeid/catflap/modules/webhook"
+	"github.com/chenggegedeid/catflap/utils/res"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+type StunServiceAddViewRequest struct {
+	DeviceID     uint   `json:"deviceId"`     // 设备ID
+	Name         string `json:"name"`         // 服务名称,如 "SSH" / "Web管理" / "照片库"
+	InternalPort uint16 `json:"internalPort"` // 内网端口,如 22
+	Protocol     string `json:"protocol"`     // 传输协议 "TCP"/"UDP" (默认 TCP)
+	Https        bool   `json:"https"`        // 是否是 https 服务（影响前端跳转 scheme）
+
+	// UPnP 相关配置
+	UseUPnP bool `json:"useUpnp"` // 是否启用 UPnP 自动端口映射 (默认 true)
+
+	// 对外访问
+	Domain       string `json:"domain"`       // 对外域名，如 fw.example.com；留空回落公网 IP
+	TLSTerminate bool   `json:"tlsTerminate"` // 由 Catflap 在洞口终结 TLS（仅 TCP）
+	CertID       uint   `json:"certId"`       // 绑定证书 ID，0 表示按 SNI 自动匹配
+	BackendHTTPS bool   `json:"backendHttps"` // 转发给内网时也用 HTTPS（tls.Dial），仅在 TLSTerminate 时成立
+
+	Enabled     bool   `json:"enabled"`     // 服务是否启用 (默认 true)
+	Description string `json:"description"` // 服务描述信息 (可选)
+
+	WebHookConfig webhook.WebhookConfig `json:"webhookconfig"` // Webhook 配置文件
+	Redirect      model.RedirectConfig  `json:"redirect"`      // 入口域名跟着外部端口走
+	MCEntry       model.MCEntryConfig   `json:"mcEntry"`       // MC Java 版联机的 SRV 记录
+}
+
+func (StunApi) StunServiceAddView(c *gin.Context) {
+	cr := middleware.GetBindRequest[StunServiceAddViewRequest](c)
+
+	// 查找目标设备
+	deviceIndex := -1
+	for i, device := range stun.Runtime.Config.Devices {
+		if device.DeviceID == cr.DeviceID {
+			deviceIndex = i
+			break
+		}
+	}
+	if deviceIndex == -1 {
+		res.FailWithMsg("设备不存在", c)
+		return
+	}
+
+	// 生成新服务ID（取当前最大ID+1）
+	var maxID uint = 0
+	for _, svc := range stun.Runtime.Config.Devices[deviceIndex].Services {
+		if svc.ID > maxID {
+			maxID = svc.ID
+		}
+	}
+
+	// 构建新服务
+	domain, tlsTerminate, certID := normalizeTLSFields(cr.Protocol, cr.Domain, cr.TLSTerminate, cr.CertID)
+	domain = fillDomainFromCert(domain, tlsTerminate, certID)
+	newService := model.Service{
+		ID:            maxID + 1,
+		Name:          cr.Name,
+		InternalPort:  cr.InternalPort,
+		Protocol:      cr.Protocol,
+		Https:         cr.Https,
+		UseUPnP:       cr.UseUPnP,
+		Domain:        domain,
+		TLSTerminate:  tlsTerminate,
+		CertID:        certID,
+		BackendHTTPS:  normalizeBackendHTTPS(cr.Protocol, cr.BackendHTTPS, tlsTerminate),
+		Enabled:       cr.Enabled,
+		Description:   cr.Description,
+		WebHookConfig: cr.WebHookConfig,
+		Redirect:      cr.Redirect,
+		MCEntry:       normalizeMCEntry(cr.Protocol, cr.MCEntry),
+		UpdatedAt:     time.Now(),
+	}
+
+	// 添加服务到设备
+	stun.Runtime.Config.Devices[deviceIndex].Services = append(
+		stun.Runtime.Config.Devices[deviceIndex].Services,
+		newService,
+	)
+
+	// 持久化配置到文件
+	if err := stun.UpdateConfig(stun.Runtime.Config); err != nil {
+		res.FailWithMsg("保存配置失败", c)
+		return
+	}
+
+	// 启动该服务的 STUN 穿透
+	// 修复：原版调用已删除的全局函数 stun.StartService，改为调度器实例方法
+	// 注意：必须从 global 切片取指针，不能用局部变量 newService（append 后地址可能已变）
+	device := &stun.Runtime.Config.Devices[deviceIndex]
+	services := device.Services
+	stun.Runtime.Scheduler.StartService(device, &services[len(services)-1])
+
+	res.OkWithData(newService, c)
+}

@@ -1,0 +1,9 @@
+#!/bin/bash
+
+### 卸载前调用：先把进程停掉，避免卸载后还有个残留进程占着端口。
+
+if [ -x "${TRIM_APPDEST}/cmd/main" ]; then
+    bash "${TRIM_APPDEST}/cmd/main" stop >/dev/null 2>&1
+fi
+
+exit 0

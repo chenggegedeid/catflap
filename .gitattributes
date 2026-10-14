@@ -1,0 +1,62 @@
+# ── 行尾策略 ─────────────────────────────────────────────────────────────
+#
+# 事实（已用 `git cat-file blob` 逐对象核实，不是推测）：
+#   上游 ZluxYao/LinkStar 的仓库里**所有文本文件都是 LF**。
+#   证据：上游 main 的 273 个 .go 文件，CR 计数**全部为 0**；
+#         app.go 从 2026-07-05 到 2026-10-11 的每一个历史版本 CR 也都是 0；
+#         上游没有 .gitattributes，也没有任何 CRLF 提交。
+#
+# 所以这里用 `text=auto eol=lf`：
+#   clean（入库）：CRLF 一律转成 LF。提交进仓库的字节与上游形态一致，于是
+#                  `git diff upstream/main` 只会显示真正的改动，
+#                  `git merge upstream` 不会产生整库的行尾噪声。
+#   smudge（检出）：一律还原成 LF。Windows / Linux / macOS 三个平台结果完全相同，
+#                  不会出现「同一份代码在不同机器上 git status 结果不一样」。
+#
+# ⚠️ 三个不要：
+#   1. 不要写成 `* -text`。那会让 Windows 上检出时的 CRLF 原样入库，
+#      结果是**每个文本文件都和上游逐行不同**，从此彻底无法与上游合并。
+#   2. 不要只写 `text=auto`（不带 eol）。那样 Windows 上会检出 CRLF，
+#      虽然入库仍是 LF，但工作区与上游不一致，`.editorconfig` 也会失效。
+#   3. 不要把这里改成 `eol=crlf`。上游是 LF，改成 CRLF 等于主动制造差异。
+#
+# 若在 Windows 上看到「所有文件都显示被修改」，先检查：
+#     git config --get core.autocrlf     # 必须为 false 或 input，绝不要 true
+# 本仓库已在 .git/config 里显式设为 false。
+
+* text=auto eol=lf
+
+# ── 二进制：禁止任何行尾转换 ──────────────────────────────────────────────
+# `text=auto` 靠「前 8000 字节里有没有 NUL」来判断二进制，绝大多数情况够用，
+# 但下面这些类型必须钉死，避免误判导致文件损坏。
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.bmp    binary
+*.ico    binary
+*.icns   binary
+*.ttf    binary
+*.otf    binary
+*.woff   binary
+*.woff2  binary
+*.eot    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+*.tar    binary
+*.7z     binary
+*.fpk    binary
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.dylib  binary
+*.syso   binary
+*.xmind  binary
+*.pem    text eol=lf
+*.key    text eol=lf
+
+# ── 生成物：体积大、机器产出 ──────────────────────────────────────────────
+# dist 仍然入库（app.go 用 //go:embed 引用），但不计入 GitHub 语言统计。
+web/*/dist/** linguist-generated=true

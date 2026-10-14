@@ -1,0 +1,56 @@
+package dns
+
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+// 运行方式（PowerShell）:
+//
+//	go test ./modules/ddns/dns/ -v -run TestCloudflareGetZone
+func TestCloudflareGetZone(t *testing.T) {
+	token := os.Getenv("CF_ApiToken")
+	domain := ""
+	if token == "" || domain == "" {
+		t.Skip("未设置 token")
+	}
+
+	cf := NewCloudflare(token)
+
+	resp, err := cf.getZones(domain)
+	if err != nil {
+		t.Fatalf("GetZone 请求失败: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatalf("API 返回失败: %v", resp.Messages)
+	}
+
+	if len(resp.Result) == 0 {
+		t.Fatalf("未找到域名 %s 对应的 zone", domain)
+	}
+
+	t.Logf("zone ID: %s, name: %s, status: %s",
+		resp.Result[0].ID, resp.Result[0].Name, resp.Result[0].Status)
+	fmt.Println(resp)
+}
+
+// go test ./modules/ddns/dns/ -v -run TestCloudflareSetRecord
+func TestCloudflareSetRecord(t *testing.T) {
+	token := os.Getenv("CF_ApiToken")
+	domain := ""
+	subDomain := "test"
+	if token == "" {
+		t.Skip("未设置 token")
+	}
+
+	cf := NewCloudflare(token)
+
+	err := cf.SetRecord(domain, subDomain, "A", "1.5.5.5", 300, false)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println("更新成功")
+}

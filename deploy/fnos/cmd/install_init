@@ -1,0 +1,15 @@
+#!/bin/bash
+
+### 安装前调用。
+
+# 端口占用检查：飞牛的 checkport=true 已经会查一次，这里再查一遍是为了给出
+# 更明确的提示（飞牛那句只说「端口被占用」，不说是被谁占了）。
+# 用了非默认端口时这里也要跟着查。
+PORT="${CATFLAP_PORT:-3791}"
+if command -v ss >/dev/null 2>&1; then
+    if ss -lnt 2>/dev/null | grep -q ":${PORT} "; then
+        echo "端口 ${PORT} 已被占用，请在安装后到应用设置里用环境变量 CATFLAP_PORT 换一个" >&2
+    fi
+fi
+
+exit 0
