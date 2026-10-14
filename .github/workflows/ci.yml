@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 后端静态检查与测试 ────────────────────────────────────────────
+  backend:
+    name: 后端校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 本仓库所有文本文件都以 LF 入库（见 .gitattributes 与 docs/decisions/0002-行尾统一为-LF.md），
+      # 所以在任何平台上 gofmt 的行为都一致，直接跑即可。
+      #
+      # test/ 除外：那是上游的临时试验程序目录，里面的 5 个文件上游本来就没 gofmt 过。
+      # 我们不打算为了满足门禁去格式化它们 —— 那会在与上游的 diff 里平白多出 5 个文件，
+      # 而它们不参与产品构建。
+      - name: gofmt
+        run: |
+          bad="$(gofmt -l . | grep -v '^test[/\\]' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::以下文件未通过 gofmt："
+            echo "$bad"
+            echo "本地修复：gofmt -w <文件>"
+            exit 1
+          fi
+          echo "gofmt 通过"
+
+      - name: go vet
+        run: go vet ./...
+
+      # modules/all/all.go 是生成物：新增/删除模块后忘了重新生成，新组件就会
+      # 「静默不生效」——接口 404、界面里没有，日志也看不出所以然。
+      - name: 校验模块清单已同步
+        run: python3 scripts/gen_module_imports.py --check
+
+      # 版本号注入点。Go 链接器对 -X 指向的符号不存在**不报错**，
+      # 改了 Version 所在的包会静默让发布版变回 dev（版本号还参与更新检查）。
+      - name: 校验版本号注入点
+        run: python3 scripts/check_version_ldflags.py
+
+      # 桌面版（wails）依赖 CGO，在 Linux 上编不了，这里只校验命令行版
+      - name: go build（不加 desktop 标签）
+        env:
+          CGO_ENABLED: 0
+        run: go build ./...
+
+      # -short 跳过 modules/stun 里依赖公网 STUN 服务器的那两个用例：
+      # 它们的结果取决于 runner 所在网络的 NAT 行为，失败不代表代码有问题。
+      # 其余用例（含 utils/utilsFile 的目录权限断言）在 Linux 上完整执行。
+      - name: go test
+        run: go test -short ./...
+
+      # deploy/ 下的 systemd 单元是「部署安全清单」的一部分，改坏了要在这里挡住。
+      # 不用 systemd-analyze verify：它会连带检查 User= 账户、ExecStart 文件
+      # 在本机存不存在，CI 里全是环境噪音，反而盖住真正的配置问题。
+      - name: 校验 systemd 单元
+        run: python3 scripts/verify_systemd_unit.py
+
+      # 已知漏洞扫描。需要访问 vuln.go.dev，外部服务偶发抽风不该拦住合并，
+      # 所以这里不阻断；正式的周期性报告在 security.yml 里出。
+      - name: govulncheck（非阻断）
+        continue-on-error: true
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  # ── 两个前端各自能构建（TypeScript 有错会在这里挡住）─────────────
+  frontend:
+    name: 前端校验 (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [admin, home]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/${{ matrix.app }}/package-lock.json
+
+      - name: npm ci
+        working-directory: web/${{ matrix.app }}
+        run: npm ci
+
+      - name: 构建
+        working-directory: web/${{ matrix.app }}
+        run: npm run build
+
+      # 依赖审计只报告不阻断：真正影响运行时的是少数几个包，
+      # 而构建链上的告警往往要等上游发新版才能消掉。周期性报告见 security.yml。
+      - name: npm audit（非阻断）
+        continue-on-error: true
+        working-directory: web/${{ matrix.app }}
+        run: npm audit --audit-level=high
+
+      - name: 检查 dist 是否已提交（dist 是入库的，见 .gitignore 说明）
+        run: |
+          if ! git diff --quiet -- web/${{ matrix.app }}/dist; then
+            echo "::warning::${{ matrix.app }} 的 dist 与本次构建结果不一致，请本地重新构建并提交 dist"
+            git diff --stat -- web/${{ matrix.app }}/dist
+          fi
+
+  # ── 交叉编译冒烟：确认几个主要目标都能出二进制 ───────────────────
+  crossbuild:
+    name: 交叉编译 ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: frontend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: linux,   goarch: arm, goarm: '7' }
+          - { goos: linux,   goarch: mipsle }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # embed 需要 dist 存在，用仓库里已提交的 dist 即可；这里只做编译冒烟
+      - name: 编译
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: go build -trimpath -o /tmp/out-${{ matrix.goos }}-${{ matrix.goarch }} .
+
+      - name: 产物信息
+        run: ls -lh /tmp/out-${{ matrix.goos }}-${{ matrix.goarch }}

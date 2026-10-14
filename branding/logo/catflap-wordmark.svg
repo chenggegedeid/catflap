@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-label="Catflap 猫洞 文字标">
+  <title>Catflap 猫洞 · 横版文字标（浅底用）</title>
+
+  <!-- 图标 -->
+  <g transform="translate(36,40) scale(0.45)">
+    <path d="M156 428V236a100 100 0 0 1 200 0v192z" fill="#EAF2FE" stroke="#2563EB" stroke-width="18" stroke-linejoin="round"/>
+    <path d="M306 374 412 280" fill="none" stroke="#2563EB" stroke-width="16" stroke-linecap="round"/>
+    <path d="M204 428v-46a52 52 0 0 1 104 0v46z" fill="#2563EB"/>
+    <path d="M204 428v-46a52 52 0 0 1 104 0" fill="none" stroke="#0A1A2F" stroke-width="6" opacity="0.18"/>
+    <circle cx="412" cy="280" r="30" fill="none" stroke="#2563EB" stroke-width="12"/>
+    <circle cx="412" cy="280" r="12" fill="#2563EB"/>
+  </g>
+
+  <!-- 主标 -->
+  <text x="296" y="152"
+        font-family="Inter, 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif"
+        font-size="118" font-weight="700" fill="#0F2C52" letter-spacing="1">Catflap</text>
+
+  <!-- 副标（中文） -->
+  <text x="300" y="208"
+        font-family="'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif"
+        font-size="36" fill="#2563EB" letter-spacing="9">猫洞 · 内网穿透面板</text>
+
+  <!-- Slogan -->
+  <text x="300" y="264"
+        font-family="'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif"
+        font-size="29" fill="#64748B" letter-spacing="2">在 NAT 这扇门上，给内网开一个猫洞</text>
+</svg>

@@ -1,0 +1,8 @@
+#!/bin/bash
+
+### 升级后调用。
+
+# 配置与数据在 TRIM_PKGVAR 里，升级不会动；只确保新二进制可执行。
+chmod +x "${TRIM_APPDEST}/server/catflap" 2>/dev/null
+
+exit 0

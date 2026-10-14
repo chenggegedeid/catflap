@@ -1,0 +1,1154 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  AlertCircle,
+  CircleCheck,
+  Cloud,
+  Globe,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Server,
+  Settings,
+  Trash2,
+  TriangleAlert,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
+import { Card, CardHeader } from '../components/Card'
+import { modalBackdrop } from '../components/modal'
+import * as api from '../lib/api'
+import {
+  findProviderType,
+  hasCapability,
+  loadProviderTypes,
+  providerTypeLabel as labelOfType,
+} from '../lib/providerTypes'
+import { ProviderCap } from '../types'
+import type {
+  DdnsConfig,
+  DdnsProvider,
+  DdnsProviderTypeSpec,
+  DdnsRecord,
+  DdnsRecordStatus,
+  NetInterface,
+} from '../types'
+
+const statusInfo: Record<DdnsRecordStatus, { label: string; tone: string; icon: LucideIcon }> = {
+  success: { label: '正常', tone: 'bg-emerald-50 text-emerald-600', icon: CircleCheck },
+  pending: { label: '等待同步', tone: 'bg-amber-50 text-amber-600', icon: RefreshCw },
+  skipped: { label: '无变化', tone: 'bg-slate-100 text-slate-500', icon: CircleCheck },
+  failed: { label: '同步失败', tone: 'bg-rose-50 text-rose-500', icon: TriangleAlert },
+}
+
+const ipSourceLabel: Record<string, string> = {
+  stun: 'STUN 公网',
+  web: 'Web 查询',
+  dns: 'DNS 解析',
+  interface: '本地网卡',
+  custom: '自定义',
+}
+
+// 每种来源「来源参数」那一栏的说明。
+// 原来只对 web/dns 写了 placeholder，其余来源那个框是灰的、没人知道该不该填，
+// 现在每种来源自己说清楚：填什么、必不必填。
+const ipSourceArgMeta: Record<string, { label: string; placeholder: string; required: boolean }> = {
+  stun: { label: '来源参数（当前来源无需填写）', placeholder: '', required: false },
+  web: { label: '查询地址', placeholder: '如 https://ip.sb（留空用内置源）', required: false },
+  dns: { label: '要跟随的域名', placeholder: '如 example.com', required: true },
+  interface: { label: '网卡', placeholder: '留空自动挑一块', required: false },
+  custom: { label: 'IP 地址', placeholder: '如 192.0.2.1', required: true },
+}
+
+// ifaceOptionText 下拉里一块网卡显示成什么样：名字 + 当前记录类型用得上的地址。
+// 光有名字认不出哪块是连外网那块，Windows 上一堆 vEthernet 尤其分不清。
+function ifaceOptionText(n: NetInterface, recordType: 'A' | 'AAAA') {
+  const addrs = recordType === 'AAAA' ? n.ipv6 : n.ipv4
+  if (addrs.length === 0) return `${n.name}（没有 ${recordType === 'AAAA' ? 'IPv6' : 'IPv4'} 地址）`
+  const shown = addrs.slice(0, 2).join('、')
+  return `${n.name} — ${shown}${addrs.length > 2 ? ' 等' : ''}${n.hasPublic ? '' : '（内网地址）'}`
+}
+
+function ifaceHasType(n: NetInterface, recordType: 'A' | 'AAAA') {
+  return (recordType === 'AAAA' ? n.ipv6 : n.ipv4).length > 0
+}
+
+// ===================== 服务商字段表 =====================
+// 这张表**不在这里**：后端 /api/ddns/provider/types 按 core/provider 注册表返回，
+// 前端只负责渲染。新增一家服务商 = 后端加一个 register_*.go，本文件零改动。
+//
+// 以前这里手维护着一张 PROVIDER_TYPES，和后端的 switch、ProviderCredentialKeys
+// 各说各话，加一家要改四处，漏一处就是「能选但保存不了」或者「选项里根本没有它」。
+
+// ProviderTypeSpec / 能力常量与 loadProviderTypes 见 lib/providerTypes.ts
+type ProviderTypeSpec = DdnsProviderTypeSpec
+
+interface Toast {
+  id: number
+  text: string
+}
+
+function useToast() {
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const idRef = useRef(0)
+  const show = useCallback((text: string) => {
+    const id = ++idRef.current
+    setToasts((p) => [...p, { id, text }])
+    window.setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 2200)
+  }, [])
+  return { toasts, show }
+}
+
+function fmtTime(s?: string): string {
+  if (!s) return '--'
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime()) || d.getFullYear() < 2000) return '--'
+  return d.toLocaleString()
+}
+
+// ===================== 服务商弹窗 =====================
+
+interface ProviderFormState {
+  name: string
+  type: DdnsProvider['type']
+  credential: Record<string, string>
+}
+
+function ProviderModal({
+  types,
+  initial,
+  onCancel,
+  onSubmit,
+}: {
+  /** 可选服务商类型表，由后端注册表给出 */
+  types: ProviderTypeSpec[]
+  initial?: DdnsProvider
+  onCancel: () => void
+  onSubmit: (form: ProviderFormState) => Promise<void>
+}) {
+  const [form, setForm] = useState<ProviderFormState>(() => ({
+    name: initial?.name ?? '',
+    type: initial?.type ?? types[0]?.type ?? '',
+    credential: {},
+  }))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const meta = findProviderType(types, form.type) ?? types[0]
+  const isEdit = !!initial
+
+  const submit = async () => {
+    if (!form.name.trim()) {
+      setErr('请填写服务商名称')
+      return
+    }
+    if (!meta) {
+      setErr('服务商列表还没加载出来，请稍后重试')
+      return
+    }
+    // 新增时所有字段必填；编辑时留空表示沿用原凭证
+    if (!isEdit) {
+      for (const f of meta.fields) {
+        if (!(form.credential[f.key] ?? '').trim()) {
+          setErr(`请填写${f.label}`)
+          return
+        }
+      }
+    }
+    setErr('')
+    setBusy(true)
+    try {
+      await onSubmit(form)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '操作失败')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className={modalBackdrop}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
+    >
+      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+        <div className="mb-5 flex items-center justify-between">
+          <div className="text-base font-bold text-slate-800">{initial ? '编辑服务商' : '添加服务商'}</div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <label className="block">
+            <div className="mb-1 text-xs font-semibold text-slate-500">服务商名称</div>
+            <input
+              autoFocus
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="如 我的 Cloudflare"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-xs font-semibold text-slate-500">服务商类型</div>
+            <select
+              value={form.type}
+              disabled={isEdit || types.length === 0}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, type: e.target.value as DdnsProvider['type'], credential: {} }))
+              }
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-500"
+            >
+              {types.length === 0 && <option value="">正在读取服务商列表…</option>}
+              {types.map((m) => (
+                <option key={m.type} value={m.type}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            {isEdit && <div className="mt-1 text-[11px] text-slate-400">类型创建后不可更改</div>}
+            {meta?.docsUrl && (
+              <a
+                href={meta.docsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-block text-[11px] text-blue-500 hover:underline"
+              >
+                去哪拿这些凭据 →
+              </a>
+            )}
+          </label>
+          {(meta?.fields ?? []).map((f) => (
+            <label key={f.key} className="block">
+              <div className="mb-1 text-xs font-semibold text-slate-500">
+                {f.label}
+                {isEdit && <span className="ml-1 font-normal text-slate-400">（留空表示不修改）</span>}
+              </div>
+              <input
+                type={f.secret ? 'password' : 'text'}
+                value={form.credential[f.key] ?? ''}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, credential: { ...p.credential, [f.key]: e.target.value } }))
+                }
+                placeholder={isEdit ? '••••••••（已配置）' : f.placeholder ?? f.label}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
+              />
+              {f.help && <div className="mt-1 text-[11px] leading-relaxed text-slate-400">{f.help}</div>}
+            </label>
+          ))}
+          {err && <div className="text-xs text-rose-500">{err}</div>}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-600 disabled:opacity-50"
+          >
+            {busy ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===================== 记录弹窗 =====================
+
+interface RecordFormState {
+  enabled: boolean
+  providerId: string
+  name: string
+  domain: string
+  subDomain: string
+  recordType: 'A' | 'AAAA'
+  ipSource: 'stun' | 'web' | 'dns' | 'interface' | 'custom'
+  ipSourceArg: string
+  ttl: string
+  proxied: boolean
+}
+
+function RecordModal({
+  initial,
+  providers,
+  types,
+  onCancel,
+  onSubmit,
+}: {
+  initial?: DdnsRecord
+  providers: DdnsProvider[]
+  /** 服务商能力表，用于判断该服务商支不支持 AAAA / 小云朵 */
+  types: ProviderTypeSpec[]
+  onCancel: () => void
+  onSubmit: (form: RecordFormState) => Promise<void>
+}) {
+  const [form, setForm] = useState<RecordFormState>(() => {
+    if (!initial) {
+      return {
+        enabled: true,
+        providerId: providers[0] ? String(providers[0].id) : '',
+        name: '',
+        domain: '',
+        subDomain: '',
+        recordType: 'A',
+        ipSource: 'stun',
+        ipSourceArg: '',
+        ttl: '1',
+        proxied: false,
+      }
+    }
+    return {
+      enabled: initial.enabled,
+      providerId: String(initial.providerId),
+      name: initial.name,
+      domain: initial.domain,
+      subDomain: initial.subDomain,
+      recordType: initial.recordType,
+      ipSource: initial.ipSource,
+      ipSourceArg: initial.ipSourceArg,
+      ttl: String(initial.ttl || 1),
+      proxied: initial.proxied,
+    }
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  // 网卡列表只在选了「本地网卡」时才去拿：别的来源用不上，没必要每次开弹窗都请求一遍
+  const [ifaces, setIfaces] = useState<NetInterface[] | null>(null)
+  const [ifaceErr, setIfaceErr] = useState('')
+
+  useEffect(() => {
+    if (form.ipSource !== 'interface' || ifaces) return
+    api
+      .getDdnsInterfaces()
+      .then((list) => setIfaces(list ?? []))
+      .catch((e) => setIfaceErr(e instanceof Error ? e.message : '读取网卡列表失败'))
+  }, [form.ipSource, ifaces])
+
+  const submit = async () => {
+    if (!form.providerId) {
+      setErr('请先选择服务商')
+      return
+    }
+    if (!form.name.trim()) {
+      setErr('请填写记录名称')
+      return
+    }
+    if (!form.domain.trim()) {
+      setErr('请填写主域名')
+      return
+    }
+    if (argMeta.required && !form.ipSourceArg.trim()) {
+      setErr(`请填写${argMeta.label}`)
+      return
+    }
+    // 选好网卡之后又把记录类型改了：这块网卡上没有对应的地址，
+    // 存下去要等到下一轮同步失败才看得见
+    if (form.ipSource === 'interface' && form.ipSourceArg) {
+      const picked = (ifaces ?? []).find((n) => n.name === form.ipSourceArg)
+      if (picked && !ifaceHasType(picked, form.recordType)) {
+        setErr(`网卡「${picked.name}」上没有 ${form.recordType === 'AAAA' ? 'IPv6' : 'IPv4'} 地址，换一块或改记录类型`)
+        return
+      }
+    }
+    setErr('')
+    setBusy(true)
+    try {
+      await onSubmit(form)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '操作失败')
+      setBusy(false)
+    }
+  }
+
+  const argMeta = ipSourceArgMeta[form.ipSource] ?? ipSourceArgMeta.stun
+  const needArg = form.ipSource !== 'stun'
+
+  const selectedProvider = providers.find((p) => String(p.id) === form.providerId)
+  // 能力由后端注册表声明，这里只读 —— 不再判断「是不是 cloudflare」这类硬编码
+  const ipv4Only = selectedProvider
+    ? hasCapability(types, selectedProvider.type, ProviderCap.IPv4Only)
+    : false
+  const supportsProxied = selectedProvider
+    ? hasCapability(types, selectedProvider.type, ProviderCap.Proxied)
+    : false
+
+  // NameCheap 等仅支持 IPv4：强制 A 记录
+  useEffect(() => {
+    if (ipv4Only && form.recordType !== 'A') {
+      setForm((p) => ({ ...p, recordType: 'A' }))
+    }
+  }, [ipv4Only, form.recordType])
+
+  return (
+    <div
+      className={modalBackdrop}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
+    >
+      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+        <div className="mb-5 flex items-center justify-between">
+          <div className="text-base font-bold text-slate-800">{initial ? '编辑解析记录' : '添加解析记录'}</div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">记录名称</div>
+            <input
+              autoFocus
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="如 家庭宽带"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">服务商</div>
+            <select
+              value={form.providerId}
+              onChange={(e) => setForm((p) => ({ ...p, providerId: e.target.value }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            >
+              {providers.length === 0 && <option value="">请先添加服务商</option>}
+              {providers.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">主域名</div>
+            <input
+              value={form.domain}
+              onChange={(e) => setForm((p) => ({ ...p, domain: e.target.value }))}
+              placeholder="如 example.com"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">子域名（@ 或留空表示主域名）</div>
+            <input
+              value={form.subDomain}
+              onChange={(e) => setForm((p) => ({ ...p, subDomain: e.target.value }))}
+              placeholder="如 home"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">记录类型</div>
+            <select
+              value={form.recordType}
+              onChange={(e) => setForm((p) => ({ ...p, recordType: e.target.value as 'A' | 'AAAA' }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            >
+              <option value="A">A (IPv4)</option>
+              <option value="AAAA" disabled={ipv4Only}>
+                AAAA (IPv6){ipv4Only ? '（该服务商不支持）' : ''}
+              </option>
+            </select>
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">TTL（1 = 自动）</div>
+            <input
+              type="number"
+              value={form.ttl}
+              onChange={(e) => setForm((p) => ({ ...p, ttl: e.target.value }))}
+              min={1}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">IP 来源</div>
+            <select
+              value={form.ipSource}
+              onChange={(e) => setForm((p) => ({ ...p, ipSource: e.target.value as RecordFormState['ipSource'] }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            >
+              <option value="stun">STUN 公网 IP</option>
+              <option value="web">Web 查询</option>
+              <option value="dns">DNS 解析</option>
+              <option value="interface">本地网卡</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <label className="col-span-2 block sm:col-span-1">
+            <div className="mb-1 text-xs font-semibold text-slate-500">{argMeta.label}</div>
+            {form.ipSource === 'interface' ? (
+              <select
+                value={form.ipSourceArg}
+                onChange={(e) => setForm((p) => ({ ...p, ipSourceArg: e.target.value }))}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              >
+                <option value="">自动挑一块</option>
+                {(ifaces ?? []).map((n) => (
+                  <option key={n.name} value={n.name} disabled={!ifaceHasType(n, form.recordType)}>
+                    {ifaceOptionText(n, form.recordType)}
+                  </option>
+                ))}
+                {/* 存着的网卡现在不在了（换了机器、禁用了网卡）：留着这一项，
+                    不然下拉会显示成「自动挑一块」，一保存就悄悄换了意思 */}
+                {form.ipSourceArg !== '' &&
+                  !(ifaces ?? []).some((n) => n.name === form.ipSourceArg) && (
+                    <option value={form.ipSourceArg}>{form.ipSourceArg}（现在没有这块网卡）</option>
+                  )}
+              </select>
+            ) : (
+              <input
+                value={form.ipSourceArg}
+                onChange={(e) => setForm((p) => ({ ...p, ipSourceArg: e.target.value }))}
+                disabled={!needArg}
+                placeholder={argMeta.placeholder}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+              />
+            )}
+            {form.ipSource === 'interface' && (
+              <div className="mt-1 text-[11px] text-slate-400">
+                {ifaceErr ||
+                  (ifaces === null
+                    ? '正在读网卡...'
+                    : ifaces.length === 0
+                      ? '这台机器上没有地址能往公网写的网卡，换个 IP 来源'
+                      : '选哪块，就把哪块上面的地址写进这条记录')}
+              </div>
+            )}
+            {form.ipSource === 'custom' && (
+              <div className="mt-1 text-[11px] text-slate-400">
+                这条记录就固定指着你填的地址，不随公网 IP 变
+              </div>
+            )}
+          </label>
+
+          <div className="col-span-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => setForm((p) => ({ ...p, enabled: e.target.checked }))}
+                className="h-3.5 w-3.5"
+              />
+              启用自动同步
+            </label>
+            {supportsProxied && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={form.proxied}
+                  onChange={(e) => setForm((p) => ({ ...p, proxied: e.target.checked }))}
+                  className="h-3.5 w-3.5"
+                />
+                Cloudflare 小云朵代理
+              </label>
+            )}
+          </div>
+          {err && <div className="col-span-2 text-xs text-rose-500">{err}</div>}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-600 disabled:opacity-50"
+          >
+            {busy ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===================== 设置弹窗 =====================
+
+const intervalOptions = [
+  { value: 60, label: '1 分钟' },
+  { value: 300, label: '5 分钟' },
+  { value: 600, label: '10 分钟' },
+  { value: 1800, label: '30 分钟' },
+  { value: 3600, label: '1 小时' },
+]
+
+function SettingsModal({
+  intervalSec,
+  onCancel,
+  onSubmit,
+}: {
+  intervalSec: number
+  onCancel: () => void
+  onSubmit: (intervalSec: number) => Promise<void>
+}) {
+  const [sec, setSec] = useState(intervalSec)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const submit = async () => {
+    setErr('')
+    setBusy(true)
+    try {
+      await onSubmit(sec)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '操作失败')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className={modalBackdrop}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
+    >
+      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+        <div className="mb-5 flex items-center justify-between">
+          <div className="text-base font-bold text-slate-800">DDNS 设置</div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <label className="block">
+          <div className="mb-1 text-xs font-semibold text-slate-500">全局同步间隔</div>
+          <select
+            value={sec}
+            onChange={(e) => setSec(Number(e.target.value))}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+          >
+            {intervalOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <div className="mt-1.5 text-[11px] text-slate-400">每条记录按此间隔检查 IP 是否变化并自动同步</div>
+        </label>
+        {err && <div className="mt-3 text-xs text-rose-500">{err}</div>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-600 disabled:opacity-50"
+          >
+            {busy ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===================== 主页面 =====================
+
+export function Ddns() {
+  const [config, setConfig] = useState<DdnsConfig | null>(null)
+  const [types, setTypes] = useState<ProviderTypeSpec[]>([])
+  const [loadErr, setLoadErr] = useState('')
+  const [query, setQuery] = useState('')
+  const [filterStatus, setFilterStatus] = useState<'all' | DdnsRecordStatus>('all')
+  const [syncingId, setSyncingId] = useState<number | null>(null)
+  const { toasts, show: toast } = useToast()
+
+  const [providerModal, setProviderModal] = useState<{ open: boolean; initial?: DdnsProvider }>({ open: false })
+  const [recordModal, setRecordModal] = useState<{ open: boolean; initial?: DdnsRecord }>({ open: false })
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      const cfg = await api.getDdnsConfig()
+      setConfig(cfg)
+      setLoadErr('')
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+    const t = window.setInterval(refresh, 15000)
+    return () => window.clearInterval(t)
+  }, [refresh])
+
+  // 服务商类型表：进程内缓存，只需拉一次（STUN 页也读同一份）
+  useEffect(() => {
+    let alive = true
+    loadProviderTypes().then((list) => {
+      if (alive) setTypes(list)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const providers = config?.providers ?? []
+  const records = config?.records ?? []
+
+  const providerName = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const p of providers) m.set(p.id, p.name)
+    return m
+  }, [providers])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return records.filter((r) => {
+      if (filterStatus !== 'all' && r.lastStatus !== filterStatus) return false
+      if (q) {
+        const hay = `${r.name} ${r.subDomain}.${r.domain} ${r.lastIP}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [records, query, filterStatus])
+
+  const total = records.length
+  const success = records.filter((r) => r.lastStatus === 'success').length
+  const failed = records.filter((r) => r.lastStatus === 'failed').length
+
+  // ---- 全局设置 ----
+  const changeInterval = async (sec: number) => {
+    if (!config || sec < 30) return
+    await api.updateDdnsSettings({ intervalSec: sec })
+    setSettingsOpen(false)
+    toast('同步间隔已更新')
+    await refresh()
+  }
+
+  // ---- 服务商 ----
+  const submitProvider = async (form: ProviderFormState) => {
+    const credential: Record<string, string> = {}
+    for (const [k, v] of Object.entries(form.credential)) {
+      const t = v.trim()
+      if (t) credential[k] = t
+    }
+    if (providerModal.initial) {
+      await api.updateDdnsProvider({
+        id: providerModal.initial.id,
+        name: form.name.trim(),
+        credential,
+      })
+      toast('服务商已更新')
+    } else {
+      await api.addDdnsProvider({ name: form.name.trim(), type: form.type, credential })
+      toast('服务商已添加')
+    }
+    setProviderModal({ open: false })
+    await refresh()
+  }
+
+  const removeProvider = async (p: DdnsProvider) => {
+    if (!window.confirm(`确认删除服务商「${p.name}」？`)) return
+    try {
+      await api.deleteDdnsProvider(p.id)
+      toast('服务商已删除')
+      await refresh()
+    } catch (e) {
+      toast('删除失败: ' + (e instanceof Error ? e.message : ''))
+    }
+  }
+
+  // ---- 记录 ----
+  const submitRecord = async (form: RecordFormState) => {
+    const payload: api.DdnsRecordPayload = {
+      enabled: form.enabled,
+      providerId: Number(form.providerId),
+      name: form.name.trim(),
+      domain: form.domain.trim(),
+      subDomain: form.subDomain.trim(),
+      recordType: form.recordType,
+      ipSource: form.ipSource,
+      ipSourceArg: form.ipSourceArg.trim(),
+      ttl: Number(form.ttl) || 1,
+      proxied: form.proxied,
+    }
+    if (recordModal.initial) {
+      await api.updateDdnsRecord({ ...payload, id: recordModal.initial.id })
+      toast('记录已更新')
+    } else {
+      await api.addDdnsRecord(payload)
+      toast('记录已添加')
+    }
+    setRecordModal({ open: false })
+    await refresh()
+  }
+
+  const removeRecord = async (r: DdnsRecord) => {
+    if (!window.confirm(`确认删除记录「${r.name}」？`)) return
+    try {
+      await api.deleteDdnsRecord(r.id)
+      toast('记录已删除')
+      await refresh()
+    } catch (e) {
+      toast('删除失败: ' + (e instanceof Error ? e.message : ''))
+    }
+  }
+
+  const syncRecord = async (r: DdnsRecord) => {
+    setSyncingId(r.id)
+    try {
+      await api.syncDdnsRecord(r.id)
+      toast('同步成功')
+      await refresh()
+    } catch (e) {
+      toast('同步失败: ' + (e instanceof Error ? e.message : ''))
+    } finally {
+      setSyncingId(null)
+    }
+  }
+
+  const toggleRecordEnabled = async (r: DdnsRecord) => {
+    try {
+      await api.updateDdnsRecord({
+        id: r.id,
+        enabled: !r.enabled,
+        providerId: r.providerId,
+        name: r.name,
+        domain: r.domain,
+        subDomain: r.subDomain,
+        recordType: r.recordType,
+        ipSource: r.ipSource,
+        ipSourceArg: r.ipSourceArg,
+        ttl: r.ttl,
+        proxied: r.proxied,
+      })
+      toast(r.enabled ? '已关闭自动同步' : '已开启自动同步')
+      await refresh()
+    } catch (e) {
+      toast('操作失败: ' + (e instanceof Error ? e.message : ''))
+    }
+  }
+
+  if (loadErr && !config) {
+    return (
+      <Card>
+        <div className="py-12 text-center text-rose-500">
+          <AlertCircle className="mx-auto h-8 w-8" />
+          <div className="mt-2 text-sm font-semibold">数据加载失败</div>
+          <div className="mt-1 text-xs text-slate-500">{loadErr}</div>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white">
+            重试
+          </button>
+        </div>
+      </Card>
+    )
+  }
+
+  if (!config) {
+    return <Card><div className="py-12 text-center text-sm text-slate-400">正在加载...</div></Card>
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* 顶部标题 + 设置入口 */}
+      <div className="flex items-center justify-between">
+        <div className="text-base font-bold text-slate-800">动态域名解析</div>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+          title="DDNS 设置"
+        >
+          <Settings className="h-4 w-4" />
+          设置
+        </button>
+      </div>
+
+      {/* 顶部概览 */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-500">
+              <Globe className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">解析记录</div>
+              <div className="text-2xl font-bold text-slate-800">{total}</div>
+            </div>
+          </div>
+        </Card>
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-500">
+              <CircleCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">正常解析</div>
+              <div className="text-2xl font-bold text-slate-800">{success}</div>
+            </div>
+          </div>
+        </Card>
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-50 text-rose-500">
+              <TriangleAlert className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">异常记录</div>
+              <div className="text-2xl font-bold text-slate-800">{failed}</div>
+            </div>
+          </div>
+        </Card>
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-500">
+              <Cloud className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">已接入服务商</div>
+              <div className="text-2xl font-bold text-slate-800">{providers.length}</div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* 服务商 */}
+      <Card>
+        <CardHeader
+          title="DNS 服务商"
+          action={
+            <button
+              onClick={() => setProviderModal({ open: true })}
+              className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
+            >
+              <Plus className="h-3 w-3" /> 添加凭证
+            </button>
+          }
+        />
+        {providers.length === 0 ? (
+          <div className="py-6 text-center text-xs text-slate-400">尚未配置服务商，先添加一个 DNS 服务商凭证</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {providers.map((p) => (
+              <div
+                key={p.id}
+                className="group flex items-center gap-2 rounded-xl bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-600 ring-1 ring-orange-200"
+              >
+                <Server className="h-3.5 w-3.5" />
+                {p.name}
+                <span className="text-[10px] font-normal text-orange-400">({labelOfType(types, p.type)})</span>
+                <button
+                  onClick={() => setProviderModal({ open: true, initial: p })}
+                  className="ml-1 grid h-5 w-5 place-items-center rounded-md text-orange-400 transition hover:bg-white hover:text-emerald-600"
+                  title="编辑"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => removeProvider(p)}
+                  className="grid h-5 w-5 place-items-center rounded-md text-orange-400 transition hover:bg-white hover:text-rose-500"
+                  title="删除"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* 记录列表 */}
+      <Card className="!p-0">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="text-sm font-bold text-slate-800">域名解析列表</div>
+          <div className="relative ml-auto w-64">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索域名或 IP"
+              className="h-8 w-full rounded-full border border-slate-200 bg-white pl-8 pr-3 text-xs outline-none focus:border-blue-400"
+            />
+          </div>
+          <button
+            type="button"
+            className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+            onClick={() =>
+              setFilterStatus((p) =>
+                p === 'all' ? 'success' : p === 'success' ? 'pending' : p === 'pending' ? 'failed' : 'all',
+              )
+            }
+          >
+            状态: {filterStatus === 'all' ? '全部' : statusInfo[filterStatus].label}
+          </button>
+          <button
+            onClick={() => {
+              if (providers.length === 0) {
+                toast('请先添加 DNS 服务商')
+                return
+              }
+              setRecordModal({ open: true })
+            }}
+            className="flex items-center gap-1 rounded-md bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
+          >
+            <Plus className="h-3 w-3" /> 添加域名
+          </button>
+        </div>
+
+        {/* 手机上列太窄会把中文压成一列一个字，给张表一个下限，窄屏改成横向滚动 */}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[960px] text-sm">
+            <thead>
+              <tr className="bg-slate-50/60 text-xs text-slate-500">
+                <th className="px-5 py-2.5 text-left font-medium">域名</th>
+                <th className="px-3 py-2.5 text-left font-medium">类型</th>
+                <th className="px-3 py-2.5 text-left font-medium">当前 IP</th>
+                <th className="px-3 py-2.5 text-left font-medium">IP 来源</th>
+                <th className="px-3 py-2.5 text-left font-medium">服务商</th>
+                <th className="px-3 py-2.5 text-left font-medium">状态</th>
+                <th className="px-3 py-2.5 text-left font-medium">最近同步</th>
+                <th className="px-3 py-2.5 text-left font-medium">自动同步</th>
+                <th className="px-5 py-2.5 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-5 py-8 text-center text-sm text-slate-400">
+                    {records.length === 0 ? '暂无解析记录，点击右上角"添加域名"开始' : '没有匹配的记录'}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((r) => {
+                const s = statusInfo[r.lastStatus] ?? statusInfo.pending
+                const Icon = s.icon
+                const fqdn = !r.subDomain || r.subDomain === '@' ? r.domain : `${r.subDomain}.${r.domain}`
+                const busy = syncingId === r.id
+                return (
+                  <tr key={r.id} className="text-slate-700 transition hover:bg-slate-50/60">
+                    <td className="px-5 py-3">
+                      <div className="font-semibold">{fqdn}</div>
+                      <div className="text-[11px] text-slate-400">{r.name}</div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-600">
+                        {r.recordType}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 font-mono text-xs">{r.lastIP || '-'}</td>
+                    <td className="px-3 py-3 text-xs text-slate-500">{ipSourceLabel[r.ipSource] ?? r.ipSource}</td>
+                    <td className="px-3 py-3 text-xs">{providerName.get(r.providerId) ?? '已删除'}</td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${s.tone}`}
+                        title={r.lastMessage}
+                      >
+                        <Icon className={`h-3 w-3 ${r.lastStatus === 'pending' ? 'animate-spin' : ''}`} />
+                        {s.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-500">{fmtTime(r.lastSyncAt)}</td>
+                    <td className="px-3 py-3">
+                      <button onClick={() => toggleRecordEnabled(r)} className="flex items-center gap-1.5" title="切换自动同步">
+                        <span className={`inline-block h-2 w-2 rounded-full ${r.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                        <span className="text-xs text-slate-600">{r.enabled ? '已开启' : '已关闭'}</span>
+                      </button>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          onClick={() => syncRecord(r)}
+                          disabled={busy}
+                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+                          title="立即同步"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${busy ? 'animate-spin' : ''}`} />
+                        </button>
+                        <button
+                          onClick={() => setRecordModal({ open: true, initial: r })}
+                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
+                          title="编辑"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => removeRecord(r)}
+                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                          title="删除"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">
+          共 {filtered.length} 条记录
+        </div>
+      </Card>
+
+      {/* 弹窗 */}
+      {providerModal.open && (
+        <ProviderModal
+          types={types}
+          initial={providerModal.initial}
+          onCancel={() => setProviderModal({ open: false })}
+          onSubmit={submitProvider}
+        />
+      )}
+      {recordModal.open && (
+        <RecordModal
+          initial={recordModal.initial}
+          providers={providers}
+          types={types}
+          onCancel={() => setRecordModal({ open: false })}
+          onSubmit={submitRecord}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsModal
+          intervalSec={config.intervalSec}
+          onCancel={() => setSettingsOpen(false)}
+          onSubmit={changeInterval}
+        />
+      )}
+
+      {/* Toasts */}
+      <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
+        {toasts.map((t) => (
+          <div key={t.id} className="rounded-lg bg-slate-900/85 px-4 py-2 text-sm text-white shadow-lg">
+            {t.text}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

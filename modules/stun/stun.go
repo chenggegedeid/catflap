@@ -1,0 +1,732 @@
+package stun
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/chenggegedeid/catflap/modules/cert"
+
+	"github.com/libp2p/go-reuseport"
+	"github.com/pion/stun"
+	"github.com/sirupsen/logrus"
+)
+
+// STUN 内网穿透实现
+func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNState)) error {
+
+	// 验证环境，确保不缺东西
+	protocol, err := formatProtocol(req.Protocol)
+	if err != nil {
+		return err
+	}
+	localIP := Runtime.Network.LocalIP
+	if localIP == "" {
+		return fmt.Errorf("get local IP failed")
+	}
+	stunServer, err := Runtime.STUNService.GetBestSTUNServer()
+	if err != nil {
+		stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
+		if err != nil {
+			return err
+		}
+	}
+
+	// 端口复用连接STUN服务器，钉在出口网卡上：开着 TUN 时不钉，包会被 TUN 接走
+	localAddr := fmt.Sprintf("%s:0", localIP)
+	stunConn, err := CurrentOutboundIface().DialReusable(protocol, localAddr, stunServer)
+	if err != nil {
+		primaryErr := err
+		primarySTUNServer := stunServer
+		// 可能 best STUN 掉线了，使用备用的
+		stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
+		if err != nil {
+			return fmt.Errorf("connect stun server %s failed: %v; get backup stun server: %w", primarySTUNServer, primaryErr, err)
+		}
+		// 再次发起连接
+		stunConn, err = CurrentOutboundIface().DialReusable(protocol, localAddr, stunServer)
+		if err != nil {
+			return fmt.Errorf("connect stun server %s failed: %v; connect backup stun server %s: %w", primarySTUNServer, primaryErr, stunServer, err)
+		}
+	}
+	defer stunConn.Close()
+
+	//获取本地端口
+	var localPort uint16
+	switch protocol {
+	case "tcp":
+		localPort = uint16(stunConn.LocalAddr().(*net.TCPAddr).Port)
+	case "udp":
+		localPort = uint16(stunConn.LocalAddr().(*net.UDPAddr).Port)
+	}
+
+	// 发送STUN 请求,获取外部端口
+	publicIP, publicPort, err := DoStunHandshake(stunConn)
+	if err != nil {
+		return fmt.Errorf("stun handshake: %w", err)
+	}
+	if protocol == "udp" {
+		logrus.Infof("UDP:%s:%d", publicIP, publicPort)
+	}
+	onState(STUNState{State: STUNLog, Log: fmt.Sprintf("通过STUN获取外部信息：%s %s:%d", protocol, publicIP, publicPort)})
+
+	// 在本地端口复用监听，接受穿透后的入站连接
+	var tcpListener net.Listener
+	var udpListener *net.UDPConn
+	listenAddr := fmt.Sprintf("%s:%d", localIP, localPort)
+	if protocol == "tcp" {
+
+		tcpListener, err = reuseport.Listen(protocol, listenAddr)
+		if err != nil {
+			return fmt.Errorf("listen on %s failed: %w", listenAddr, err)
+		}
+		defer tcpListener.Close()
+	} else {
+		// UDP 没有 Listener 概念，用 ListenUDP 接收入站包
+		var udpListenAddr *net.UDPAddr
+		udpListenAddr, resolveErr := net.ResolveUDPAddr("udp", listenAddr)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve udp addr %s failed: %w", listenAddr, resolveErr)
+		}
+		// ↓ 换成 reuseport.ListenPacket，和 stunConn 共用同一个端口
+		packetConn, listenErr := reuseport.ListenPacket("udp", udpListenAddr.String())
+		if listenErr != nil {
+			return fmt.Errorf("listen udp on %s failed: %w", listenAddr, listenErr)
+		}
+		udpListener = packetConn.(*net.UDPConn)
+		defer udpListener.Close()
+
+	}
+
+	// UPNP启动 映射 网关的localPort->localip:localPort UDP 不需要upnp
+	if protocol == "tcp" {
+		if req.UseUPnP {
+			upnpCtx, upnpCancel := context.WithTimeout(ctx, 20*time.Second)
+			err := AddPortMappingByQueueWithLocalIP(
+				upnpCtx,
+				localPort,
+				localPort,
+				strings.ToUpper(protocol),
+				fmt.Sprintf("EasyLink-%s", req.ServiceName),
+				localIP,
+			)
+			if err != nil {
+				upnpCancel()
+				return err
+			}
+			// 释放资源
+			upnpCancel()
+			defer func() {
+				go DeletePortMapping(localPort, strings.ToUpper(protocol))
+			}()
+		}
+		onState(STUNState{State: STUNLog, Log: fmt.Sprintf("UPNP启动成功：路由:%d->%s:%d", localPort, localIP, localPort)})
+	}
+
+	// 把端口传出去
+	if onState != nil {
+		onState(STUNState{State: STUNMapped, ExternalIP: publicIP, ExternalPort: uint16(publicPort)}) //todo统一一下命名
+	}
+
+	// 保活
+	innerCtx, innerCancel := context.WithCancel(ctx)
+	errCh := make(chan error, 2)
+	defer innerCancel()
+	if protocol == "tcp" { //tcp 保活
+		go func() {
+			if err := tcpStunHealthKeepAlive(
+				innerCtx,
+				stunConn,
+				publicIP,
+				publicPort,
+				localPort,
+				localIP,
+				req.UseUPnP,
+				protocol,
+				req.ServiceName,
+				onState,
+				func(ip string, port int) {
+					if onState != nil {
+						onState(STUNState{State: STUNAlive, ExternalIP: ip, ExternalPort: uint16(port)})
+					}
+				},
+			); err != nil && ctx.Err() == nil {
+				errCh <- fmt.Errorf("tcp keepalive failed: %w", err)
+			}
+		}()
+	} else if protocol == "udp" { //udp 保活
+		go func() {
+			if err := udpStunHealthKeepAlive(
+				innerCtx,
+				stunConn,
+				// udpListener, // 用来收包
+				// publicIP,
+				publicPort,
+				localPort,
+				localIP,
+				func() {
+					if onState != nil {
+						onState(STUNState{State: STUNAlive, ExternalIP: publicIP, ExternalPort: uint16(publicPort)})
+					}
+				},
+			); err != nil && ctx.Err() == nil {
+				errCh <- fmt.Errorf("udp keepalive failed: %w", err)
+			}
+		}()
+	}
+
+	// 接收外网连接，转发到对应内网服务
+	go func() {
+		targetAddr := fmt.Sprintf("%s:%d", req.TargetIP, req.InternalPort) // 构建目标ip+端口
+		if protocol == "tcp" {
+			// 转发选项只构造一次，被这个洞上所有连接共享。
+			// tls.Config 里的 GetCertificate 每次握手实时回调，
+			// 因此证书续期后新连接自动用上新证书，不需要重启洞。
+			opt := ForwardOptions{BackendHTTPS: req.BackendHTTPS}
+			if req.TLSTerminate {
+				opt.TLSConfig = cert.Runtime.Manager.ServerTLSConfig(req.CertID)
+			}
+
+			for {
+				clientConn, err := tcpListener.Accept()
+				if err != nil {
+					if ctx.Err() != nil {
+						errCh <- nil
+					} else {
+						errCh <- fmt.Errorf("listener closed unexpectedly: %w", err)
+					}
+					return
+				}
+				go ForwardTCP(clientConn, targetAddr, protocol, opt) //转发到对应的内网服务
+			}
+		} else {
+			buf := make([]byte, 65535)
+			for {
+				n, remoteAddr, err := udpListener.ReadFromUDP(buf)
+				if err != nil {
+					if ctx.Err() != nil {
+						errCh <- nil
+					} else {
+						errCh <- fmt.Errorf("udp listener closed: %w", err)
+					}
+					return
+				}
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				go ForwardUDP(udpListener, remoteAddr, data, targetAddr)
+			}
+		}
+
+	}()
+
+	// 取消时保活 goroutine 什么都不发，Accept 又要等这里返回、defer 关掉监听器才醒，
+	// 只等 errCh 会两边互相等，调度器白等 12 秒才放弃
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errCh:
+		return err
+	}
+}
+
+// ===================== 内部 函数 ===============
+
+// 格式化 Protocol 输入
+func formatProtocol(protocol string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(protocol)) // 去除空格转小写
+	if value == "" {
+		value = "tcp"
+	}
+	switch value {
+	case "tcp", "udp":
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+
+}
+
+// 发送 STUN 请求
+func DoStunHandshake(conn net.Conn) (string, int, error) {
+	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+	if _, err := conn.Write(msg.Raw); err != nil {
+		return "", 0, fmt.Errorf("send stun request: %w", err)
+	}
+
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	defer conn.SetDeadline(time.Time{})
+
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return "", 0, fmt.Errorf("read stun response: %w", err)
+	}
+
+	var response stun.Message
+	response.Raw = buf[:n]
+	if err = response.Decode(); err != nil {
+		return "", 0, fmt.Errorf("decode stun response: %w", err)
+	}
+
+	var xorAddr stun.XORMappedAddress
+	if err = xorAddr.GetFrom(&response); err != nil {
+		return "", 0, fmt.Errorf("get mapped address: %w", err)
+	}
+
+	return xorAddr.IP.String(), xorAddr.Port, nil
+}
+
+// ================= TCP 保活 ========================
+
+// STUN TCP 保活
+//
+// onAlive 在确认映射可用时回调，参数是当前生效的公网 IP/端口——
+// CGNAT 下重连后端口可能变化，回调方（scheduler）会据此重新同步 DDNS/重定向。
+func tcpStunHealthKeepAlive(
+	ctx context.Context,
+	currentStunConn net.Conn,
+	publicIP string,
+	publicPort int,
+	localPort uint16,
+	localIP string,
+	useUPnP bool,
+	protocol string,
+	serviceName string,
+	onState func(STUNState),
+	onAlive func(publicIP string, publicPort int),
+) error {
+
+	currentIP := publicIP
+	currentPort := publicPort
+
+	// 重连并重新握手。CGNAT 等多层 NAT 下重连后映射端口可能变化：
+	// 变化后的新映射同样可以把入站流量送到本服务（同一个本地端口），
+	// 所以这里不再把「端口变了」当致命错误，而是跟随新端口继续保活，
+	// 并通过 onState 通知上层重新同步 DDNS / 入口重定向。
+	redial := func() (net.Conn, string, int, error) {
+		stunServer, err := Runtime.STUNService.GetBestSTUNServer()
+		if err != nil {
+			stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
+			if err != nil {
+				return nil, "", 0, fmt.Errorf("get stun server for reconnect: %w", err)
+			}
+		}
+		localAddr := fmt.Sprintf("%s:%d", localIP, localPort)
+		conn, dialErr := CurrentOutboundIface().DialReusable("tcp", localAddr, stunServer)
+		if dialErr != nil {
+			return nil, "", 0, fmt.Errorf("reconnect stun server %s failed: %w", stunServer, dialErr)
+		}
+		ip, port, hsErr := DoStunHandshake(conn)
+		if hsErr != nil {
+			conn.Close()
+			return nil, "", 0, fmt.Errorf("stun handshake after reconnect failed: %w", hsErr)
+		}
+		return conn, ip, port, nil
+	}
+
+	followOrRestart := func(verifyErr error) error {
+		newConn, newIP, newPort, err := redial()
+		if err != nil {
+			return fmt.Errorf("tcp keepalive failed: %v; %v", verifyErr, err)
+		}
+		currentStunConn.Close()
+		remapped := newPort != currentPort || newIP != currentIP
+		currentStunConn = newConn
+		currentIP, currentPort = newIP, newPort
+		if remapped && onAlive != nil {
+			logrus.Infof("[%s] 公网映射变化 -> %s:%d，跟随新端口继续保活", serviceName, newIP, newPort)
+			// 先报 MAPPED 让上层把入口重定向标脏，再报 ALIVE 触发 DDNS/重定向同步
+			if onState != nil {
+				onState(STUNState{State: STUNMapped, ExternalIP: newIP, ExternalPort: uint16(newPort)})
+			}
+			onAlive(newIP, newPort)
+		} else if onAlive != nil {
+			onAlive(currentIP, currentPort)
+		}
+		return nil
+	}
+
+	// 首次保活验证：CGNAT 等多层 NAT 下，内网自连公网地址（回环）不通属正常，
+	// 不能作为健康依据。改用当前 STUN 连接重新握手，既保活又确认映射端口未变。
+	if err := tcpStunVerifyMapping(currentStunConn, currentPort); err != nil {
+		if err := followOrRestart(err); err != nil {
+			return err
+		}
+	} else if onAlive != nil {
+		onAlive(currentIP, currentPort)
+	}
+
+	// 开启28s 的检查
+	healthTicker := time.NewTicker(25 * time.Second)
+	defer healthTicker.Stop()
+
+	// UPnP 1min 检测 + 3h 续约 (useUPnP=false 时 channel 为 nil, select 永远不选中)
+	var upnpCheckCh, upnpRenewCh <-chan time.Time
+	upperProto := strings.ToUpper(protocol)
+	upnpDesc := fmt.Sprintf("EasyLink-%s", serviceName)
+	if useUPnP {
+		upnpCheckTicker := time.NewTicker(1 * time.Minute)
+		defer upnpCheckTicker.Stop()
+		upnpCheckCh = upnpCheckTicker.C
+
+		upnpRenewTicker := time.NewTicker(3 * time.Hour)
+		defer upnpRenewTicker.Stop()
+		upnpRenewCh = upnpRenewTicker.C
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case <-upnpCheckCh:
+			checkCtx, checkCancel := context.WithTimeout(ctx, 10*time.Second)
+			exists, err := CheckPortMappingByQueue(checkCtx, localPort, upperProto)
+			checkCancel()
+			if err != nil {
+				logrus.Warnf("UPnP 端口映射检测失败 %d: %v", localPort, err)
+				continue
+			}
+			if exists {
+				continue
+			}
+			logrus.Warnf("UPnP 端口映射丢失，尝试重建: %d", localPort)
+			rebuildCtx, rebuildCancel := context.WithTimeout(ctx, 20*time.Second)
+			err = AddPortMappingByQueueWithLocalIP(rebuildCtx, localPort, localPort, upperProto, upnpDesc, localIP)
+			rebuildCancel()
+			if err != nil {
+				return fmt.Errorf("UPnP 端口映射重建失败: %w", err)
+			}
+			logrus.Infof("UPnP 端口映射重建成功: %d", localPort)
+
+		case <-upnpRenewCh:
+			renewCtx, renewCancel := context.WithTimeout(ctx, 20*time.Second)
+			err := AddPortMappingByQueueWithLocalIP(renewCtx, localPort, localPort, upperProto, upnpDesc, localIP)
+			renewCancel()
+			if err != nil {
+				return fmt.Errorf("UPnP 端口映射续约失败: %w", err)
+			}
+			logrus.Infof("UPnP 端口映射续约成功: %d", localPort)
+
+		case <-healthTicker.C:
+
+			// 保活 + 映射验证：CGNAT 等环境下内向回环不通属正常，直接用 STUN 握手确认。
+			// 验证成功说明映射未变，顺带的 STUN 流量就是保活心跳。
+			if err := tcpStunVerifyMapping(currentStunConn, currentPort); err == nil {
+				if onAlive != nil {
+					onAlive(currentIP, currentPort)
+				}
+				continue
+			}
+
+			// 验证失败：stunConn 断了或 NAT 映射已变，重连并跟随新映射
+			verifyErr := tcpStunVerifyMapping(currentStunConn, currentPort)
+			if err := followOrRestart(verifyErr); err != nil {
+				return err
+			}
+		}
+	}
+
+}
+
+// 类似 Time.Sleep 但是开被ctx 终终端
+func sleepWithCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// TCP STUN 梯度健康检查
+// 注意：依赖 NAT 回环（从内网自连公网地址），CGNAT 等多层 NAT 环境下恒失败，
+// 主流程已改用 tcpStunVerifyMapping（同连接 STUN 握手）替代，此函数保留备用。
+func tcpStunHealthCheck(ctx context.Context, publicIP string, expectedPublicPort int) bool {
+	// 第一次检查
+	if tcpConnectCheck(publicIP, expectedPublicPort, 3*time.Second) {
+		return true
+	}
+
+	// 梯度检查1 3 5
+	sleepTime := 1 * time.Second
+	for i := 0; i < 3; i++ {
+		if !sleepWithCtx(ctx, sleepTime) {
+			return false
+		}
+		if tcpConnectCheck(publicIP, expectedPublicPort, 3*time.Second) {
+			return true
+		}
+		sleepTime += 2 * time.Second
+	}
+	return false
+}
+
+// tcpStunVerifyMapping 在同一条 STUN 连接上重新握手，验证 NAT 映射端口未变，顺便产生保活流量。
+// CGNAT 等不支持 NAT 回环的环境下，这比从内网自连公网地址更可靠。
+func tcpStunVerifyMapping(stunConn net.Conn, expectedPublicPort int) error {
+	_, port, err := DoStunHandshake(stunConn)
+	if err != nil {
+		return err
+	}
+	if port != expectedPublicPort {
+		return fmt.Errorf("public port changed from %d to %d", expectedPublicPort, port)
+	}
+	return nil
+}
+
+// TCP检查是否存活
+func tcpConnectCheck(host string, port int, timeout time.Duration) bool {
+	// JoinHostPort 而不是 "%s:%d"：IPv6 字面量必须带方括号
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// ================= UDP 保活 ========================
+
+// UDP STUN 保活
+// UDP 没有连接性，状态，目前只能用检测端口变没变来保活，是不是真的打通了得看过滤行为了
+func udpStunHealthKeepAlive(
+	ctx context.Context,
+	currentStunConn net.Conn,
+	publicPort int,
+	localPort uint16,
+	localIP string,
+	onAlive func(),
+) error {
+	// 刚打通视为活
+	if onAlive != nil {
+		onAlive()
+	}
+
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+
+			// 正常检查：发 binding request 顺便保活，同时确认端口
+			newPort, err := udpStunHealthCheck(ctx, currentStunConn)
+			if err == nil {
+				if newPort != publicPort {
+					return fmt.Errorf("public port changed %d -> %d", publicPort, newPort)
+				}
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+
+			// 3次连接失败，尝试重连
+			currentStunConn.Close()
+			newConn, newPort, err := udpReconnectSTUN(localIP, localPort)
+			if err != nil {
+				return fmt.Errorf("stun reconnect: %w", err)
+			}
+			if newPort != publicPort {
+				newConn.Close()
+				return fmt.Errorf("public port changed %d -> %d after reconnect", publicPort, newPort)
+			}
+			currentStunConn = newConn
+		}
+	}
+}
+
+// 梯度重试 1s 2s 3s，容忍网络抖动
+func udpStunHealthCheck(ctx context.Context, conn net.Conn) (int, error) {
+	delay := time.Second
+	for range 3 {
+		if !sleepWithCtx(ctx, delay) {
+			return 0, ctx.Err()
+		}
+		_, port, err := DoStunHandshake(conn)
+		if err == nil {
+			return port, nil
+		}
+		delay += 1 * time.Second
+	}
+	return 0, fmt.Errorf("UDP stun retry exhausted")
+}
+
+// 重连 STUN 服务器并握手
+func udpReconnectSTUN(localIP string, localPort uint16) (net.Conn, int, error) {
+	stunServer, err := Runtime.STUNService.GetBestSTUNServer()
+	if err != nil {
+		stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
+		if err != nil {
+			return nil, 0, fmt.Errorf("get stun server: %w", err)
+		}
+	}
+	conn, err := CurrentOutboundIface().DialReusable("udp", fmt.Sprintf("%s:%d", localIP, localPort), stunServer)
+	if err != nil {
+		return nil, 0, fmt.Errorf("dial stun %s: %w", stunServer, err)
+	}
+	_, port, err := DoStunHandshake(conn)
+	if err != nil {
+		conn.Close()
+		return nil, 0, fmt.Errorf("handshake: %w", err)
+	}
+	return conn, port, nil
+}
+
+// STUN 梯度检测
+// func udpStunHealthCheck(ctx context.Context, publicIP string, publicPort int, localPort uint16) bool {
+// 	if udpConnectCheck(publicIP, publicPort, localPort, 3*time.Second) {
+// 		return true
+// 	}
+// 	sleepTime := 1 * time.Second
+// 	for i := 0; i < 3; i++ {
+// 		if !sleepWithCtx(ctx, sleepTime) {
+// 			return false
+// 		}
+// 		if udpConnectCheck(publicIP, publicPort, localPort, 3*time.Second) {
+// 			return true
+// 		}
+// 		sleepTime += 2 * time.Second
+// 	}
+// 	return false
+// }
+
+// // UDP STUN 保活
+// func udpStunHealthKeepAlive(
+// 	ctx context.Context,
+// 	currentStunConn net.Conn,
+// 	// udpListener *net.UDPConn,
+// 	publicIP string,
+// 	publicPort int,
+// 	localPort uint16,
+// 	localIP string,
+// 	onAlive func(),
+// ) error {
+// 	// 先做一次外部连通性验证
+// 	if !udpStunHealthCheck(ctx, publicIP, publicPort, localPort) {
+// 		if ctx.Err() != nil {
+// 			return nil
+// 		}
+// 		return fmt.Errorf("udp health check failed")
+// 	}
+// 	if onAlive != nil {
+// 		onAlive()
+// 	}
+
+// 	// UDP NAT 映射超时通常 30s，用 20s 心跳保住映射
+// 	keepAliveTicker := time.NewTicker(20 * time.Second)
+// 	// 外部连通性检查周期可以长一些
+// 	healthTicker := time.NewTicker(28 * time.Second)
+// 	defer keepAliveTicker.Stop()
+// 	defer healthTicker.Stop()
+
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return nil
+
+// 		case <-keepAliveTicker.C:
+// 			// 向 STUN 服务器发心跳，维持 NAT 映射
+// 			msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+// 			currentStunConn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+// 			currentStunConn.Write(msg.Raw)
+// 			currentStunConn.SetWriteDeadline(time.Time{})
+
+// 		case <-healthTicker.C:
+// 			if udpStunHealthCheck(ctx, publicIP, publicPort, localPort) {
+// 				continue
+// 			}
+
+// 			// 外部连通性失败，先用现有 conn 重新握手确认端口
+// 			_, port, err := DoStunHandshake(currentStunConn)
+// 			if err == nil {
+// 				if port != publicPort {
+// 					return fmt.Errorf("public port changed from %d to %d", publicPort, port)
+// 				}
+// 				continue
+// 			}
+
+// 			// stunConn 断了，重新建连
+// 			currentStunConn.Close()
+// 			stunServer, err := Runtime.STUNService.GetBestSTUNServer()
+// 			if err != nil {
+// 				stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
+// 				if err != nil {
+// 					return fmt.Errorf("get stun server for reconnect: %w", err)
+// 				}
+// 			}
+
+// 			localAddr := fmt.Sprintf("%s:%d", localIP, localPort)
+// 			newConn, dialErr := reuseport.Dial("udp", localAddr, stunServer)
+// 			if dialErr != nil {
+// 				return fmt.Errorf("reconnect stun server %s failed: %w", stunServer, dialErr)
+// 			}
+
+// 			_, newPort, handshakeErr := DoStunHandshake(newConn)
+// 			if handshakeErr != nil {
+// 				newConn.Close()
+// 				return fmt.Errorf("stun handshake after reconnect failed: %w", handshakeErr)
+// 			}
+
+// 			if newPort != publicPort {
+// 				newConn.Close()
+// 				return fmt.Errorf("public port changed from %d to %d", publicPort, newPort)
+// 			}
+
+// 			currentStunConn = newConn
+// 		}
+// 	}
+// }
+
+// // UDP 梯度健康检查
+// func udpStunHealthCheck(ctx context.Context, publicIP string, publicPort int, localPort uint16) bool {
+// 	if udpConnectCheck(publicIP, publicPort, localPort, 3*time.Second) {
+// 		return true
+// 	}
+// 	sleepTime := 1 * time.Second
+// 	for i := 0; i < 3; i++ {
+// 		if !sleepWithCtx(ctx, sleepTime) {
+// 			return false
+// 		}
+// 		if udpConnectCheck(publicIP, publicPort, localPort, 3*time.Second) {
+// 			return true
+// 		}
+// 		sleepTime += 2 * time.Second
+// 	}
+// 	return false
+// }
+
+// // 向 publicIP:publicPort 发一个探测包，用临时 socket 收回包，不干扰 udpListener
+// func udpConnectCheck(publicIP string, publicPort int, localPort uint16, timeout time.Duration) bool {
+// 	// 发探测包
+// 	dst := fmt.Sprintf("%s:%d", publicIP, publicPort)
+// 	probe, err := net.Dial("udp", dst)
+// 	if err != nil {
+// 		return false
+// 	}
+// 	defer probe.Close()
+
+// 	probe.SetDeadline(time.Now().Add(timeout))
+// 	if _, err = probe.Write([]byte("ping")); err != nil {
+// 		return false
+// 	}
+
+// 	// 单独开一个临时 socket 在同端口收回包，不碰 udpListener
+// 	tempConn, err := reuseport.ListenPacket("udp", fmt.Sprintf(":%d", localPort))
+// 	if err != nil {
+// 		return false
+// 	}
+// 	defer tempConn.Close()
+
+// 	tempConn.SetDeadline(time.Now().Add(timeout))
+// 	buf := make([]byte, 64)
+// 	_, _, err = tempConn.ReadFrom(buf)
+// 	return err == nil
+// }

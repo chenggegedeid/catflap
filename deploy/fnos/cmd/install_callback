@@ -1,0 +1,9 @@
+#!/bin/bash
+
+### 安装后调用。
+
+# 让二进制可执行：tar 在 Windows 上打出来会丢权限位，
+# 打包脚本虽然修了一次，这里再兜一道（chmod 失败不影响安装结果）。
+chmod +x "${TRIM_APPDEST}/server/catflap" 2>/dev/null
+
+exit 0

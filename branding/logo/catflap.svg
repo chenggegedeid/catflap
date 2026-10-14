@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Catflap 猫洞">
+  <title>Catflap 猫洞 · 01 门上猫洞</title>
+  <defs>
+    <linearGradient id="a-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A1A2F"/>
+      <stop offset="1" stop-color="#0A3055"/>
+    </linearGradient>
+    <linearGradient id="a-door" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2E6BB8"/>
+      <stop offset="1" stop-color="#14406F"/>
+    </linearGradient>
+    <linearGradient id="a-flap" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#A5E9FB"/>
+    </linearGradient>
+    <radialGradient id="a-halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="a-soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#a-bg)"/>
+
+  <!-- 洞口光晕 -->
+  <ellipse cx="256" cy="372" rx="130" ry="118" fill="url(#a-halo)" filter="url(#a-soft)"/>
+
+  <!-- 门（拱形） -->
+  <path d="M156 428V236a100 100 0 0 1 200 0v192z" fill="url(#a-door)" stroke="#5B9BE8" stroke-width="16" stroke-linejoin="round"/>
+
+  <!-- 连接线：光溢 + 主线（先画，后面被活门盖住起点 = 从洞里穿出） -->
+  <path d="M250 388c62-10 104-52 162-108" fill="none" stroke="#7DD3FC" stroke-width="22" stroke-linecap="round" opacity="0.18"/>
+  <path d="M250 388c62-10 104-52 162-108" fill="none" stroke="#7DD3FC" stroke-width="13" stroke-linecap="round"/>
+
+  <!-- 猫洞活门 -->
+  <path d="M204 428v-46a52 52 0 0 1 104 0v46z" fill="url(#a-flap)"/>
+  <path d="M204 428v-46a52 52 0 0 1 104 0" fill="none" stroke="#E0F2FE" stroke-width="7" opacity="0.9"/>
+
+  <!-- 门外节点 -->
+  <circle cx="412" cy="280" r="30" fill="none" stroke="#22D3EE" stroke-width="11"/>
+  <circle cx="412" cy="280" r="13" fill="#E0F2FE"/>
+</svg>

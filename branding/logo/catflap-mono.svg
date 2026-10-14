@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Catflap 猫洞 单色">
+  <title>Catflap 猫洞 · 01 单色版（浅底用）</title>
+  <defs>
+    <mask id="a-mono-cut">
+      <rect width="512" height="512" fill="#000"/>
+      <path d="M156 428V236a100 100 0 0 1 200 0v192z" fill="#fff"/>
+      <path d="M204 428v-46a52 52 0 0 1 104 0v46z" fill="#000"/>
+    </mask>
+  </defs>
+
+  <!-- 门体挖空活门 -->
+  <rect width="512" height="512" fill="#2563EB" mask="url(#a-mono-cut)"/>
+
+  <!-- 连接线（同色，门内不可见、门外可见） -->
+  <path d="M306 374 412 280" fill="none" stroke="#2563EB" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="412" cy="280" r="30" fill="none" stroke="#2563EB" stroke-width="12"/>
+  <circle cx="412" cy="280" r="12" fill="#2563EB"/>
+</svg>

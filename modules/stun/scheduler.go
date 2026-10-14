@@ -1,0 +1,938 @@
+package stun
+
+import (
+	"context"
+	"fmt"
+	"github.com/chenggegedeid/catflap/modules/stun/model"
+	"github.com/chenggegedeid/catflap/modules/webhook"
+	"net"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/sirupsen/logrus"
+)
+
+// EventKind 区分阶段变化和纯日志，订阅者可选择性处理
+type EventKind int
+
+const (
+	EventPhaseChanged EventKind = iota
+	EventLogAppended
+)
+
+// StateEvent 对外的数据
+type StateEvent struct {
+	Kind         EventKind    `json:"kind"`         // 事件种类
+	Key          string       `json:"key"`          // 唯一键，格式 "deviceID-serviceID"
+	DeviceName   string       `json:"deviceName"`   // 所属设备名称
+	ServiceName  string       `json:"serviceName"`  // 服务名称
+	Phase        ServicePhase `json:"phase"`        // 当前阶段（枚举值）
+	PhaseStr     string       `json:"phaseStr"`     // 当前阶段（可读字符串）
+	ExternalPort uint16       `json:"externalPort"` // STUN 映射后的外部端口，0 表示尚未获取
+	RestartCount int          `json:"restartCount"` // 累计重启次数
+	LastError    string       `json:"lastError"`    // 最近一次错误描述
+	Logs         []ServiceLog `json:"logs"`         // 最近的服务日志（最多 maxServiceLogs 条）
+	UpdatedAt    time.Time    `json:"updatedAt"`    // 最后一次状态更新时间
+
+	// 入口重定向的同步结果。只在运行时保存，不写进配置文件——
+	// 配置是用户填的，状态是跑出来的，混在一起前端一保存就会把状态覆盖掉。
+	//
+	// stale = 外网端口已经变了，服务商那边还是 RedirectTarget 这个旧地址，
+	// 此时从入口域名进来是打不开的，得等洞确认通了才会自动写过去。
+	RedirectStatus   string    `json:"redirectStatus"`   // ok / failed / stale，空表示还没同步过
+	RedirectTarget   string    `json:"redirectTarget"`   // 最近一次写过去的地址
+	RedirectError    string    `json:"redirectError"`    // 失败原因
+	RedirectKeepPath bool      `json:"redirectKeepPath"` // 服务商是否接受了「保留原始路径」的写法
+	RedirectAt       time.Time `json:"redirectAt"`       // 最近一次同步时间
+
+	// MC 入口（SRV）的同步结果，同样只在运行时保存
+	MCEntryStatus string    `json:"mcEntryStatus"` // ok / failed，空表示还没同步过
+	MCEntryPort   uint16    `json:"mcEntryPort"`   // 最近一次写进 SRV 的端口
+	MCEntryError  string    `json:"mcEntryError"`  // 失败原因
+	MCEntryAt     time.Time `json:"mcEntryAt"`     // 最近一次同步时间
+}
+
+const maxServiceLogs = 30
+
+// ServiceLog 每个服务日志
+type ServiceLog struct {
+	Message   string       `json:"message"`   // 日志内容
+	Phase     ServicePhase `json:"phase"`     // 产生日志时所处阶段
+	PhaseStr  string       `json:"phaseStr"`  // 阶段可读字符串
+	CreatedAt time.Time    `json:"createdAt"` // 日志产生时间
+}
+
+// ============ ServicePhase 服务生命周期阶段 =================
+type ServicePhase int
+
+const (
+	PhaseProbing    ServicePhase = iota // 探针阶段：验证配置可行性，最多 maxProbes 次连续失败
+	PhaseRunning                        // 运行阶段：穿透成功且稳定过，短线后无限重启
+	PhaseRestarting                     // 等待重启阶段:
+	PhaseFailed                         // 运行失败：探针耗尽，需人为修改配置文件然后重启启动
+	PhaseStopped                        // 主动停止
+)
+
+// 根据阶段返回 String
+func (p ServicePhase) String() string {
+	switch p {
+	case PhaseProbing:
+		return "PROBING" // 探测  运行5次探测
+	case PhaseRunning:
+		return "RUNNING" // 运行中 配置文件可用
+	case PhaseRestarting:
+		return "RESTARTING" // 无限重启
+	case PhaseFailed:
+		return "FAILED" // 探测失败
+	default:
+		return "STOPPED" // 手动停止
+	}
+}
+
+// ============== serviceEntry 单个服务的运行时状态 ============
+
+// serviceEntry 服务实例
+type serviceEntry struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+
+	deviceID    uint   // 所属设备 ID
+	serviceID   uint   // 服务 ID
+	deviceName  string // 设备名
+	serviceName string // 服务名
+
+	// 以下字段供面板读取，goroutine 写，面板读，用 RWMutex 保护
+	mu           sync.RWMutex
+	phase        ServicePhase // 当前阶段
+	externalPort uint16       // STUN 映射后的外部端口
+	lastWebhook  string       // 最近一次触发 webhook 的 publicIP:port
+	restartCount int          // 重启次数
+	lastError    string
+	logMessages  []ServiceLog // 滚动日志
+	updatedAt    time.Time
+
+	// 入口重定向：和 webhook 各记各的，免得动一边的开关影响到另一边
+	lastRedirect     string    // 最近一次真写进服务商的目标地址，相同就不再打 API
+	redirectPending  string    // 正在写、还没有结果的目标地址，空表示没有在途的
+	redirectStatus   string    // ok / failed / stale
+	redirectError    string    // 失败原因
+	redirectKeepPath bool      // 服务商是否接受了保留路径的写法
+	redirectAt       time.Time // 最近一次同步时间
+	redirectRetryAt  time.Time // 失败后的冷却时间，到点前不重试
+
+	// MC 入口：端口没变、上次成功就不打 API；失败了和入口重定向一样冷却
+	mcEntryPort    uint16
+	mcEntryPending bool
+	mcEntryStatus  string
+	mcEntryError   string
+	mcEntryAt      time.Time
+	mcEntryRetryAt time.Time
+}
+
+// newServiceEntry 创建服务实例
+func newServiceEntry(cancel context.CancelFunc, deviceID, serviceID uint, deviceName, serviceName string) *serviceEntry {
+	return &serviceEntry{
+		cancel:      cancel,
+		done:        make(chan struct{}),
+		deviceID:    deviceID,
+		serviceID:   serviceID,
+		deviceName:  deviceName,
+		serviceName: serviceName,
+		phase:       PhaseProbing,
+		updatedAt:   time.Now(),
+	}
+}
+
+// currentPhase 并发安全地读取当前阶段
+func (e *serviceEntry) currentPhase() ServicePhase {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.phase
+}
+
+// applyState 唯一的状态变更入口，返回阶段是否真的改变了
+// 若新阶段为 PhaseRestarting，自动累加重启计数
+func (e *serviceEntry) applyState(phase ServicePhase, port uint16, msg string) (changed bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	now := time.Now()
+	changed = e.phase != phase
+	if phase == PhaseRestarting && changed {
+		e.restartCount++
+	}
+	e.phase = phase
+	e.externalPort = port
+
+	switch phase {
+	case PhaseFailed, PhaseRestarting:
+		e.lastError = msg
+	default:
+		e.lastError = "" // 成功路径自动清错
+	}
+
+	e.updatedAt = now
+	e.appendLogLocked(phase, msg, now)
+	return
+}
+
+// onlyLog 仅追加日志，不改阶段
+func (e *serviceEntry) onlyLog(message string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.appendLogLocked(e.phase, message, time.Now())
+}
+
+// appendLogLocked 空消息跳过；与上一条相同去重；超出上限丢弃最旧的
+func (e *serviceEntry) appendLogLocked(phase ServicePhase, message string, now time.Time) {
+	if message == "" {
+		return
+	}
+	// 去重：与上一条相同则跳过
+	if len(e.logMessages) > 0 && e.logMessages[len(e.logMessages)-1].Message == message {
+		return
+	}
+	e.logMessages = append(e.logMessages, ServiceLog{
+		Message:   message,
+		Phase:     phase,
+		PhaseStr:  phase.String(),
+		CreatedAt: now,
+	})
+
+	// 滚动窗口：只保留最新的 maxServiceLogs 条
+	if len(e.logMessages) > maxServiceLogs {
+		e.logMessages = e.logMessages[len(e.logMessages)-maxServiceLogs:]
+	}
+}
+
+// 生成单个服务的快照
+func (e *serviceEntry) snapshot(key string, kind EventKind) StateEvent {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	logs := append([]ServiceLog(nil), e.logMessages...)
+	return StateEvent{
+		Kind:         kind,
+		Key:          key,
+		DeviceName:   e.deviceName,
+		ServiceName:  e.serviceName,
+		Phase:        e.phase,
+		PhaseStr:     e.phase.String(),
+		ExternalPort: e.externalPort,
+		RestartCount: e.restartCount,
+		LastError:    e.lastError,
+		Logs:         logs,
+		UpdatedAt:    e.updatedAt,
+
+		RedirectStatus:   e.redirectStatus,
+		RedirectTarget:   e.lastRedirect,
+		RedirectError:    e.redirectError,
+		RedirectKeepPath: e.redirectKeepPath,
+		RedirectAt:       e.redirectAt,
+
+		MCEntryStatus: e.mcEntryStatus,
+		MCEntryPort:   e.mcEntryPort,
+		MCEntryError:  e.mcEntryError,
+		MCEntryAt:     e.mcEntryAt,
+	}
+}
+
+// =====================Scheduler  调度器主体 =============
+
+type Scheduler struct {
+	ctx    context.Context // scheduler 级别的生命周期，用于 failedTTL goroutine
+	cancel context.CancelFunc
+
+	mu      sync.RWMutex
+	service map[string]*serviceEntry // key:"deviceID-serviceID" 所有服务的管理
+	runner  Runner                   // STUN 隧道执行器
+
+	subMu        sync.RWMutex
+	subscribers  map[chan StateEvent]struct{} // 所有活跃的订阅通道
+	subBufferCap int                          // 每个订阅通道的缓冲大小，默认 16
+}
+
+// 创建调度器
+func NewScheduler(runner Runner) *Scheduler {
+	if runner == nil {
+		runner = NewSTUNRunner()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Scheduler{
+		ctx:          ctx,
+		cancel:       cancel,
+		service:      make(map[string]*serviceEntry),
+		runner:       runner,
+		subscribers:  make(map[chan StateEvent]struct{}),
+		subBufferCap: 16,
+	}
+}
+
+// Close 关闭调度器，停止所有服务并取消 failedTTL goroutine
+func (s *Scheduler) Close() {
+	s.cancel()
+	s.StopAll()
+}
+
+// detach 从mac 里去掉 entry 并发送取消信号，返回被去掉的服务
+func (s *Scheduler) detach(key string) *serviceEntry {
+	s.mu.Lock()
+	entry, ok := s.service[key]
+	if ok {
+		delete(s.service, key)
+	}
+	s.mu.Unlock()
+
+	if ok && entry != nil {
+		entry.cancel()
+	}
+	return entry
+}
+
+// waitEntry 等待 entry 的 goroutine 退出，最多等 12s
+func waitEntry(entry *serviceEntry) {
+	if entry == nil {
+		return
+	}
+	select {
+	case <-entry.done:
+	case <-time.After(12 * time.Second):
+	}
+}
+
+// releaseEntry goroutine 退出时清理 map，FAILED 状态保留供外部查询失败原因
+func (s *Scheduler) releaseEntry(Key string, entry *serviceEntry) {
+	if entry.currentPhase() == PhaseFailed {
+		return
+	}
+	s.mu.Lock()
+	if currentEntry, ok := s.service[Key]; ok && currentEntry == entry {
+		delete(s.service, Key)
+	}
+	s.mu.Unlock()
+}
+
+// transition 状态变更唯一写入路径：改 entry → 决定 kind → emit
+func (s *Scheduler) transition(entry *serviceEntry, key string, phase ServicePhase, port uint16, msg string) bool {
+	changed := entry.applyState(phase, port, msg)
+	kind := EventLogAppended
+	if changed {
+		kind = EventPhaseChanged
+	}
+	s.emit(entry.snapshot(key, kind))
+	return changed
+}
+
+// log 仅追加日志，不改阶段
+func (s *Scheduler) log(entry *serviceEntry, key, msg string) {
+	if msg == "" {
+		return
+	}
+	entry.onlyLog(msg)
+	s.emit(entry.snapshot(key, EventLogAppended))
+}
+
+// Snapshot  查所有服务的Event
+func (s *Scheduler) Snapshot() []StateEvent {
+	s.mu.RLock()
+	// 先在读锁里，把所有 entry 的引用收集起来
+	type kv struct {
+		k string
+		e *serviceEntry
+	}
+	items := make([]kv, 0, len(s.service))
+	for k, e := range s.service {
+		items = append(items, kv{k, e})
+	}
+	s.mu.RUnlock()
+	result := make([]StateEvent, 0, len(items))
+	for _, it := range items {
+		result = append(result, it.e.snapshot(it.k, EventPhaseChanged))
+	}
+	return result
+
+}
+
+// ============== 订阅事件 ============
+// Subscribe 注册订阅者
+func (s *Scheduler) Subscribe() (<-chan StateEvent, func()) {
+	ch := make(chan StateEvent, s.subBufferCap) // 创建一个带缓冲的通道
+	s.subMu.Lock()
+	s.subscribers[ch] = struct{}{} // 把这个通道登记到订阅者表里
+	s.subMu.Unlock()
+
+	return ch, func() { // 返回两个东西：通道本身、以及一个"取消函数"
+		s.subMu.Lock()
+		delete(s.subscribers, ch) // 调用取消函数时，把这个通道从订阅者表里删掉
+		s.subMu.Unlock()
+	}
+}
+
+// RecordManualRedirect 把「立即同步」那一下的结果也记到运行状态里。
+//
+// 不记的话界面上「最近一次同步」那行还停在上一次自动同步的地址：用户明明刚点过，
+// 看到的还是旧地址配一个绿色的「成功」。
+func (s *Scheduler) RecordManualRedirect(deviceID, serviceID uint, target string, keepPath bool, err error) {
+	key := serviceKey(deviceID, serviceID)
+	s.mu.RLock()
+	entry, ok := s.service[key]
+	s.mu.RUnlock()
+	if !ok || entry == nil {
+		return
+	}
+	entry.recordRedirect(target, keepPath, err)
+	s.emit(entry.snapshot(key, EventLogAppended))
+}
+
+func (s *Scheduler) Get(deviceID, serviceID uint) (StateEvent, bool) {
+	key := serviceKey(deviceID, serviceID)
+	s.mu.RLock() // 读锁：允许多个 goroutine 同时读，但不能同时写
+	entry, ok := s.service[key]
+	s.mu.RUnlock()
+	if !ok {
+		return StateEvent{}, false // 服务不存在
+	}
+	return entry.snapshot(key, EventPhaseChanged), true
+}
+
+// emit  把事件推给所有订阅者
+func (s *Scheduler) emit(event StateEvent) {
+	s.subMu.RLock()
+	// 先在读锁里面把订阅者列表复制一份出来
+	subs := make([]chan StateEvent, 0, len(s.subscribers))
+	for ch := range s.subscribers {
+		subs = append(subs, ch)
+	}
+	s.subMu.RUnlock()
+
+	// 逐个发送
+	for _, ch := range subs {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
+}
+
+// ============== 生命周期管理 =============
+
+// StartAll 批量启动 devices 列表中所有 Enabled=true 的服务
+func (s *Scheduler) StartAll(devices []model.Device) {
+	for i := range devices {
+		device := &devices[i]
+		for j := range device.Services {
+			service := &device.Services[j]
+			if service.Enabled {
+				s.StartService(device, service)
+			}
+		}
+	}
+}
+
+// 启动服务
+func (s *Scheduler) StartService(device *model.Device, service *model.Service) {
+	key := serviceKey(device.DeviceID, service.ID)
+
+	// 先停止旧的服务,并且等待服务取消
+	old := s.detach(key)
+	waitEntry(old)
+
+	if !service.Enabled {
+		return
+	}
+
+	// 重建服务
+	ctx, cancel := context.WithCancel(context.Background())
+	entry := newServiceEntry(cancel, device.DeviceID, service.ID, device.Name, service.Name)
+
+	// 二次检查：waitEntry 期间另一方可能已注册了相同 key
+	s.mu.Lock()
+	if _, exists := s.service[key]; exists {
+		s.mu.Unlock()
+		cancel()
+		return
+	}
+	s.service[key] = entry
+	s.mu.Unlock()
+
+	req := buildSTUNRequest(device, service)
+
+	go s.runService(ctx, key, entry, req)
+}
+
+func (s *Scheduler) StopService(deviceID, serviceID uint) {
+	waitEntry(s.detach(serviceKey(deviceID, serviceID)))
+}
+
+// 停止所有服务
+func (s *Scheduler) StopAll() {
+	s.mu.Lock()
+	entries := make([]*serviceEntry, 0, len(s.service))
+	for k, e := range s.service {
+		delete(s.service, k)
+		e.cancel()
+		entries = append(entries, e)
+	}
+	s.mu.Unlock()
+
+	for _, e := range entries {
+		waitEntry(e)
+	}
+}
+
+// ====================runService 主循环 ==========
+// runService 每个服务对应一个 goroutine
+// 退出条件：
+//
+//	a. ctx 取消（外部 StopService）→ PhaseStopped
+//	b. runner.Run 返回 nil（正常结束）→ PhaseStopped
+//	c. 探测连续失败 ≥ maxProbes → PhaseFailed，service.Enabled=false
+func (s *Scheduler) runService(ctx context.Context, key string, entry *serviceEntry, req STUNRequest) {
+	defer close(entry.done)
+	defer s.releaseEntry(key, entry)
+
+	const maxProbes = 5
+
+	probeFailures := 0
+	everAlive := false
+	probingBackoff := NewProbingBackoff()
+	RestartingBackoff := NewRestartingBackoff()
+
+	s.transition(entry, key, PhaseProbing, 0, "")
+
+	for {
+
+		//手动停止
+		if ctx.Err() != nil {
+			s.transition(entry, key, PhaseStopped, 0, "")
+		}
+
+		err := s.runner.Run(ctx, req, func(state STUNState) {
+			switch state.State {
+			case STUNMapped:
+				// 先标再 transition：transition 会把快照推给前端，
+				// 顺序反了的话前端先收到新端口、再等下一次事件才收到状态
+				entry.markRedirectStale(state.ExternalPort)
+				s.transition(entry, key, PhaseProbing, state.ExternalPort, state.Log)
+			case STUNAlive:
+				everAlive = true
+				phaseChanged := s.transition(entry, key, PhaseRunning, state.ExternalPort, state.Log)
+				s.sendServiceWebhook(entry, key, req, state, phaseChanged)
+				s.syncServiceRedirect(entry, key, req, state)
+				s.syncServiceMCEntry(entry, key, req, state)
+			case STUNFailed:
+				s.transition(entry, key, PhaseRestarting, 0, state.Log)
+			case STUNLog:
+				s.log(entry, key, state.Log) // 仍然保留：这是「不切换阶段，只加日志」
+			}
+		})
+
+		// runner跑完一轮，如果手动取消
+		if ctx.Err() != nil {
+			s.transition(entry, key, PhaseStopped, 0, "")
+			return
+		}
+		if err == nil {
+			s.transition(entry, key, PhaseStopped, 0, "")
+			return
+		}
+
+		if everAlive {
+			// 曾经活过：无限退避重启
+			s.transition(entry, key, PhaseRestarting, 0, err.Error())
+			if !sleepCtx(ctx, RestartingBackoff.Next()) {
+				s.transition(entry, key, PhaseStopped, 0, "")
+				return
+			}
+			s.transition(entry, key, PhaseProbing, 0, "")
+			continue
+		}
+
+		// 从未活过：消耗探针
+		probeFailures++
+		if probeFailures >= maxProbes {
+			s.transition(entry, key, PhaseFailed, 0, err.Error())
+			return
+		}
+		s.transition(entry, key, PhaseRestarting, 0, err.Error())
+		if !sleepCtx(ctx, probingBackoff.Next()) {
+			s.transition(entry, key, PhaseStopped, 0, "")
+			return
+		}
+		s.transition(entry, key, PhaseProbing, 0, "")
+
+	}
+
+}
+
+// ====================== Backoff退避策略 ================
+
+// Backoff 按预步长依次返回等待时长
+type Backoff struct {
+	steps []time.Duration // 退避步长列表
+	index int             // 当前步长下标
+}
+
+// NewRestartingBackoff 创建重启退避器：1s → 2s → 4s → 10s → 1min → 1min...
+func NewRestartingBackoff() *Backoff {
+	return &Backoff{
+		steps: []time.Duration{
+			1 * time.Second,
+			3 * time.Second,
+			5 * time.Second,
+			10 * time.Second,
+			1 * time.Minute,
+		},
+	}
+}
+
+func NewProbingBackoff() *Backoff {
+	return &Backoff{
+		steps: []time.Duration{
+			1 * time.Second,
+			1 * time.Second,
+			1 * time.Second,
+			1 * time.Second,
+		},
+	}
+}
+
+// Next 返回下一个退避时长。
+func (b *Backoff) Next() time.Duration {
+	if b.index < len(b.steps) {
+		step := b.steps[b.index]
+		b.index++
+		return step
+	}
+	return b.steps[len(b.steps)-1]
+}
+
+// Reset 重置退避器
+func (b *Backoff) Reset() {
+	b.index = 0
+}
+
+// ============ 辅助函数 =========
+
+// serviceKey 将设备 ID 和服务 ID 拼成唯一字符串键
+func serviceKey(deviceID, serviceID uint) string {
+	return fmt.Sprintf("%d-%d", deviceID, serviceID)
+}
+
+func buildSTUNRequest(device *model.Device, service *model.Service) STUNRequest {
+	return STUNRequest{
+		ServiceName:   service.Name,
+		TargetIP:      device.IP,
+		InternalPort:  service.InternalPort,
+		Protocol:      service.Protocol,
+		UseUPnP:       service.UseUPnP,
+		WebhookConfig: service.WebHookConfig,
+		Redirect:      service.Redirect,
+		MCEntry:       service.MCEntry,
+
+		// UDP 洞口不支持终结 TLS（那是 DTLS，另一回事）
+		TLSTerminate: service.TLSTerminate && !strings.EqualFold(service.Protocol, "udp"),
+		CertID:       service.CertID,
+		BackendHTTPS: service.BackendHTTPS,
+	}
+}
+
+func (s *Scheduler) sendServiceWebhook(entry *serviceEntry, key string, req STUNRequest, state STUNState, phaseChanged bool) {
+	cfg := req.WebhookConfig
+	if !cfg.Enabled {
+		return
+	}
+	publicIP := state.ExternalIP
+	if publicIP == "" {
+		publicIP = Runtime.Network.PublicIP
+	}
+	if publicIP == "" || state.ExternalPort == 0 {
+		return
+	}
+
+	port := strconv.Itoa(int(state.ExternalPort))
+	address := net.JoinHostPort(publicIP, port)
+	if !entry.shouldSendWebhook(address, phaseChanged, cfg.OnlyWhenChanged) {
+		return
+	}
+
+	event := entry.snapshot(key, EventPhaseChanged)
+	fields := map[string]string{
+		"address":       address,
+		"device_name":   event.DeviceName,
+		"external_ip":   publicIP,
+		"external_port": port,
+		"ipAddr":        address,
+		"internal_port": fmt.Sprintf("%d", req.InternalPort),
+		"phase":         PhaseRunning.String(),
+		"port":          port,
+		"protocol":      req.Protocol,
+		"service_key":   key,
+		"service_name":  req.ServiceName,
+		"target_ip":     req.TargetIP,
+		"updated_at":    time.Now().Format(time.RFC3339),
+	}
+
+	go func() {
+		if _, err := webhook.Send(cfg, fields); err != nil {
+			msg := fmt.Sprintf("Webhook 发送失败：%v", err)
+			logrus.WithError(err).Warnf("STUN webhook failed: key=%s", key)
+			s.log(entry, key, msg)
+			return
+		}
+		s.log(entry, key, "Webhook 发送成功")
+	}()
+}
+
+// redirectFailCooldown 入口重定向同步失败后的冷却时间。
+//
+// STUNAlive 是保活心跳，几秒就来一次。配错了（token 没权限、域名不在这个账号下）
+// 就是一直错，不冷却的话等于拿服务商的 API 当沙包打，很容易被限流。
+const redirectFailCooldown = 5 * time.Minute
+
+// syncServiceRedirect 地址变了就把入口重定向刷一遍，和 webhook 同一个触发点。
+func (s *Scheduler) syncServiceRedirect(entry *serviceEntry, key string, req STUNRequest, state STUNState) {
+	cfg := req.Redirect
+	if !cfg.Enabled || strings.TrimSpace(cfg.EntryHost) == "" || state.ExternalPort == 0 {
+		return
+	}
+
+	_, svc := FindDeviceService(entry.deviceID, entry.serviceID)
+	if svc == nil {
+		return
+	}
+	// 目标地址直接按本次拿到的端口算，不回头读调度器状态：
+	// 那边是另一把锁，读回来的可能已经是下一轮的值了。
+	host := strings.TrimSpace(svc.Domain)
+	if host == "" {
+		host = state.ExternalIP
+		if host == "" {
+			host = Runtime.Network.PublicIP
+		}
+	}
+	if host == "" {
+		return
+	}
+	target := fmt.Sprintf("%s://%s:%d", PublicScheme(svc), host, state.ExternalPort)
+
+	if !entry.shouldSyncRedirect(target) {
+		return
+	}
+
+	go func() {
+		syncer, err := buildRedirectSyncer(cfg.ProviderID)
+		var (
+			keepPath  bool
+			entryWarn string
+		)
+		if err == nil {
+			keepPath, entryWarn, err = syncer.SyncRedirectRule(
+				redirectZone(cfg),
+				redirectRuleKey(entry.deviceID, entry.serviceID),
+				redirectRuleLabel(svc),
+				strings.TrimSpace(cfg.EntryHost),
+				target,
+			)
+		}
+		entry.recordRedirect(target, keepPath, err)
+		if err != nil {
+			logrus.WithError(err).Warnf("入口重定向同步失败: key=%s", key)
+			s.log(entry, key, fmt.Sprintf("入口重定向同步失败：%v", err))
+			return
+		}
+		msg := fmt.Sprintf("入口重定向已更新：%s → %s", strings.TrimSpace(cfg.EntryHost), target)
+		if !keepPath {
+			msg += "（服务商不接受保留路径的写法，从子路径进来会落到根路径）"
+		}
+		s.log(entry, key, msg)
+		// 规则写进去了，但入口域名那条记录没确认上——这条单独说，
+		// 不然日志里只剩一行「已更新」，而实际访问是域名不存在
+		if entryWarn != "" {
+			s.log(entry, key, entryWarn)
+		}
+
+		// 落地域名补不上不影响这次同步：规则已经写进去了
+		host, added, lerr := ensureLandingRecord(cfg, target)
+		switch {
+		case lerr != nil:
+			s.log(entry, key, fmt.Sprintf("落地域名没能自动接管：%v", lerr))
+		case added:
+			s.log(entry, key, fmt.Sprintf("落地域名 %s 已加进 DDNS，之后会自己跟着公网 IP 走", host))
+		}
+	}()
+}
+
+// shouldSyncRedirect 目标没变就不打服务商 API；上次失败的话等冷却时间过了再试。
+//
+// 返回 true 时已经把 redirectPending 占上了，避免同一条规则被并发写两遍。
+// lastRedirect 要等真写完才动：它是「服务商那边现在是什么」，界面直接显示这个值，
+// 提前改成新地址的话，写还没发出去，界面上就已经报了个成功。
+func (e *serviceEntry) shouldSyncRedirect(target string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// 已经有一次在写了：这次先放过，下一次保活心跳会拿最新地址再来
+	if e.redirectPending != "" {
+		return false
+	}
+	if e.lastRedirect == target {
+		if e.redirectStatus != "failed" {
+			return false
+		}
+		if time.Now().Before(e.redirectRetryAt) {
+			return false
+		}
+	} else if e.lastRedirect != "" {
+		// 地址变了，服务商那边还是旧的，这段时间里界面别再显示绿色的「成功」
+		e.redirectStatus = "stale"
+	}
+	e.redirectPending = target
+	return true
+}
+
+// recordRedirect 记下同步结果，失败时压上冷却时间
+func (e *serviceEntry) recordRedirect(target string, keepPath bool, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lastRedirect = target
+	e.redirectPending = ""
+	e.redirectKeepPath = keepPath
+	e.redirectAt = time.Now()
+	if err != nil {
+		e.redirectStatus = "failed"
+		e.redirectError = err.Error()
+		e.redirectRetryAt = time.Now().Add(redirectFailCooldown)
+		return
+	}
+	e.redirectStatus = "ok"
+	e.redirectError = ""
+	e.redirectRetryAt = time.Time{}
+}
+
+// markRedirectStale 外网端口刚换了一个，服务商那边还是旧的——把状态标出来。
+//
+// 端口是在 STUNMapped 那一刻就知道的，可真正写服务商要等 STUNAlive（洞得先被
+// 外面拨回来确认通了）。中间这段时间界面上是一个绿色的「成功」配着旧端口，
+// 而入口域名此刻是打不开的：看着一切正常，实际断着，最难查的就是这种。
+//
+// 返回 true 表示状态真的变了，调用方据此决定要不要推一次给前端。
+func (e *serviceEntry) markRedirectStale(port uint16) bool {
+	if port == 0 {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// 没同步过（没开重定向，或者还没轮到）就没有「旧的」可言
+	if e.lastRedirect == "" || e.redirectStatus == "stale" {
+		return false
+	}
+	if redirectTargetPort(e.lastRedirect) == port {
+		return false
+	}
+	e.redirectStatus = "stale"
+	return true
+}
+
+// redirectTargetPort 从 scheme://host:port 里把端口抠出来，抠不出来返回 0
+func redirectTargetPort(target string) uint16 {
+	u, err := url.Parse(target)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(u.Port())
+	if err != nil || n <= 0 || n > 65535 {
+		return 0
+	}
+	return uint16(n)
+}
+
+func (e *serviceEntry) shouldSendWebhook(address string, phaseChanged bool, onlyWhenChanged bool) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lastWebhook == address {
+		return phaseChanged && !onlyWhenChanged
+	}
+	e.lastWebhook = address
+	return true
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// syncServiceMCEntry 洞确认通了就把 SRV 指到当前端口，和入口重定向同一个触发点。
+//
+// 保活心跳每隔几秒就来一次，端口没变、上次成功的话不打 API；
+// 失败了冷却 redirectFailCooldown，配错了（令牌没权限）不至于一直刷服务商。
+func (s *Scheduler) syncServiceMCEntry(entry *serviceEntry, key string, req STUNRequest, state STUNState) {
+	cfg := req.MCEntry
+	if !mcEntryReady(cfg, state.ExternalPort) || !entry.shouldSyncMCEntry(state.ExternalPort) {
+		return
+	}
+	go func() {
+		msg, changed, err := SyncMCEntry(cfg, state.ExternalPort)
+		entry.recordMCEntry(state.ExternalPort, err)
+		s.emit(entry.snapshot(key, EventLogAppended))
+		if err != nil {
+			logrus.WithError(err).Warnf("MC 入口同步失败: key=%s", key)
+			s.log(entry, key, fmt.Sprintf("MC 入口同步失败：%v", err))
+			return
+		}
+		if changed {
+			s.log(entry, key, msg)
+		}
+	}()
+}
+
+func (e *serviceEntry) shouldSyncMCEntry(port uint16) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.mcEntryPending {
+		return false
+	}
+	if e.mcEntryPort == port {
+		if e.mcEntryStatus == "ok" || time.Now().Before(e.mcEntryRetryAt) {
+			return false
+		}
+	}
+	e.mcEntryPending = true
+	return true
+}
+
+func (e *serviceEntry) recordMCEntry(port uint16, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.mcEntryPending = false
+	e.mcEntryPort = port
+	e.mcEntryAt = time.Now()
+	if err != nil {
+		e.mcEntryStatus = "failed"
+		e.mcEntryError = err.Error()
+		e.mcEntryRetryAt = time.Now().Add(redirectFailCooldown)
+		return
+	}
+	e.mcEntryStatus = "ok"
+	e.mcEntryError = ""
+	e.mcEntryRetryAt = time.Time{}
+}
+
+// recordMCEntryFor 「立即同步」的结果也记进运行状态，界面那行才会跟着变
+func (s *Scheduler) recordMCEntryFor(deviceID, serviceID uint, port uint16, err error) {
+	key := serviceKey(deviceID, serviceID)
+	s.mu.RLock()
+	entry, ok := s.service[key]
+	s.mu.RUnlock()
+	if !ok || entry == nil {
+		return
+	}
+	entry.recordMCEntry(port, err)
+	s.emit(entry.snapshot(key, EventLogAppended))
+}

@@ -1,0 +1,123 @@
+package stun
+
+import (
+	"context"
+	"fmt"
+	"github.com/chenggegedeid/catflap/core"
+	"time"
+
+	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+)
+
+func InitSTUN() error {
+	var err error
+
+	// 读取 STUN 配置文件
+	Runtime.Config, err = ReadConfig()
+	if err != nil {
+		return fmt.Errorf("读取 STUN 配置失败: %w", err)
+	}
+
+	// 初始化调度器
+	Runtime.Scheduler = NewScheduler(NewSTUNRunner())
+
+	// 监听退出保存配置文件
+	core.OnShutdown(func() {
+		syncRuntimeConfig()
+		if err := UpdateConfig(Runtime.Config); err != nil {
+			logrus.Error("保存配置失败：", err)
+		}
+	})
+
+	// 先认出口网卡：下面测 STUN 服务器、扫路由、选 UPnP 网关、查公网 IP 都从这张卡出去
+	networkConfig.Store(&Runtime.Config.Network)
+	outbound, err := DetectOutboundIface()
+	if err != nil {
+		logrus.Warnf("获取出口网卡失败: %v", err)
+	}
+	currentOutboundIface.Store(&outbound)
+	Runtime.Network.Iface, Runtime.Network.Gateway = outbound.Name, outbound.Gateway
+	logrus.Info("当前出口网卡：", outbound)
+
+	var g errgroup.Group
+
+	// 1. 初始化 STUN 服务，获取最快的 STUN 服务器
+	g.Go(func() error {
+		Runtime.STUNService = NewSTUNService(Runtime.Config.StunServerList)
+		Runtime.Config.BestSTUN = Runtime.STUNService.BestSTUNServer
+		logrus.Info("当前使用stun服务器：", Runtime.Config.BestSTUN)
+
+		if Runtime.Config.BestSTUN == "" {
+			return fmt.Errorf("没有可用的 STUN 服务器")
+		}
+		return nil
+	})
+
+	// 2. 获取 NAT 路由列表
+	g.Go(func() error {
+		natRouterList, err := GetNatRouterList()
+		if err != nil {
+			return fmt.Errorf("获取 NAT Router 列表失败: %w", err)
+		}
+		Runtime.Network.NatRouterList = natRouterList
+		logrus.Info("当前NAT Router：", Runtime.Network.NatRouterList)
+		return nil
+	})
+
+	// 3. 发现 UPnP 设备并选择默认网关
+	g.Go(func() error {
+		gateway := DiscoverUPnPGateway()
+		SelectDefaultGateway(gateway)
+		Runtime.UpnpGateway = gateway
+		return nil
+	})
+
+	// 等待基础运行时准备完成
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("初始化 STUN 运行时失败: %w", err)
+	}
+
+	// 4. 获取网络地址信息，依赖上面选出的 STUN 服务器
+	addrInfo, err := GetPublicIPInfo(Runtime.Config.BestSTUN)
+	if err != nil {
+		return fmt.Errorf("获取网络地址信息失败: %w", err)
+	}
+	Runtime.Network.LocalIP = addrInfo.LocalIP
+	Runtime.Network.PublicIP = addrInfo.PublicIP
+
+	// DDNS 是和 STUN 并排起的，它先跑那一轮多半赶在这行之前，只能记一次失败。
+	// 这里回头叫它一声，就绪了立刻补一次，不用干等到下个周期。
+	notifyPublicIPChanged(addrInfo.PublicIP, "")
+
+	syncRuntimeConfig()
+
+	// 5. 启动网络信息更新器
+	go RunNetworkRuntimeUpdater(context.Background())
+
+	// 6. 异步检测 UDP/TCP NAT 类型
+	go func() {
+		udpResult, tcpResult, err := DetectAndClassifyNat()
+		if err != nil {
+			logrus.Warnf("启动时检测 NAT 类型失败: %v", err)
+		}
+		if udpResult != nil {
+			logrus.Infof("UDP NAT检测结果: type=%s mapping=%s filtering=%s", udpResult.NatType, udpResult.Mapping, udpResult.Filtering)
+		}
+		if tcpResult != nil {
+			logrus.Infof("TCP NAT检测结果: type=%s mapping=%s", tcpResult.NatType, tcpResult.Mapping)
+		}
+	}()
+
+	// 7. 启动所有 STUN 服务映射
+	go Runtime.Scheduler.StartAll(Runtime.Config.Devices)
+
+	return nil
+}
+
+func syncRuntimeConfig() {
+	if Runtime.STUNService != nil && Runtime.STUNService.BestSTUNServer != "" {
+		Runtime.Config.BestSTUN = Runtime.STUNService.BestSTUNServer
+	}
+	Runtime.Config.UpdatedAt = time.Now()
+}

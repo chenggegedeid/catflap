@@ -1,0 +1,95 @@
+name: Bug 报告
+description: 程序行为与预期不符
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先确认：
+
+        - 已经看过 [SECURITY.md](https://github.com/chenggegedeid/catflap/blob/main/SECURITY.md)？
+          **安全漏洞请不要开公开 Issue**，走私有渠道报告。
+        - 用的是最新 Release？老版本的问题请先升级再复现。
+        - 日志里的域名、Token、内网 IP 已经**打码**（粘贴前务必检查一遍）。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 面板界面里的版本号，或访问 `GET /api/system/version` 的结果
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台与架构
+      options:
+        - Linux / amd64
+        - Linux / arm64
+        - Linux / armv7
+        - Linux / mipsle
+        - Windows / amd64（桌面版）
+        - Windows / amd64（命令行版）
+        - 其它（请在描述里说明）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装方式
+      options:
+        - 直接跑二进制
+        - systemd 服务
+        - Docker
+        - 飞牛 NAS / fpk 应用中心
+        - 从源码构建
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 实际发生了什么？从哪个界面/接口触发的？
+    validations:
+      required: true
+
+  - type: textarea
+    id: expect
+    attributes:
+      label: 预期
+      description: 你认为应该发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 /catflap/ 的 xxx 页
+        2. 填 xxx 点保存
+        3. 看到 xxx
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 程序的前台输出，或 `journalctl -u catflap -n 100`
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 网络环境（是否有公网 IP / 是否在 CGNAT / 是否走代理）、NAT 类型检测结果、相关截图
+    validations:
+      required: false

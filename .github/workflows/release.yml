@@ -1,0 +1,308 @@
+name: Release
+
+# 打 tag 触发；或手动指定 tag。
+#
+# ⚠️ tag 命名要求：必须是 vX.Y.Z 这种**纯数字点分**形式，不要带后缀。
+# 原因：程序内部 modules/update/update.go 的 releaseVersion() 会先取最后一个 "-"
+# 之后的部分、再去掉 "v" 前缀，然后逐段比数字。带后缀会把版本解析错。
+# 预发布请用 GitHub Release 页面的 Pre-release 勾选，而不是往 tag 里塞 "-beta"。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（形如 v1.1.0，必须已存在）'
+        required: true
+        type: string
+      prerelease:
+        description: '标记为预发布（Pre-release）'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 计算注入到二进制里的版本号 ────────────────────────────────────
+  # 注意：注入值必须是**裸的** 1.0.0，不能带 "v"。
+  # 因为 newerThan() 用 strconv.Atoi 逐段比数字，本地版本若带 v 会被解析成 0，
+  # 导致程序永远认为「有新版本」。详见 docs/decisions/。
+  version:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.v.outputs.ver }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG} / 注入版本=${TAG#v}"
+
+  # ── 先构建两个前端，产出 dist 给后续任务复用 ─────────────────────
+  web:
+    name: 构建前端
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 构建 admin
+        working-directory: web/admin
+        run: npm ci && npm run build
+
+      - name: 构建 home
+        working-directory: web/home
+        run: npm ci && npm run build
+
+      - name: 打包 dist
+        run: tar -czf web-dist.tar.gz web/admin/dist web/home/dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist.tar.gz
+          retention-days: 1
+
+  # ── Linux 四个目标：CGO_ENABLED=0，纯静态，直接即所得 ────────────
+  #
+  # 资产名必须与 modules/update/update.go 的 assetName() 完全一致，
+  # 否则用户点「一键更新」时会找不到对应文件。
+  linux:
+    name: Linux → ${{ matrix.asset }}
+    needs: [version, web]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goarch: amd64,  goarm: '',  asset: catflap }
+          - { goarch: arm64,  goarm: '',  asset: catflap-linux-arm64 }
+          - { goarch: arm,    goarm: '7', asset: catflap-linux-armv7 }
+          - { goarch: mipsle, goarm: '',  asset: catflap-linux-mipsle }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+
+      - name: 展开 dist
+        run: tar -xzf web-dist.tar.gz
+
+      - name: 编译
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/chenggegedeid/catflap/core.Version=${{ needs.version.outputs.ver }}" \
+            -o build/${{ matrix.asset }} .
+
+      - name: 校验产物（确认版本号注入成功、且是静态链接）
+        run: |
+          file build/${{ matrix.asset }}
+          strings build/${{ matrix.asset }} | grep -q "${{ needs.version.outputs.ver }}" \
+            && echo "版本号已注入" \
+            || { echo "::error::版本号未注入"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: build/${{ matrix.asset }}
+          retention-days: 3
+
+  # ── 飞牛 fnOS 应用包（.fpk）────────────────────────────────────
+  #
+  # 必须在 Linux runner 上打：① 包里的二进制是 linux/amd64；
+  # ② tar 在 Windows 上打不出正确的权限位（cmd/* 没有可执行位装上就起不来）。
+  #
+  # 打包脚本 scripts/pack_fpk.py 自带断言（内层必须是真 gzip、cmd/* 必须可执行、
+  # 端口三处一致、checksum 与 app.tgz 的 md5 一致），任一条不满足就非零退出。
+  fnos-fpk:
+    name: 飞牛 fnOS → catflap-${{ needs.version.outputs.ver }}.fpk
+    needs: [version, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+
+      - name: 展开 dist
+        run: tar -xzf web-dist.tar.gz
+
+      - name: 编译 linux/amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X github.com/chenggegedeid/catflap/core.Version=${{ needs.version.outputs.ver }}" -o build/catflap-fnos .
+
+      - name: 打包 fpk
+        run: python3 scripts/pack_fpk.py --binary build/catflap-fnos --version ${{ needs.version.outputs.ver }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fnos-fpk
+          path: dist/catflap-${{ needs.version.outputs.ver }}.fpk
+          retention-days: 3
+          if-no-files-found: error
+
+  # ── Windows 桌面版 ───────────────────────────────────────────────
+  # 需要 CGO（Wails 链接 WebView2），所以用 mingw + MSYS2；
+  # syso（图标与版本信息）由 wails3 CLI 生成。
+  # 首次跑如果失败，多半是 wails3 的版本或 msys2 包名变了，按报错调整即可。
+  windows-desktop:
+    name: Windows → catflap-desktop.exe
+    needs: [version, web]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+
+      - name: 展开 dist
+        shell: bash
+        run: tar -xzf web-dist.tar.gz
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+
+      - name: 安装 wails3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.23
+
+      - name: 生成 Windows 资源文件
+        run: |
+          & "$(go env GOPATH)\bin\wails3.exe" generate syso `
+            -arch amd64 `
+            -icon build/windows/icon.ico `
+            -manifest build/windows/wails.exe.manifest `
+            -info build/windows/info.json `
+            -out wails_windows_amd64.syso
+
+      - name: 编译（CGO 需要 mingw 的 gcc）
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          CC: gcc
+          PATH: /c/msys64/mingw64/bin:${{ env.PATH }}
+        run: |
+          go build -tags "production desktop" -trimpath -buildvcs=false \
+            -ldflags "-s -w -H windowsgui -X github.com/chenggegedeid/catflap/core.Version=${{ needs.version.outputs.ver }}" \
+            -o build/catflap-desktop.exe .
+
+      - name: 清理临时 syso
+        if: always()
+        shell: bash
+        run: rm -f wails_windows_amd64.syso
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catflap-desktop.exe
+          path: build/catflap-desktop.exe
+          retention-days: 3
+          if-no-files-found: error
+
+  # ── 汇总发布 ────────────────────────────────────────────────────
+  release:
+    name: 发布 Release
+    needs: [version, linux, fnos-fpk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理发布文件
+        run: |
+          mkdir -p dist
+          find artifacts -type f -maxdepth 2 ! -name 'web-dist.tar.gz' -exec cp {} dist/ \;
+          ls -lh dist/
+          # 桌面版任务如果失败，这里会少一个文件，不阻断发布（Release 页会显示实际资产）
+          test -f dist/catflap || { echo "::error::主产物 catflap 缺失，终止"; exit 1; }
+
+      - name: 生成校验和
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          # 正文里带上校验和，方便用户手工核对
+          {
+            echo "## 校验和"
+            echo ""
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+            echo ""
+            echo "## 安装"
+            echo ""
+            echo "- **Debian / Ubuntu**：\`curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh | sudo bash\`"
+            echo "- **飞牛 fnOS**：下载下面的 \`.fpk\`，在应用中心手动安装"
+            echo "- **其它 Linux**：解压对应架构的二进制，配 systemd 见 \`deploy/systemd/catflap.service\`"
+            echo ""
+            echo "## 说明"
+            echo ""
+            echo "- 默认端口 3791，可用环境变量 \`CATFLAP_PORT\` 改"
+            echo "- 已部署的实例可以在面板里点「一键更新」，它会用 GitHub API 返回的摘要做校验"
+            echo "- 不要用 root 运行，见 SECURITY.md 的部署安全清单"
+          } > release-body.md
+
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --generate-notes \
+            --notes-file release-body.md \
+            ${PRERELEASE_FLAG} \
+            dist/*
+
+      - name: 发布结果
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "${{ needs.version.outputs.tag }}" --json url,assets --jq '.'

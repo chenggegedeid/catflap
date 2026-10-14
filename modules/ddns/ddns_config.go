@@ -1,0 +1,73 @@
+package ddns
+
+import (
+	"github.com/chenggegedeid/catflap/modules/ddns/model"
+	"github.com/chenggegedeid/catflap/utils/utilsFile"
+	"os"
+	"path"
+	"time"
+
+	"github.com/sirupsen/logrus"
+)
+
+const ConfigPath = "config/ddnsConfig.json"
+
+// 读取stun_config 配置文件
+func ReadConfig() (model.DDNSConfig, error) {
+	var config model.DDNSConfig
+
+	//检测文件是否存在
+	if fileInfo, err := os.Stat(ConfigPath); os.IsNotExist(err) || fileInfo.Size() == 0 {
+		//不存在创建空配置文件
+		return createConfig()
+
+	} else {
+		//文件存在读取配置文件
+		config, err = utilsFile.ReadJsonFile[model.DDNSConfig](ConfigPath)
+		if err != nil {
+			logrus.Error("DDNSConfig读取失败：", err)
+			return config, err
+		}
+	}
+	return config, nil
+
+}
+
+func createConfig() (model.DDNSConfig, error) {
+	var config model.DDNSConfig
+	// 首次创建，设置创建时间
+	config.CreatedAt = time.Now()
+	config.UpdatedAt = time.Now()
+
+	// 设置初始参数
+	config.IntervalSec = 300
+
+	// 确保 config 目录存在
+	if err := utilsFile.EnsurePrivateDir(path.Dir(ConfigPath)); err != nil {
+		logrus.Error("创建DDNSConfig目录失败：", err)
+		return config, err
+	}
+
+	// 写入一个空的配置文件
+	if err := utilsFile.WriteJsonFile(ConfigPath, config); err != nil {
+		logrus.Error("DDNSConfig写入失败：", err)
+		return config, err
+	}
+	return config, nil
+}
+
+// SaveConfig 把配置写入磁盘文件（纯存盘，自带更新时间戳）
+func SaveConfig(config model.DDNSConfig) error {
+
+	// 更新时间戳
+	config.UpdatedAt = time.Now()
+
+	// 写入配置文件
+	if err := utilsFile.WriteJsonFile(ConfigPath, config); err != nil {
+		logrus.Error("DDNSConfig写入失败：", err)
+		return err
+	}
+
+	logrus.Info("DDNS配置文件已更新")
+	return nil
+}

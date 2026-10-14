@@ -1,0 +1,88 @@
+name: 安全与依赖周报
+
+# 为什么不放进 ci.yml：
+# 这两项都要访问外部服务（vuln.go.dev / npm registry），偶发抽风或上游新披露
+# 都不该拦住日常合并，所以从主 CI 里摘出来，改成固定的周期性扫描。
+# 主 CI 里它们以「非阻断」形式跑一遍做早期提醒，正式结论以本工作流为准。
+on:
+  schedule:
+    # 每周一 03:00 UTC = 北京时间 11:00
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: security-report
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: 依赖与漏洞扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck（Go 依赖）
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          {
+            echo '### Go 依赖（govulncheck）'
+            echo ''
+            echo '```'
+            "$(go env GOPATH)/bin/govulncheck" ./... 2>&1 || true
+            echo '```'
+          } > /tmp/report.md
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: npm audit（前端依赖）
+        run: |
+          for app in admin home; do
+            {
+              echo ''
+              echo "### 前端依赖（web/$app）"
+              echo ''
+              echo '```'
+              # npm ci 的输出很长，静默掉，只留审计结论
+              (cd "web/$app" && npm ci --no-audit --no-fund >/dev/null 2>&1 && npm audit --audit-level=low) 2>&1 || true
+              echo '```'
+            } >> /tmp/report.md
+          done
+
+      # 单开一个固定标题的 issue 反复更新，而不是每周建一个新的——否则 issue 列表很快被刷屏
+      - name: 汇总结果到 issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: '🔒 依赖与漏洞周报'
+          SEARCH: '依赖与漏洞周报 in:title'
+        run: |
+          {
+            echo "扫描时间：$(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo ''
+            echo "对应提交：\`${GITHUB_SHA:0:7}\`"
+            echo ''
+            cat /tmp/report.md
+            echo ''
+            echo '---'
+            echo ''
+            echo '> 由 `.github/workflows/security.yml` 每周一自动更新。'
+            echo '> 无输出/无告警即代表本周未发现已知漏洞。'
+          } > /tmp/body.md
+
+          num="$(gh issue list --state open --search "$SEARCH" --json number --jq '.[0].number // empty')"
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file /tmp/body.md
+            echo "已把本周结果追加到既有 issue #$num"
+          else
+            gh issue create --title "$TITLE" --body-file /tmp/body.md
+          fi

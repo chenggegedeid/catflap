@@ -1,0 +1,69 @@
+package stun_api
+
+import (
+	"github.com/chenggegedeid/catflap/middleware"
+	"github.com/chenggegedeid/catflap/modules/stun"
+	"github.com/chenggegedeid/catflap/modules/stun/model"
+	"github.com/chenggegedeid/catflap/utils/res"
+
+	"github.com/gin-gonic/gin"
+)
+
+type StunDeviceDeleteViewRequest struct {
+	DeviceID uint `json:"deviceId"` // 设备ID
+}
+
+func (StunApi) StunDeviceDeleteView(c *gin.Context) {
+	cr := middleware.GetBindRequest[StunDeviceDeleteViewRequest](c)
+
+	// 查找目标设备
+	deviceIndex := -1
+	for i, device := range stun.Runtime.Config.Devices {
+		if device.DeviceID == cr.DeviceID {
+			deviceIndex = i
+			break
+		}
+	}
+	if deviceIndex == -1 {
+		res.FailWithMsg("设备不存在", c)
+		return
+	}
+
+	// 停止该设备下所有服务的 STUN 穿透
+	// 修复：原版调用已删除的全局函数 stun.StopService，改为调度器实例方法
+	deletedServiceIDs := make([]uint, 0, len(stun.Runtime.Config.Devices[deviceIndex].Services))
+	// 入口重定向配置得在摘掉之前留一份，理由同 stun_service_delete.go
+	redirectCfgs := make(map[uint]model.RedirectConfig, len(stun.Runtime.Config.Devices[deviceIndex].Services))
+	landingHosts := make([]string, 0, len(stun.Runtime.Config.Devices[deviceIndex].Services))
+	for _, svc := range stun.Runtime.Config.Devices[deviceIndex].Services {
+		stun.Runtime.Scheduler.StopService(cr.DeviceID, svc.ID)
+		deletedServiceIDs = append(deletedServiceIDs, svc.ID)
+		redirectCfgs[svc.ID] = svc.Redirect
+		landingHosts = append(landingHosts, svc.Domain)
+	}
+
+	// 从切片中删除该设备
+	devices := stun.Runtime.Config.Devices
+	stun.Runtime.Config.Devices = append(
+		devices[:deviceIndex],
+		devices[deviceIndex+1:]...,
+	)
+
+	// 持久化配置到文件
+	if err := stun.UpdateConfig(stun.Runtime.Config); err != nil {
+		res.FailWithMsg("保存配置失败", c)
+		return
+	}
+
+	// 通知订阅方（home 模块借此级联清掉对应卡片）
+	for _, sid := range deletedServiceIDs {
+		stun.NotifyServiceDeleted(cr.DeviceID, sid)
+		stun.CleanupRedirect(redirectCfgs[sid], cr.DeviceID, sid)
+	}
+	// 当初替这些域名自动加的 DDNS 记录也收回去，理由同 stun_service_delete.go
+	for _, host := range landingHosts {
+		stun.CleanupLandingRecord(host)
+	}
+
+	res.OkWithMsg("删除成功", c)
+}
