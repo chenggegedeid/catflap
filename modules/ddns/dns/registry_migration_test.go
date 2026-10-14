@@ -48,6 +48,12 @@ var allTypes = []model.DNSProviderType{
 	model.DNSProviderNameSilo,
 }
 
+// TestRegistryCoversAllLegacyProviders 迁移前的 7 家必须一家不少、行为一致。
+//
+// 这里**不再断言数量恰好等于 7**：v1.1 之后注册表里会不断新增服务商（加一个
+// register_*.go 就多一家），那正是这个设计的意义。所以断言改成「至少包含这 7 家」，
+// 加上下面那条「这 7 家的相对顺序不变」。
+// 若哪天 legacy 那 7 家少了一家，这两条会立刻失败 —— 那才是真问题。
 func TestRegistryCoversAllLegacyProviders(t *testing.T) {
 	for _, tp := range allTypes {
 		if !IsSupported(tp) {
@@ -55,10 +61,8 @@ func TestRegistryCoversAllLegacyProviders(t *testing.T) {
 		}
 	}
 
-	// 反向：注册表里不该多出 switch 时代没有的类型（多出来会让界面出现
-	// 一个选了必然报错的选项）
-	if got, want := len(Descriptors()), len(allTypes); got != want {
-		t.Errorf("注册了 %d 家，期望 %d 家", got, want)
+	if got, want := len(Descriptors()), len(allTypes); got < want {
+		t.Errorf("注册了 %d 家，少于迁移前的 %d 家", got, want)
 	}
 }
 
@@ -136,18 +140,29 @@ func TestBuildUnknownProviderIsNil(t *testing.T) {
 	}
 }
 
-// TestDescriptorsOrderIsStable 界面上的顺序不能随 init 的文件顺序漂移。
+// TestDescriptorsOrderIsStable 老用户在界面上看到的顺序不能随 init 的文件顺序漂移。
+//
+// 只校验**迁移前那 7 家的相对顺序**：新增的服务商按 Order 排在后面，
+// 它们的加入不该影响老用户的习惯位置。
 func TestDescriptorsOrderIsStable(t *testing.T) {
 	want := []string{
 		"cloudflare", "alidns", "tencentcloud", "baiducloud",
 		"huaweicloud", "namecheap", "namesilo",
 	}
+
+	legacy := map[string]bool{}
+	for _, w := range want {
+		legacy[w] = true
+	}
+
 	var got []string
 	for _, d := range Descriptors() {
-		got = append(got, d.Key)
+		if legacy[d.Key] {
+			got = append(got, d.Key)
+		}
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("服务商顺序 = %v，期望 %v", got, want)
+		t.Errorf("老服务商的相对顺序 = %v，期望 %v", got, want)
 	}
 }
 

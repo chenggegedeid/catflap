@@ -20,6 +20,12 @@ const (
 	DNSProviderHuaweiCloud  DNSProviderType = "huaweicloud"
 	DNSProviderNameCheap    DNSProviderType = "namecheap"
 	DNSProviderNameSilo     DNSProviderType = "namesilo"
+	// 下面三家是 v1.1 新增的：注册表化之后，加一家 = 加一个 register_*.go，
+	// 这里补常量只是为了让代码里不出现裸字符串。
+	DNSProviderGoDaddy DNSProviderType = "godaddy"
+	DNSProviderPorkbun DNSProviderType = "porkbun"
+	DNSProviderHE      DNSProviderType = "he"
+	DNSProviderDuckDNS DNSProviderType = "duckdns"
 )
 
 // 定义每个 DNS 记录类型
