@@ -61,6 +61,11 @@ func StunRouters(g *gin.RouterGroup) {
 		middleware.BindJsonMiddleware[stun_api.StunServersUpdateRequest],
 		app.StunServersUpdateView,
 	)
+	// 恢复内置列表：用户把列表改坏（比如删空）时的回头路
+	g.POST(
+		"stun/servers/reset",
+		app.StunServersResetView,
+	)
 
 	// 新增服务
 	g.POST(

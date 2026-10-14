@@ -205,6 +205,17 @@ export const updateStunServers = (servers: string[]) =>
     body: JSON.stringify({ servers }),
   })
 
+/**
+ * 把服务器列表恢复成内置的那一批（恢复后后端立即重测选优）。
+ *
+ * 存在的意义是给「把列表改坏了」留一条回头路：列表一旦被删空，打洞彻底起不来，
+ * 而手动重打十几行 host:port 没人愿意做。
+ */
+export const resetStunServers = () =>
+  requestWithMsg<{ servers: string[]; best: string }>('/api/stun/servers/reset', {
+    method: 'POST',
+  })
+
 /** 打洞走哪张网卡、STUN 域名找谁解析 */
 export const getStunNetwork = () => request<StunNetwork>('/api/stun/network')
 
