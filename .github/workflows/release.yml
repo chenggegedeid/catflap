@@ -241,7 +241,10 @@ jobs:
   # ── 汇总发布 ────────────────────────────────────────────────────
   release:
     name: 发布 Release
-    needs: [version, linux, fnos-fpk]
+    # windows-desktop 必须在 needs 里：不在的话发布任务会抢在桌面版编译完成
+    # 之前就跑，于是 Release 里少一个 catflap-desktop.exe（v1.0.0 就是这么漏的）。
+    # 代价只是发布多等几分钟，比事后手工补资产强。
+    needs: [version, linux, fnos-fpk, windows-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
