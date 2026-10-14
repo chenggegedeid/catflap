@@ -690,3 +690,52 @@ export const wakeWolTarget = (id: string) =>
     method: 'POST',
     body: JSON.stringify({ id }),
   })
+
+/** 计划任务 */
+export interface TaskItem {
+  id: string
+  name: string
+  enabled: boolean
+  kind: 'interval' | 'daily'
+  intervalMin: number
+  hour: number
+  minute: number
+  action: 'ddns' | 'wol'
+  target: string
+  lastRun?: string
+  lastResult?: string
+  lastError?: string
+  nextRun?: string
+}
+
+export const getTasks = () => request<{ tasks: TaskItem[] }>('/api/task/tasks')
+
+export const addTask = (body: Omit<TaskItem, 'lastRun' | 'lastResult' | 'lastError' | 'nextRun'>) =>
+  request<TaskItem>('/api/task/task/add', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const updateTask = (body: TaskItem) =>
+  requestWithMsg<unknown>('/api/task/task/update', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+
+export const deleteTask = (id: string) =>
+  requestWithMsg<unknown>('/api/task/task/delete', {
+    method: 'DELETE',
+    body: JSON.stringify({ id }),
+  })
+
+/**
+ * 立刻执行一次。
+ *
+ * 后端是同步执行的（动作本身秒级完成），所以这里能直接拿到 ok / error。
+ * 手动与定时走同一条路径，不存在「手动能跑、定时没反应」这种两套逻辑。
+ */
+export const runTask = (id: string) =>
+  requestWithMsg<{ ok: boolean; lastRun?: string; error?: string }>('/api/task/task/run', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })

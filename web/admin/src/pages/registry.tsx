@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Bell,
   Blocks,
+  CalendarClock,
   FileText,
   Globe,
   LayoutDashboard,
@@ -22,6 +23,7 @@ import { Placeholder } from './Placeholder'
 import { ReverseProxy } from './ReverseProxy'
 import { Settings } from './Settings'
 import { Stun } from './Stun'
+import { Task } from './Task'
 import { Wol } from './Wol'
 
 /**
@@ -117,6 +119,14 @@ export const pages = {
     component: 'wol',
     element: <Wol />,
   },
+  task: {
+    label: '计划任务',
+    icon: CalendarClock,
+    subtitle: '定时同步 DDNS 解析记录或唤醒机器',
+    badge: 'NEW',
+    component: 'task',
+    element: <Task />,
+  },
 
   components: {
     label: '功能管理',
@@ -163,6 +173,7 @@ export interface NavGroupDef {
 export const pageGroups = [
   { keys: ['dashboard'] },
   { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'cert', 'wol'] },
+  { title: '自动化', keys: ['task'] },
   { title: '系统与管理', keys: ['components', 'settings', 'logs', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]
 

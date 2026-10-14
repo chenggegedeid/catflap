@@ -22,6 +22,7 @@ import (
 	_ "github.com/chenggegedeid/catflap/modules/proxy"
 	_ "github.com/chenggegedeid/catflap/modules/stun"
 	_ "github.com/chenggegedeid/catflap/modules/system"
+	_ "github.com/chenggegedeid/catflap/modules/task"
 	_ "github.com/chenggegedeid/catflap/modules/update"
 	_ "github.com/chenggegedeid/catflap/modules/webhook"
 	_ "github.com/chenggegedeid/catflap/modules/wol"
