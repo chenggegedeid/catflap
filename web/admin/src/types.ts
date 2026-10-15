@@ -571,23 +571,30 @@ export interface ProxyConfig {
   entry: ProxyEntry
   listeners: ProxyListener[]
   sites: ProxySite[]
-  /** Cloudflare Tunnel 的运行状态（token 不回显） */
-  tunnel?: ProxyTunnelState
 }
 
-export interface ProxyTunnelState {
+/** 隧道运行状态（token 不回显，只说填没填） */
+export interface TunnelRuntimeState {
   running: boolean
   message: string
-  /** 只表示"填没填"，不回显真实 token */
   tokenSet: boolean
   binaryPath: string
   startedAt: string
 }
 
-export interface ProxyTunnelPayload {
+/** 隧道设置读取结果 */
+export interface TunnelConfigView {
   enabled: boolean
   binaryPath: string
-  /** 留空 = 不改动；面板回显的是掩码 */
+  tokenSet: boolean
+  extraArgs: string
+  state: TunnelRuntimeState
+}
+
+export interface TunnelSavePayload {
+  enabled: boolean
+  binaryPath: string
+  /** 留空或掩码 = 不改动 */
   token: string
   clearToken: boolean
   extraArgs: string

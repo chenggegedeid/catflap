@@ -8,27 +8,46 @@
  * 这里只做「托管用户自己装的 cloudflared」：填路径 + token，Catflap 拉起、
  * 看住、停掉。token 是隧道凭证，回显用掩码，留空提交=不改动。
  */
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Cloud, RefreshCw } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
-import type { ProxyConfig } from '../types'
+import type { TunnelConfigView } from '../types'
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-export function TunnelPanel({ tunnel, onChanged }: { tunnel: NonNullable<ProxyConfig['tunnel']>; onChanged: () => void }) {
-  const [open, setOpen] = useState(false)
-  const [binaryPath, setBinaryPath] = useState(tunnel.binaryPath ?? '')
+export function Tunnel() {
+  const [cfg, setCfg] = useState<TunnelConfigView | null>(null)
+  const [loadErr, setLoadErr] = useState('')
+  const [binaryPath, setBinaryPath] = useState('')
   const [token, setToken] = useState('')
   const [extraArgs, setExtraArgs] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api.getTunnelConfig()
+      setCfg(data)
+      setBinaryPath(data.binaryPath ?? '')
+      setExtraArgs(data.extraArgs ?? '')
+      setLoadErr('')
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : '加载失败')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const tunnel = cfg?.state
+
   const save = async (enabled: boolean) => {
     setErr('')
     setBusy(true)
     try {
-      await api.setProxyTunnel({
+      await api.saveTunnel({
         enabled,
         binaryPath: binaryPath.trim(),
         // 掩码/空串都表示"不改动"，后端会跳过
@@ -36,7 +55,8 @@ export function TunnelPanel({ tunnel, onChanged }: { tunnel: NonNullable<ProxyCo
         clearToken: false,
         extraArgs: extraArgs.trim(),
       })
-      onChanged()
+      setToken('')
+      await refresh()
     } catch (e) {
       setErr(errText(e))
     } finally {
@@ -48,13 +68,22 @@ export function TunnelPanel({ tunnel, onChanged }: { tunnel: NonNullable<ProxyCo
     setErr('')
     setBusy(true)
     try {
-      await api.restartProxyTunnel()
-      onChanged()
+      await api.restartTunnel()
+      await refresh()
     } catch (e) {
       setErr(errText(e))
     } finally {
       setBusy(false)
     }
+  }
+
+  // 首屏还没拿到配置：给个加载态，别让下面那一堆 tunnel.xxx 空指针
+  if (!tunnel) {
+    return (
+      <Card>
+        <div className="text-sm text-slate-400">{loadErr || '正在加载隧道状态…'}</div>
+      </Card>
+    )
   }
 
   const on = tunnel.running
@@ -111,15 +140,7 @@ export function TunnelPanel({ tunnel, onChanged }: { tunnel: NonNullable<ProxyCo
         {tunnel.message && <span className="text-[11px] text-slate-400">{tunnel.message}</span>}
       </div>
 
-      {!open ? (
-        <button
-          onClick={() => setOpen(true)}
-          className="mt-2 px-1 text-[11px] text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
-        >
-          {tunnel.tokenSet ? '修改设置' : '去配置'}
-        </button>
-      ) : (
-        <div className="mt-3 space-y-3 rounded-xl bg-slate-50 p-3">
+      <div className="mt-3 space-y-3 rounded-xl bg-slate-50 p-3">
           <label className="block">
             <div className="mb-1 text-xs font-semibold text-slate-500">cloudflared 路径（留空 = 在 PATH 里找）</div>
             <input
@@ -159,15 +180,6 @@ export function TunnelPanel({ tunnel, onChanged }: { tunnel: NonNullable<ProxyCo
           {err && <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
           <div className="flex justify-end gap-2">
             <button
-              onClick={() => {
-                setOpen(false)
-                setErr('')
-              }}
-              className="rounded-xl px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-200"
-            >
-              收起
-            </button>
-            <button
               onClick={() => save(tunnel.running || tunnel.tokenSet)}
               disabled={busy}
               className="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
@@ -175,11 +187,10 @@ export function TunnelPanel({ tunnel, onChanged }: { tunnel: NonNullable<ProxyCo
               {busy ? '保存中...' : '保存设置'}
             </button>
           </div>
-          <div className="flex items-center gap-1.5 px-1 text-[11px] text-slate-300">
-            <Cloud className="h-3 w-3" /> token 是隧道的全部凭证，按密码对待：面板上只显示是否已配置
-          </div>
+        <div className="flex items-center gap-1.5 px-1 text-[11px] text-slate-300">
+          <Cloud className="h-3 w-3" /> token 是隧道的全部凭证，按密码对待：面板上只显示是否已配置
         </div>
-      )}
+      </div>
     </Card>
   )
 }

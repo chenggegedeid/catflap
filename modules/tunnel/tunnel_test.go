@@ -1,10 +1,8 @@
-package proxy
+package tunnel
 
 import (
 	"strings"
 	"testing"
-
-	"github.com/chenggegedeid/catflap/modules/proxy/model"
 )
 
 // 掩码 token 不能被当成真 token 存回去。
@@ -12,9 +10,9 @@ import (
 // 面板回显凭证时给的是一串圆点，用户没改动就会原样提交回来——照单全收的话，
 // 用户只是想改个"启用"勾，结果把 token 冲成了一串圆点，隧道再也起不来。
 func TestMaskedTokenIsNotStored(t *testing.T) {
-	var got model.TunnelConfig
+	var got Config
 	apply := func(in string, clear bool) {
-		cfg := model.TunnelConfig{Token: "real-token-value"}
+		cfg := Config{Token: "real-token-value"}
 		if clear {
 			cfg.Token = ""
 		} else if in != "" && !isMasked(in) {
@@ -59,24 +57,24 @@ func TestIsMasked(t *testing.T) {
 // 未启用 / 缺二进制 / 缺 token 都要给出能照着做的报错，而不是笼统失败
 func TestStartTunnelRequiresConfig(t *testing.T) {
 	// 没启用
-	setTunnelConfig(model.TunnelConfig{})
-	if err := StartTunnel(); err != errTunnelDisabled {
+	setTunnelConfig(Config{})
+	if err := Start(); err != errTunnelDisabled {
 		t.Fatalf("未启用时应返回 errTunnelDisabled，got %v", err)
 	}
 
 	// 启用了但没 token
-	setTunnelConfig(model.TunnelConfig{Enabled: true})
-	if err := StartTunnel(); err != errNoTunnelToken {
+	setTunnelConfig(Config{Enabled: true})
+	if err := Start(); err != errNoTunnelToken {
 		t.Fatalf("缺 token 时应返回 errNoTunnelToken，got %v", err)
 	}
 
 	// 有 token 但二进制不存在（故意指向一个肯定不存在的路径）
-	setTunnelConfig(model.TunnelConfig{
+	setTunnelConfig(Config{
 		Enabled:    true,
 		Token:      "x",
 		BinaryPath: "/nonexistent/cloudflared-for-test",
 	})
-	if err := StartTunnel(); err != errNoCloudflared {
+	if err := Start(); err != errNoCloudflared {
 		t.Fatalf("找不到二进制时应返回 errNoCloudflared，got %v", err)
 	}
 }
@@ -94,16 +92,14 @@ func isMasked(s string) bool {
 	return true
 }
 
-func setTunnelConfig(cfg model.TunnelConfig) {
-	Runtime.mu.Lock()
-	Runtime.Config.Tunnel = cfg
-	Runtime.mu.Unlock()
+func setTunnelConfig(cfg Config) {
+	Runtime.SetConfig(cfg)
 }
 
 // TunnelState 不该把 token 本身吐出去，只能说"填没填"
 func TestTunnelStateLeaksNoToken(t *testing.T) {
-	setTunnelConfig(model.TunnelConfig{Enabled: true, Token: "super-secret-token"})
-	st := TunnelState()
+	setTunnelConfig(Config{Enabled: true, Token: "super-secret-token"})
+	st := CurrentState()
 	if !st.TokenSet {
 		t.Fatal("填了 token 应回 tokenSet=true")
 	}
