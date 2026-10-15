@@ -24,6 +24,8 @@ func SystemRoutersProtected(g *gin.RouterGroup) {
 
 	g.GET("system/log/days", app.LogDaysView)
 	g.GET("system/log", app.LogListView)
+	// 分类摘要：只回各模块的条数与异常数，折叠态用（不读内容，省得打开页面就卡）
+	g.GET("system/log/summary", app.LogSummaryView)
 
 	// 功能管理：有哪些组件、能不能开关、现在什么状态
 	g.GET("system/components", app.ListComponents)

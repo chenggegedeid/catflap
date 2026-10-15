@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"github.com/chenggegedeid/catflap/modules/traffic"
+
 	"context"
 	"crypto/tls"
 	"errors"
@@ -50,6 +52,10 @@ func serve(router *Router, w http.ResponseWriter, r *http.Request) {
 		writeAccessDenied(w, entry.Site, r)
 		return
 	}
+
+	// 把站点 ID 带给上面的采集层（它要按服务分组统计流量）。
+	// 在这里塞是因为只有这里知道命中了哪个站点。
+	r = traffic.WithSiteID(r, entry.Site.ID)
 
 	entry.proxy.ServeHTTP(w, r)
 }

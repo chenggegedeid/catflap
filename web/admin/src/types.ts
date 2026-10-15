@@ -55,9 +55,29 @@ export interface ComponentsView {
   disabled: string[]
 }
 
+/** 一个模块的日志条数与异常数（折叠态显示用） */
+export interface LogModuleStat {
+  module: string
+  total: number
+  warn: number
+  error: number
+  lastAt: string
+}
+
+export interface LogSummary {
+  modules: LogModuleStat[]
+  total: number
+  warn: number
+  error: number
+  /** 只统计了最近一段（日志很大时），界面上说明一下 */
+  truncated: boolean
+}
+
 export interface LogEntry {
   time: string
   level: string
+  /** 日志所属模块（stun / proxy / ddns ...）；老日志没有这一段，会是空串 */
+  module: string
   caller: string
   message: string
 }

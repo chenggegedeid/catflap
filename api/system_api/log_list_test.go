@@ -111,3 +111,54 @@ func TestDayRe(t *testing.T) {
 		}
 	}
 }
+
+// 带模块段的新格式要能解析出模块名 —— 这是日志分类功能的基础，
+// 解析不出来界面上的分类就永远是空的。
+func TestParseLogWithModule(t *testing.T) {
+	raw := []byte(`[2026-10-15 17:20:31] [info] [stun] [scheduler.go:114] 打洞成功 外部端口 35545
+[2026-10-15 17:20:33] [warn] [proxy] [accesslog.go:53] 来源 45.155.204.11 被拒绝
+[2026-10-15 17:20:35] [error] [ddns] [ddns_syncrecord.go:124] 同步失败：Authentication error`)
+
+	got := parseLog(raw)
+	if len(got) != 3 {
+		t.Fatalf("应有 3 条，实际 %d", len(got))
+	}
+
+	want := []struct{ module, level, caller string }{
+		{"stun", "info", "scheduler.go:114"},
+		{"proxy", "warn", "accesslog.go:53"},
+		{"ddns", "error", "ddns_syncrecord.go:124"},
+	}
+	for i, w := range want {
+		if got[i].Module != w.module {
+			t.Errorf("第 %d 条模块：期望 %s，实际 %q", i, w.module, got[i].Module)
+		}
+		if got[i].Level != w.level {
+			t.Errorf("第 %d 条级别：期望 %s，实际 %q", i, w.level, got[i].Level)
+		}
+		if got[i].Caller != w.caller {
+			t.Errorf("第 %d 条 caller：期望 %s，实际 %q", i, w.caller, got[i].Caller)
+		}
+	}
+
+	// 正文不能被模块段吃掉
+	if got[0].Message != "打洞成功 外部端口 35545" {
+		t.Errorf("正文被解析歪了：%q", got[0].Message)
+	}
+}
+
+// 老日志（无模块段）的清理：模块为空、正文完整
+func TestParseLogLegacyHasNoModule(t *testing.T) {
+	raw := []byte(`[2026-09-18 00:00:01] [info] [network.go:73,gith.../stun.updateNetworkAddress] 正文在这里`)
+
+	got := parseLog(raw)
+	if len(got) != 1 {
+		t.Fatalf("应有 1 条，实际 %d", len(got))
+	}
+	if got[0].Module != "" {
+		t.Errorf("老格式不该解析出模块名，实际 %q", got[0].Module)
+	}
+	if got[0].Message != "正文在这里" {
+		t.Errorf("老格式正文解析错了：%q", got[0].Message)
+	}
+}

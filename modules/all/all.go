@@ -24,6 +24,7 @@ import (
 	_ "github.com/chenggegedeid/catflap/modules/stun"
 	_ "github.com/chenggegedeid/catflap/modules/system"
 	_ "github.com/chenggegedeid/catflap/modules/task"
+	_ "github.com/chenggegedeid/catflap/modules/traffic"
 	_ "github.com/chenggegedeid/catflap/modules/tunnel"
 	_ "github.com/chenggegedeid/catflap/modules/update"
 	_ "github.com/chenggegedeid/catflap/modules/webhook"
