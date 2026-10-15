@@ -6,20 +6,34 @@ import { pages, type PageKey, type PageMeta } from './registry'
 import type { ComponentHealth, ComponentInfo } from '../types'
 
 /**
- * 组件名 → 页面。功能管理页据此把「stun」这种人看的机器名换成界面上的
+ * 按组件名找出它对应的页面。功能管理页据此把「stun」这种机器名换成界面上的
  * 「STUN 内网穿透」，并给出「打开这一页」的入口。
  *
  * 从注册表推出来而不是再写一张表：那条对应关系本来就已经写在注册表里了
  * （PageMeta.component），再抄一遍就是第二个真相源，改了注册表忘了改这里
  * 就会出现「点进去是空白页」。
+ *
+ * # 为什么是函数，不是模块顶层的常量
+ *
+ * 这里有一条循环依赖：registry.tsx 引入本文件（把 ComponentManager 挂进
+ * pages），本文件又从 registry.tsx 取 pages。谁先求值由打包顺序决定 ——
+ * 一旦本文件先被求值，顶层就去 Object.keys(pages) 的话，pages 还是
+ * undefined，Object.keys(undefined) 抛 TypeError，整个 bundle 停在这一行，
+ * React 根本没挂载，后台就是一片白屏（控制台里只有一句
+ * "Cannot convert undefined or null to object"，看不出跟页面有关）。
+ *
+ * 推迟到渲染时才读，那时注册表必然已经初始化完毕。页面只有十来个，
+ * 每次渲染扫一遍的开销可以忽略，不值得为它引入缓存。
  */
-const pageByComponent: Partial<Record<string, { key: PageKey; meta: PageMeta }>> = {}
-for (const key of Object.keys(pages) as PageKey[]) {
-  // 这里必须显式标注成 PageMeta：pages 用了 satisfies，每个值的类型都是它自己的
-  // 字面量形状，没写 component 的那几条（dashboard、logs……）在联合类型上
-  // 根本没有这个属性，直接取会报 TS2339。
-  const meta: PageMeta = pages[key]
-  if (meta.component) pageByComponent[meta.component] = { key, meta }
+function pageByComponent(name: string): { key: PageKey; meta: PageMeta } | undefined {
+  for (const key of Object.keys(pages) as PageKey[]) {
+    // 这里必须显式标注成 PageMeta：pages 用了 satisfies，每个值的类型都是它自己的
+    // 字面量形状，没写 component 的那几条（dashboard、logs……）在联合类型上
+    // 根本没有这个属性，直接取会报 TS2339。
+    const meta: PageMeta = pages[key]
+    if (meta.component === name) return { key, meta }
+  }
+  return undefined
 }
 
 type Tone = 'ok' | 'warn' | 'bad' | 'idle'
@@ -125,7 +139,7 @@ export function ComponentManager() {
         ) : (
           <ul className="divide-y divide-slate-100">
             {list.map((c) => {
-              const linked = pageByComponent[c.name]
+              const linked = pageByComponent(c.name)
               const Icon = linked?.meta.icon ?? Blocks
               const h = health[c.name]
               const working = busy === c.name
