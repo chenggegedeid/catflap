@@ -28,6 +28,9 @@ type SiteSaveRequest struct {
 
 	Enabled     bool   `json:"enabled"`
 	Description string `json:"description"`
+
+	// Access IP 门禁：谁能访问这个站点。留空模式 = 谁都能访问。
+	Access proxymodel.AccessControl `json:"access"`
 }
 
 func (r SiteSaveRequest) toModel() proxymodel.Site {
@@ -43,6 +46,7 @@ func (r SiteSaveRequest) toModel() proxymodel.Site {
 		CertID:       r.CertID,
 		Enabled:      r.Enabled,
 		Description:  r.Description,
+		Access:       r.Access,
 	}
 }
 

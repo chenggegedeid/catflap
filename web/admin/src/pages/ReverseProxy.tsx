@@ -340,6 +340,8 @@ interface SiteFormState {
   certId: string
   enabled: boolean
   description: string
+  accessMode: '' | 'allow' | 'deny'
+  accessRules: string
 }
 
 function SiteModal({
@@ -366,6 +368,8 @@ function SiteModal({
     certId: String(initial?.certId ?? 0),
     enabled: initial?.enabled ?? true,
     description: initial?.description ?? '',
+    accessMode: initial?.access?.mode ?? '',
+    accessRules: (initial?.access?.rules ?? []).join('\n'),
   }))
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -419,6 +423,14 @@ function SiteModal({
     certId: form.https ? Number(form.certId) || 0 : 0,
     enabled: form.enabled,
     description: form.description.trim(),
+    // 一行一条规则；空行和多余空格丢掉，后端只认干净的 IP / CIDR
+    access: {
+      mode: form.accessMode,
+      rules: form.accessRules
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    },
   })
 
   const runTest = async () => {
@@ -678,6 +690,53 @@ function SiteModal({
         />
       </label>
 
+      {/* ===================== 访问控制 ===================== */}
+      <div className="rounded-xl ring-1 ring-slate-200">
+        <div className="flex items-center justify-between gap-2 px-3 pt-2.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            访问控制（IP 门禁）
+          </div>
+          <select
+            value={form.accessMode}
+            onChange={(e) => setForm((p) => ({ ...p, accessMode: e.target.value as SiteFormState['accessMode'] }))}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400"
+          >
+            <option value="">所有人可访问</option>
+            <option value="allow">只允许名单内</option>
+            <option value="deny">只拒绝名单内</option>
+          </select>
+        </div>
+
+        {form.accessMode !== '' && (
+          <>
+            <textarea
+              value={form.accessRules}
+              onChange={(e) => setForm((p) => ({ ...p, accessRules: e.target.value }))}
+              rows={3}
+              placeholder={'每行一条，如：\n203.0.113.0/24\n198.51.100.7'}
+              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-400"
+            />
+            <div className="px-3 pb-2.5 pt-1.5 text-[11px] leading-relaxed text-slate-400">
+              {form.accessMode === 'allow' ? '只有' : '被'}
+              名单内的 IP 会被{form.accessMode === 'allow' ? '放行，其余一律拒绝' : '拒绝，其余放行'}。
+              可写单个 IP 或 CIDR 网段——家宽 IP 会变，<span className="font-mono">203.0.113.0/24</span> 这种网段更耐用。
+              判断依据是 TCP 对端地址，<span className="font-semibold">伪造 X-Forwarded-For 无效</span>。
+              {form.accessMode === 'allow' && (
+                <div className="mt-1 text-amber-600">
+                  注意：只填白名单却不填内容等于全放行；反过来把自己关在外面就得去改配置文件了，不确定先别开。
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        {form.accessMode === '' && (
+          <div className="px-3 pb-2.5 pt-1.5 text-[11px] leading-relaxed text-slate-400">
+            服务暴露到公网后，光靠「域名没人知道」不算防护——域名会出现在证书透明日志里，扫描器也在扫整个网段
+          </div>
+        )}
+      </div>
+
       <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
         <input
           type="checkbox"
@@ -838,6 +897,7 @@ export function ReverseProxy() {
         certId: s.certId,
         enabled: s.enabled,
         description: s.description,
+        access: s.access ?? { mode: '', rules: [] },
       })
       toast(`${s.backend}：${probe.message}`)
     } catch (e) {

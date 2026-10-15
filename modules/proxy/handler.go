@@ -44,6 +44,13 @@ func serve(router *Router, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 门禁：先看这个来源能不能访问该站点，再谈转发。
+	// 放在 Match 之后是因为规则挂在站点上，得先知道命中了哪个站点。
+	if !accessAllowed(entry.Site, r) {
+		writeAccessDenied(w, entry.Site, r)
+		return
+	}
+
 	entry.proxy.ServeHTTP(w, r)
 }
 

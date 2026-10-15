@@ -14,6 +14,7 @@ import type {
   NetInterface,
   ProxyConfig,
   ProxyEntry,
+  ProxyAccess,
   ProxyProbeResult,
   ProxySite,
   RedirectConfig,
@@ -626,6 +627,8 @@ export interface ProxySitePayload {
   certId: number
   enabled: boolean
   description: string
+  /** IP 门禁；mode 为空串表示不限制 */
+  access: ProxyAccess
 }
 
 export const addProxySite = (body: ProxySitePayload) =>
