@@ -1,8 +1,13 @@
 package device_api
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/device"
+	"github.com/chenggegedeid/catflap/modules/proxy"
+	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/utils/res"
 
 	"github.com/gin-gonic/gin"
@@ -54,9 +59,80 @@ func (DeviceApi) DeviceDeleteView(c *gin.Context) {
 		res.FailWithMsg("id 不能为空", c)
 		return
 	}
+	// 删之前先看有没有服务挂着：设备删了那些服务会静默失效
+	// （配置还在、但不再运行），用户只会看到"不工作了"却看不出原因
+	d, ok := device.Get(cr.ID)
+	if !ok {
+		res.FailWithMsg("设备不存在", c)
+		return
+	}
+	if used := servicesOnDevice(d.DeviceID, d.IP); len(used) > 0 {
+		res.FailWithMsg(
+			"这台设备上还有 "+strconv.Itoa(len(used))+" 个服务，先删掉它们再删设备："+
+				strings.Join(used, "、"), c)
+		return
+	}
+
 	if err := device.Delete(cr.ID); err != nil {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
 	res.OkWithMsg("已删除", c)
+}
+
+// servicesOnDevice 这台设备上挂了哪些服务（给删除前检查用）。
+//
+// **在 api 层做**：device 模块不认识服务（那是各业务模块的事），
+// 而 proxy 和 stun 也不互相依赖。这层能看到两边，所以由它来数。
+//
+// 为什么要检查：穿透服务是按 deviceId 关联的，设备一删，那些服务
+// 就成了孤儿 —— 配置里还在、但 hydrate 时匹配不到设备，
+// 于是**静默地不再运行**。用户只会看到"服务不工作了"，看不出原因。
+// 这种静默失效比报错难查得多，所以宁可不让删。
+func servicesOnDevice(id uint, ip string) []string {
+	var out []string
+
+	// 穿透服务：按 deviceId
+	for _, s := range stun.Runtime.Config.Services {
+		if s.DeviceID == id {
+			out = append(out, "穿透："+nameOr(s.Name, "未命名服务"))
+		}
+	}
+
+	// 反代站点 / 端口转发：按 IP
+	cfg := proxy.Runtime.Snapshot()
+	for _, s := range cfg.Sites {
+		if hostOfAddr(s.Backend) == ip {
+			label := s.Description
+			if label == "" && len(s.Hosts) > 0 {
+				label = s.Hosts[0]
+			}
+			out = append(out, "站点："+nameOr(label, "未命名站点"))
+		}
+	}
+	for _, f := range cfg.Forwards {
+		if hostOfAddr(f.Target) == ip {
+			out = append(out, "转发："+nameOr(f.Description, "端口 "+itoa(f.ListenPort)))
+		}
+	}
+	return out
+}
+
+func nameOr(s, fallback string) string {
+	if strings.TrimSpace(s) == "" {
+		return fallback
+	}
+	return s
+}
+
+func hostOfAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if i := strings.LastIndex(addr, ":"); i > 0 {
+		return addr[:i]
+	}
+	return addr
+}
+
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }
