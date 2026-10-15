@@ -786,7 +786,16 @@ export interface NotifyRuleSavePayload {
   enabled: boolean
 }
 
-export const getNotifyConfig = () => request<NotifyConfigView>('/api/notify/config')
+export async function getNotifyConfig(): Promise<NotifyConfigView> {
+  const data = await request<NotifyConfigView>('/api/notify/config')
+  // Go 的 nil 切片会序列化成 null，前端拿到 null 取 .length 就是 TypeError，
+  // 整个页面白屏且看不出是哪个字段。后端已经给空切片了，这里再兜一层 ——
+  // 这种崩法排查成本太高，不值得只靠一边保证。
+  data.channels = (data.channels ?? []).map((c) => ({ ...c, usedByRules: c.usedByRules ?? [] }))
+  data.rules = data.rules ?? []
+  data.events = data.events ?? []
+  return data
+}
 
 export const saveNotifyChannel = (body: NotifyChannelSavePayload) =>
   request<{ id: string }>('/api/notify/channel', { method: 'POST', body: JSON.stringify(body) })

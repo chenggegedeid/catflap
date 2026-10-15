@@ -97,7 +97,7 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	svc.Enabled = cr.Enabled
 	svc.Description = cr.Description
 	svc.WebHookConfig = cr.WebHookConfig
-	svc.ChannelIDs = cr.ChannelIDs
+	svc.ChannelIDs = nonNilStrings(cr.ChannelIDs)
 	svc.Redirect = cr.Redirect
 	oldMCEntry := svc.MCEntry
 	svc.MCEntry = normalizeMCEntry(cr.Protocol, cr.MCEntry)
@@ -125,4 +125,16 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	stun.Runtime.Scheduler.StartService(device, &device.Services[serviceIndex])
 
 	res.OkWithData(*svc, c)
+}
+
+// nonNilStrings nil 切片换成空切片。
+//
+// Go 把 nil 切片序列化成 null，前端拿到 null 再取 .length / .includes 就是
+// TypeError —— 整个页面白屏。这种崩法排查成本很高（控制台只有一句
+// "Cannot read properties of null"，看不出是哪个字段），所以宁可在这里多一行。
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }

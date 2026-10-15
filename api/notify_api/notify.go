@@ -43,17 +43,34 @@ func (NotifyApi) NotifyConfigView(c *gin.Context) {
 
 	channels := make([]channelView, 0, len(cfg.Channels))
 	for _, ch := range cfg.Channels {
+		// 注意：这几个切片必须给**空切片**而不是 nil。
+		// Go 把 nil 切片序列化成 null，前端拿到 null 再取 .length 就是
+		// TypeError —— 整个页面白屏，而且控制台只有那么一句，
+		// 看不出跟哪个字段有关。这条坑在 home 模块也踩过一次。
+		used := notify.Runtime.ChannelUsedByRules(ch.ID)
+		if used == nil {
+			used = []string{}
+		}
 		channels = append(channels, channelView{
 			Channel:     ch,
 			Config:      maskSecret(ch.Type, ch.Config),
-			UsedByRules: notify.Runtime.ChannelUsedByRules(ch.ID),
+			UsedByRules: used,
 		})
+	}
+
+	rules := cfg.Rules
+	if rules == nil {
+		rules = []notify.Rule{}
+	}
+	events := notify.AllEvents()
+	if events == nil {
+		events = []notify.EventMeta{}
 	}
 
 	res.OkWithData(ConfigViewResponse{
 		Channels:              channels,
-		Rules:                 cfg.Rules,
-		Events:                notify.AllEvents(),
+		Rules:                 rules,
+		Events:                events,
 		Migrated:              notify.IsMigrated(),
 		CooldownSeconds:       cfg.CooldownSeconds,
 		LegacyWebhookFallback: cfg.LegacyWebhookFallback,

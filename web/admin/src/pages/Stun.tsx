@@ -588,7 +588,7 @@ function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState 
     showOnHome,
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
-    channelIds: [...(svc.channelIds ?? [])],
+    channelIds: [...(svc.channelIds ?? [])],  // 后端可能是 null，见 notify 的同类修复
     redirect: { ...emptyRedirect, ...(svc.redirect ?? {}) },
     mcEntry: { ...emptyMCEntry, ...(svc.mcEntry ?? {}) },
   }
@@ -616,7 +616,7 @@ function serviceToPayload(deviceId: number, svc: StunService): api.StunServicePa
     enabled: svc.enabled !== false,
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
-    channelIds: [...(svc.channelIds ?? [])],
+    channelIds: [...(svc.channelIds ?? [])],  // 后端可能是 null，见 notify 的同类修复
     redirect: { ...emptyRedirect, ...(svc.redirect ?? {}) },
     mcEntry: { ...emptyMCEntry, ...(svc.mcEntry ?? {}) },
   }
@@ -1224,13 +1224,13 @@ function ServiceModal({
                     <label key={ch.id} className="flex cursor-pointer items-center gap-2 text-xs">
                       <input
                         type="checkbox"
-                        checked={form.channelIds.includes(ch.id)}
+                        checked={(form.channelIds ?? []).includes(ch.id)}
                         onChange={(e) =>
                           setForm((p) => ({
                             ...p,
                             channelIds: e.target.checked
-                              ? [...p.channelIds, ch.id]
-                              : p.channelIds.filter((id) => id !== ch.id),
+                              ? [...(p.channelIds ?? []), ch.id]
+                              : (p.channelIds ?? []).filter((id) => id !== ch.id),
                           }))
                         }
                       />
@@ -1240,7 +1240,7 @@ function ServiceModal({
                       </span>
                     </label>
                   ))}
-                  {form.channelIds.length === 0 && (
+                  {(form.channelIds ?? []).length === 0 && (
                     <div className="pt-1 text-[11px] text-slate-400">
                       一个都不选 = 这个服务不发通知。
                     </div>
