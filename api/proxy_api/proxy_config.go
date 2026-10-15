@@ -16,8 +16,6 @@ type ProxyConfigView struct {
 	Entry     EntryView           `json:"entry"`
 	Listeners []proxy.ListenState `json:"listeners"`
 	Sites     []proxymodel.Site   `json:"sites"`
-	// Tunnel Cloudflare Tunnel 的运行时状态（token 不回显，只给 tokenSet）
-	Tunnel proxymodel.TunnelState `json:"tunnel"`
 }
 
 // EntryView 两个默认入口的设置。
@@ -40,7 +38,6 @@ func (ProxyApi) ProxyConfigView(c *gin.Context) {
 		Entry:     buildEntryView(cfg),
 		Listeners: proxy.ListenStates(),
 		Sites:     cfg.Sites,
-		Tunnel:    proxy.TunnelState(),
 	}, c)
 }
 

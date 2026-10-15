@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  Cloud,
   Bell,
   Blocks,
   CalendarClock,
@@ -24,6 +25,7 @@ import { ReverseProxy } from './ReverseProxy'
 import { Settings } from './Settings'
 import { Stun } from './Stun'
 import { Task } from './Task'
+import { Tunnel } from './Tunnel'
 import { Wol } from './Wol'
 
 /**
@@ -164,6 +166,12 @@ export const pages = {
     icon: FileText,
     element: <Logs />,
   },
+  tunnel: {
+    label: 'Tunnel',
+    icon: Cloud,
+    subtitle: 'CGNAT 下不带端口的最干净出口',
+    element: <Tunnel />,
+  },
   notify: {
     label: '通知',
     icon: Bell,
@@ -190,7 +198,7 @@ export interface NavGroupDef {
  */
 export const pageGroups = [
   { keys: ['dashboard'] },
-  { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'cert', 'wol'] },
+  { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'tunnel', 'cert', 'wol'] },
   { title: '自动化', keys: ['task'] },
   { title: '系统与管理', keys: ['components', 'settings', 'logs', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]

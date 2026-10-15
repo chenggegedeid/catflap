@@ -1,4 +1,4 @@
-package proxy
+package tunnel
 
 import (
 	"os"
@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/chenggegedeid/catflap/modules/proxy/model"
 
 	"github.com/sirupsen/logrus"
 )
@@ -26,7 +24,7 @@ import (
 
 const defaultCloudflared = "cloudflared"
 
-// tunnel 隧道进程的运行时状态。整个包里只有一份，用互斥锁护着。
+// tunnelRuntime 隧道进程的运行时状态。整个包里只有一份，用互斥锁护着。
 type tunnelRuntime struct {
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -36,14 +34,14 @@ type tunnelRuntime struct {
 
 var tunnelRt tunnelRuntime
 
-// TunnelState 给面板看的当前状态
-func TunnelState() model.TunnelState {
+// CurrentState 给面板看的当前状态
+func CurrentState() State {
 	cfg := currentTunnelConfig()
 
 	tunnelRt.mu.Lock()
 	defer tunnelRt.mu.Unlock()
 
-	st := model.TunnelState{
+	st := State{
 		Running:    tunnelRt.cmd != nil,
 		Message:    tunnelRt.msg,
 		TokenSet:   strings.TrimSpace(cfg.Token) != "",
@@ -58,10 +56,8 @@ func TunnelState() model.TunnelState {
 	return st
 }
 
-func currentTunnelConfig() model.TunnelConfig {
-	Runtime.mu.RLock()
-	defer Runtime.mu.RUnlock()
-	return Runtime.Config.Tunnel
+func currentTunnelConfig() Config {
+	return Runtime.Snapshot()
 }
 
 // resolveCloudflared 找到要用的 cloudflared。
@@ -82,8 +78,8 @@ func resolveCloudflared(configured string) string {
 	return ""
 }
 
-// StartTunnel 拉起 cloudflared。已经跑着就什么都不做。
-func StartTunnel() error {
+// Start 拉起 cloudflared。已经跑着就什么都不做。
+func Start() error {
 	cfg := currentTunnelConfig()
 	if !cfg.Enabled {
 		return errTunnelDisabled
@@ -148,8 +144,8 @@ func StartTunnel() error {
 	return nil
 }
 
-// StopTunnel 停掉 cloudflared
-func StopTunnel() {
+// Stop 停掉 cloudflared
+func Stop() {
 	tunnelRt.mu.Lock()
 	cmd := tunnelRt.cmd
 	tunnelRt.cmd = nil
@@ -173,17 +169,17 @@ func StopTunnel() {
 	logrus.Info("[tunnel] 已停止")
 }
 
-// SyncTunnel 让运行状态跟上配置：开了就确保跑着，关了就确保停着。
-// 配置保存后和程序启动时各调一次。
-func SyncTunnel() {
+// Sync 让运行状态跟上配置：开了就确保跑着，关了就确保停着。
+// 配置保存后调一次 —— 用户点保存就该看到状态变，不用等重启服务。
+func Sync() {
 	cfg := currentTunnelConfig()
 	if cfg.Enabled {
-		if err := StartTunnel(); err != nil && err != errTunnelDisabled {
+		if err := Start(); err != nil && err != errTunnelDisabled {
 			logrus.Warnf("[tunnel] 未能启动: %v", err)
 		}
 		return
 	}
-	StopTunnel()
+	Stop()
 }
 
 // tunnelLogWriter 把 cloudflared 的输出接成日志行。

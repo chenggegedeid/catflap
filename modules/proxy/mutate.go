@@ -292,14 +292,3 @@ func SetAccessLog(on bool) error {
 		return nil
 	})
 }
-
-// UpdateTunnel 改隧道配置。回调里只改字段，保存和落盘由 Update 统一做。
-//
-// 进程本身的启停用 SyncTunnel，不要在回调里做——那会拿着锁去启子进程，
-// 启得慢一点就把配置写入也堵住。
-func UpdateTunnel(fn func(cfg *model.TunnelConfig)) error {
-	return Runtime.Update(func(cfg *model.ProxyConfig) error {
-		fn(&cfg.Tunnel)
-		return nil
-	})
-}

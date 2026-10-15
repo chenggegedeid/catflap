@@ -21,9 +21,6 @@ func InitProxy() error {
 	Runtime.mu.Unlock()
 
 	core.OnShutdown(func() {
-		// 隧道是 Catflap 拉起来的子进程，退出时必须带走，不然会留下一个孤儿
-		// 进程占着隧道（下次启动再拉一条，CF 那边就看到两条同名隧道在抢）
-		StopTunnel()
 		Runtime.pool.StopAll()
 		if err := SaveConfig(Runtime.Snapshot()); err != nil {
 			logrus.Error("保存反向代理配置失败：", err)
@@ -35,9 +32,6 @@ func InitProxy() error {
 	if err := Runtime.pool.Apply(cfg); err != nil {
 		logrus.Error("[proxy] ", err)
 	}
-
-	// 隧道放在监听之后：它是独立的一条对外通路，起不来也不该挡住本地反代
-	SyncTunnel()
 
 	if n := len(Runtime.CurrentRouter().Hosts()); n > 0 {
 		logrus.Infof("[proxy] 已加载 %d 个站点", n)
