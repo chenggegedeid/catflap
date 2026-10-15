@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ExternalLink, KeyRound, Network, RefreshCw, Save, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import {
+  MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
   changePassword,
   checkUpdate,
@@ -30,6 +31,7 @@ export function Settings() {
 }
 
 function ChangePassword() {
+  const [username, setUsername] = useState('')
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -48,6 +50,10 @@ function ChangePassword() {
       setErr(`新密码至少 ${MIN_PASSWORD_LENGTH} 位`)
       return
     }
+    if (newPassword.length > MAX_PASSWORD_LENGTH) {
+      setErr(`新密码最多 ${MAX_PASSWORD_LENGTH} 位`)
+      return
+    }
     if (newPassword === oldPassword) {
       setErr('新密码和当前密码一样')
       return
@@ -61,12 +67,15 @@ function ChangePassword() {
     try {
       // 后端改完密码会换掉签名密钥，旧 token 立刻作废，
       // 顺手回一个新的——不存下来这一页下一个请求就变成未登录了
-      const { token } = await changePassword(oldPassword, newPassword)
-      setToken(token)
+      const res = await changePassword(oldPassword, newPassword, username)
+      setToken(res.token)
       setOldPassword('')
       setNewPassword('')
       setConfirm('')
-      setDone('密码已改好。其他设备上原来登着的都掉线了，要用新密码重新登录')
+      setUsername('')
+      setDone(
+        '改好了。其他设备上原来登着的都掉线了，要用新的用户名和密码重新登录',
+      )
     } catch (e) {
       setErr(e instanceof Error ? e.message : '修改失败')
     } finally {
@@ -79,13 +88,25 @@ function ChangePassword() {
       <CardHeader title="修改密码" />
 
       <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
-        Catflap 只有一个管理员，没有用户名，登录就是这一串密码，所以它得够长。
+        登录要同时给用户名和密码。连续错 13 次会锁 3 分钟，**这个锁是按来源 IP
+        算的** —— 别人一直试只会把他自己挡住，你从别的地方照样能进来。
         <br />
-        连续错 13 次会锁 3 分钟，挡得住别人一直试；但这个锁不分来源，别人也能拿它把你自己关在外面，
-        真正靠得住的还是密码本身。
+        用户名不区分大小写，登录时怎么敲都认。
       </div>
 
       <form onSubmit={submit} className="max-w-sm space-y-3">
+        <label className="block">
+          <div className={labelCls}>新的用户名（留空就不改）</div>
+          <input
+            type="text"
+            autoComplete="username"
+            maxLength={32}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="不改就留空"
+            className={fieldCls}
+          />
+        </label>
         <label className="block">
           <div className={labelCls}>当前密码</div>
           <input

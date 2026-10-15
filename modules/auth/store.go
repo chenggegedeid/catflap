@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -10,30 +12,71 @@ import (
 	"github.com/chenggegedeid/catflap/utils/pwd"
 )
 
-// MinPasswordLength 密码最短长度。
-// 这里没有用户名，别人想进来只能一串一串地试这个密码，
-// 所以长度基本就是全部的门槛，短密码等于没设。
-const MinPasswordLength = 8
+// 密码长度区间。
+//
+// 下限 6：加了用户名之后，攻击者要同时猜中"用户名 + 密码"，组合空间比
+// 只有密码时大得多，6 位够用；再强制加长只会让用户在便签上记密码。
+//
+// 上限 24：**主要不是安全考虑，是防误操作** —— 挡住"把一整段文字粘进
+// 密码框"这类情况（Argon2 对长输入照样算，但那种密码用户自己下次也敲不对）。
+// 24 位给了足够空间，既能用口令短语（如 "correct-horse-battery"），
+// 又不至于接受无限长。
+//
+// 注意方向：上限只在**设置新密码**时拦，登录时**不检查长度** ——
+// 否则历史上设过的超长密码会直接登不进去。见 checkNewPassword 的调用点。
+const (
+	MinPasswordLength = 6
+	MaxPasswordLength = 24
+)
 
 var (
 	ErrNotInitialized   = errors.New("尚未初始化")
 	ErrAlreadyInit      = errors.New("已初始化")
 	ErrWrongPassword    = errors.New("密码错误")
+	ErrWrongUsername    = errors.New("用户名错误")
 	ErrEmptyPassword    = errors.New("密码不能为空")
 	ErrPasswordTooShort = fmt.Errorf("密码至少 %d 位", MinPasswordLength)
+	ErrPasswordTooLong  = fmt.Errorf("密码最多 %d 位", MaxPasswordLength)
+	ErrEmptyUsername    = errors.New("用户名不能为空")
+	ErrUsernameBadChar  = errors.New("用户名只能包含字母、数字、下划线和点")
 	ErrPasswordBusy     = errors.New("密码校验繁忙，请稍后重试")
 	ErrLoginLimited     = errors.New("登录失败次数过多，请稍后重试")
 )
 
-// checkNewPassword 设置密码和修改密码共用的下限检查。
+// checkNewPassword 设置密码和修改密码共用的检查。
 // 前端也会拦一道，但接口谁都能直接调，服务端必须自己拦。
-// 按字符数不按字节数，八个汉字也算八位。
+// 按字符数不按字节数，六个汉字也算六位。
 func checkNewPassword(password string) error {
 	if password == "" {
 		return ErrEmptyPassword
 	}
-	if utf8.RuneCountInString(password) < MinPasswordLength {
+	n := utf8.RuneCountInString(password)
+	if n < MinPasswordLength {
 		return ErrPasswordTooShort
+	}
+	if n > MaxPasswordLength {
+		return ErrPasswordTooLong
+	}
+	return nil
+}
+
+// checkNewUsername 设置用户名时的检查。
+//
+// 限制字符集而不是放开：用户名会出现在日志和审计记录里，
+// 允许任意字符会带来日志注入（伪造换行插一条假的登录记录）。
+func checkNewUsername(username string) error {
+	u := NormalizeUsername(username)
+	if u == "" {
+		return ErrEmptyUsername
+	}
+	for _, r := range u {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-'
+		if !ok {
+			return ErrUsernameBadChar
+		}
+	}
+	if utf8.RuneCountInString(u) > 32 {
+		return errors.New("用户名最多 32 位")
 	}
 	return nil
 }
@@ -64,9 +107,15 @@ func (r *AuthRuntime) IsInitialized() bool {
 	return r.Config.Initialized
 }
 
-// Setup 首次设置 admin 密码，仅在未初始化时可用
-func (r *AuthRuntime) Setup(password string) error {
+// Setup 首次设置用户名与密码，仅在未初始化时可用。
+//
+// username 留空时用 DefaultUsername：老的安装流程只有密码，
+// 这里不能因为没传用户名就失败。
+func (r *AuthRuntime) Setup(username, password string) error {
 	if err := checkNewPassword(password); err != nil {
+		return err
+	}
+	if err := checkNewUsername(username); err != nil {
 		return err
 	}
 	// WithLock 内仍会二次检查；此处提前返回，避免初始化后继续执行昂贵的密码哈希。
@@ -91,15 +140,23 @@ func (r *AuthRuntime) Setup(password string) error {
 		if cfg.TokenTTLHours <= 0 {
 			cfg.TokenTTLHours = defaultTokenTTLHours
 		}
+		cfg.Username = NormalizeUsername(username)
 		cfg.PasswordHash = hash
 		cfg.Initialized = true
 		return nil
 	})
 }
 
-// Login 校验密码，成功返回签发的 token。
+// Login 校验用户名和密码，成功返回签发的 token。
+//
 // remember 为 true 时用「记住我」的长有效期，否则用默认的短有效期。
-func (r *AuthRuntime) Login(password string, remember bool) (string, error) {
+// remoteAddr 是 TCP 对端地址（"ip:port"），用于按来源限速 —— 必须是
+// Request.RemoteAddr 而不是 c.ClientIP()，见 clientKey 的说明。传空表示
+// 不判断来源（只受全局总闸约束）。
+//
+// 用户名的兼容处理：老配置没有 Username，此时任何用户名都接受
+// （用 DefaultUsername 补上）—— 否则升级后老用户会登不进去。
+func (r *AuthRuntime) Login(username, password, remoteAddr string, remember bool) (string, error) {
 	r.mu.RLock()
 	cfg := r.Config
 	r.mu.RUnlock()
@@ -107,13 +164,27 @@ func (r *AuthRuntime) Login(password string, remember bool) (string, error) {
 	if !cfg.Initialized {
 		return "", ErrNotInitialized
 	}
-	if !globalLoginFailureLimiter.begin(time.Now()) {
+
+	// 本机不限速：自己调试时输错密码不该被锁在外面
+	var key string
+	if k := clientKey(remoteAddr); !isExemptFromLimit(k) {
+		key = k
+	}
+
+	if !globalLoginFailureLimiter.begin(key, time.Now()) {
 		return "", ErrLoginLimited
 	}
 	loginResult := loginAttemptIgnored
 	defer func() {
-		globalLoginFailureLimiter.finish(loginResult, time.Now())
+		globalLoginFailureLimiter.finish(loginResult, key, time.Now())
 	}()
+
+	// 用户名不对就**别去算密码哈希**：Argon2 很慢，让攻击者拿它做 CPU 消耗
+	// 攻击太亏了。先判便宜的那个。
+	if !usernameMatches(cfg, username) {
+		loginResult = loginAttemptFailed
+		return "", ErrWrongUsername
+	}
 
 	matched, err := pwd.VerifyPassword(cfg.PasswordHash, password)
 	if errors.Is(err, pwd.ErrArgon2Busy) {
@@ -130,6 +201,20 @@ func (r *AuthRuntime) Login(password string, remember bool) (string, error) {
 	return jwt.GenerateToken(cfg.JwtSecret, tokenTTL(cfg.TokenTTLHours, remember))
 }
 
+// usernameMatches 这个用户名对不对。
+//
+// 老配置（Username 为空）一律放行：那种情况下"用户名"这个概念本来就不存在，
+// 拿它去比对只会把升级上来的用户锁在外面。
+func usernameMatches(cfg Config, username string) bool {
+	if strings.TrimSpace(cfg.Username) == "" {
+		return true
+	}
+	return subtle.ConstantTimeCompare(
+		[]byte(NormalizeUsername(username)),
+		[]byte(cfg.UsernameFor()),
+	) == 1
+}
+
 // ValidateToken 校验 token 是否有效
 func (r *AuthRuntime) ValidateToken(token string) bool {
 	r.mu.RLock()
@@ -144,13 +229,21 @@ func (r *AuthRuntime) ValidateToken(token string) bool {
 
 // ChangePassword 校验旧密码后更新为新密码，同时换掉 JwtSecret，返回新签发的 token。
 //
+// newUsername 传空表示"不改用户名"（只改密码）；传了就在本次一并改掉。
+//
 // 换 secret 是必须的：改密码通常是因为怀疑密码泄露了，而已经发出去的 token
 // 默认还能再用 7 天，不换 secret 的话拿着旧 token 的人照样进得来，改了等于没改。
 // 换掉之后所有旧 token 立刻失效，返回的新 token 给当前这个浏览器续上，
 // 其他设备上的登录状态会被踢掉，需要用新密码重新登录。
-func (r *AuthRuntime) ChangePassword(oldPassword, newPassword string) (string, error) {
+func (r *AuthRuntime) ChangePassword(oldPassword, newPassword, newUsername string) (string, error) {
 	if err := checkNewPassword(newPassword); err != nil {
 		return "", err
+	}
+	// 只在真的要改用户名时才校验：留空是"不改"，不该因为空值报错
+	if strings.TrimSpace(newUsername) != "" {
+		if err := checkNewUsername(newUsername); err != nil {
+			return "", err
+		}
 	}
 	r.mu.RLock()
 	cfg := r.Config
@@ -181,6 +274,9 @@ func (r *AuthRuntime) ChangePassword(oldPassword, newPassword string) (string, e
 	var ttlHours int
 	if err := r.WithLock(func(cfg *Config) error {
 		cfg.PasswordHash = hash
+		if strings.TrimSpace(newUsername) != "" {
+			cfg.Username = NormalizeUsername(newUsername)
+		}
 		cfg.JwtSecret = randomSecret()
 		if cfg.TokenTTLHours <= 0 {
 			cfg.TokenTTLHours = defaultTokenTTLHours
