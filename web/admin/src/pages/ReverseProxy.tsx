@@ -3,6 +3,7 @@ import {
   Radar,
   AlertCircle,
   ArrowRight,
+  Copy,
   ExternalLink,
   Globe,
   HardDrive,
@@ -1037,6 +1038,20 @@ export function ReverseProxy() {
     }
   }
 
+  /**
+   * 照着这条站点再开一个。
+   *
+   * ID 清零就是为了"新增"而不是"覆盖" —— 和穿透页的复制服务一个道理。
+   * 域名要换（同一个域名不能挂两条），所以清掉让用户重填；
+   * 其余（证书、门禁、后端、HTTPS 设置）都保留，省得再勾一遍。
+   */
+  const duplicateSite = (s: ProxySite) => {
+    setSiteModal({
+      open: true,
+      initial: { ...s, id: 0, hosts: [], showOnHome: false },
+    })
+  }
+
   const removeSite = async (s: ProxySite) => {
     if (!window.confirm(`确认删除站点 ${s.hosts?.[0] ?? `:${s.listenPort}`}？`)) return
     try {
@@ -1193,7 +1208,7 @@ export function ReverseProxy() {
         )}
       </Card>
 
-      {/* 站点表 */}
+      {/* 站点列表：卡片式，和穿透页的「设备列表」同一套布局 */}
       <Card className="!p-0">
         <div className="px-5 pt-4">
           <CardHeader
@@ -1259,25 +1274,36 @@ export function ReverseProxy() {
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            {/* 手机上列太窄会把中文压成一列一个字，给张表一个下限，窄屏改成横向滚动 */}
-            <table className="w-full min-w-[560px] text-sm">
-              <thead>
-                <tr className="bg-slate-50/60 text-xs text-slate-500">
-                  <th className="px-5 py-2.5 text-left font-medium">域名</th>
-                  <th className="w-8 py-2.5" />
-                  <th className="px-3 py-2.5 text-left font-medium">后端</th>
-                  <th className="px-5 py-2.5 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {sites.map((s) => {
+          /*
+           * 站点列表用**卡片**，和穿透页的服务卡片同一套布局。
+           *
+           * 为什么不用表格：两边都是"一堆可开关的入口"，操作方式应该一致 ——
+           * 用户在一个页面学会的操作，到另一个页面就该能直接用。
+           * 表格在小屏上还会把中文压成一列一个字，卡片不会。
+           */
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-3 px-5 py-4">
+            {sites.map((s) => {
                   const url = siteURL(entry, s)
                   const addr = siteAddr(entry, s)
+                  // 停用的站点本来就不该跑，别拿红色状态去吓人
+                  const off = s.enabled === false
                   return (
-                    <tr key={s.id} className="align-top text-slate-700 transition hover:bg-slate-50/60">
-                      <td className="px-5 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
+                    <div
+                      key={s.id}
+                      className={`flex flex-col rounded-xl border p-3 transition hover:border-blue-200 hover:shadow-md ${
+                        off ? 'border-slate-200/80 bg-slate-50/60' : 'border-slate-200/80'
+                      }`}
+                    >
+                      {/* 头部：状态点 + 域名 + 操作按钮组（顺序与穿透页一致） */}
+                      <div className="mb-2 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${
+                            off ? 'bg-slate-300' : 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
+                          }`}
+                        />
+                        <span className={`mr-0.5 flex-1 truncate text-sm font-bold ${
+                          off ? 'text-slate-400' : 'text-slate-800'
+                        }`}>
                           {url ? (
                             <a
                               href={url}
@@ -1297,6 +1323,60 @@ export function ReverseProxy() {
                               {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
                             </span>
                           )}
+                        </span>
+                        {/* 按钮组：顺序与穿透页的服务卡片一致
+                            （启停 / 主页 / 编辑 / 复制 / 删除） */}
+                        <button
+                          onClick={() => toggleSiteFlag(s, 'enabled')}
+                          disabled={flagBusy === s.id}
+                          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
+                            off
+                              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                              : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                          }`}
+                          title={off ? '点一下启用' : '点一下停用'}
+                        >
+                          <Power className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => toggleSiteFlag(s, 'showOnHome')}
+                          disabled={flagBusy === s.id}
+                          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
+                            s.showOnHome
+                              ? 'bg-blue-100 text-blue-600'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                          title={s.showOnHome ? '从主页移除' : '添加到主页'}
+                        >
+                          <HomeIcon className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => setSiteModal({ open: true, initial: s })}
+                          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                          title="编辑"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        {/* 复制：照着这条再开一个。多域名站点常常只差域名和后端，
+                            手填一遍容易漏（尤其是证书、门禁这些折叠起来的项） */}
+                        <button
+                          onClick={() => duplicateSite(s)}
+                          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                          title="照着这个再开一个"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => removeSite(s)}
+                          className="grid h-6 w-6 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
+                          title="删除"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+
+                      {/* 状态徽章 */}
+                      <div className="flex flex-wrap items-center gap-1.5">
                           {(s.hosts?.length ?? 0) === 0 && (
                             <span
                               title="没填域名，这个端口上来的请求全收"
@@ -1349,78 +1429,33 @@ export function ReverseProxy() {
                               剥前缀
                             </span>
                           )}
-                        </div>
-                        {s.description && <div className="mt-0.5 text-[11px] text-slate-400">{s.description}</div>}
-                      </td>
-                      <td className="py-3 text-center">
-                        <ArrowRight className="mx-auto h-3.5 w-3.5 text-slate-300" />
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-slate-600">
-                        {s.backend}
+                      </div>
+                      {s.description && (
+                        <div className="mt-1 text-[11px] text-slate-400">{s.description}</div>
+                      )}
+
+                      {/* 后端：这条站点把请求转到哪去。
+                          旁边放「测试后端」—— 它属于后端，不该混在头部按钮组里 */}
+                      <div className="mt-auto flex items-center gap-1 pt-1 font-mono text-xs text-slate-600">
+                        <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
+                        <span className="min-w-0 flex-1 truncate">{s.backend}</span>
                         {s.backendHttps && (
-                          <span className="ml-1 rounded bg-emerald-50 px-1 py-0.5 font-sans text-[10px] font-bold text-emerald-600">
+                          <span className="rounded bg-emerald-50 px-1 py-0.5 font-sans text-[10px] font-bold text-emerald-600">
                             TLS
                           </span>
                         )}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => testSite(s)}
-                            disabled={testingId === s.id}
-                            className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
-                            title="测试后端"
-                          >
-                            <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
-                          </button>
-                          {/* 一键启停：和穿透服务卡片一样，不用为了勾个框
-                              把整个表单打开一遍 */}
-                          <button
-                            onClick={() => toggleSiteFlag(s, 'enabled')}
-                            disabled={flagBusy === s.id}
-                            className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
-                              s.enabled
-                                ? 'text-emerald-500 hover:bg-emerald-50'
-                                : 'text-slate-300 hover:bg-slate-100'
-                            }`}
-                            title={s.enabled ? '已启用，点一下停用' : '已停用，点一下启用'}
-                          >
-                            <Power className="h-3 w-3" />
-                          </button>
-                          {/* 上主页：在导航主页上显示这个站点 */}
-                          <button
-                            onClick={() => toggleSiteFlag(s, 'showOnHome')}
-                            disabled={flagBusy === s.id}
-                            className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
-                              s.showOnHome
-                                ? 'text-blue-500 hover:bg-blue-50'
-                                : 'text-slate-300 hover:bg-slate-100'
-                            }`}
-                            title={s.showOnHome ? '在主页显示中，点一下取消' : '在导航主页上显示'}
-                          >
-                            <HomeIcon className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => setSiteModal({ open: true, initial: s })}
-                            className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
-                            title="编辑"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => removeSite(s)}
-                            className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-500"
-                            title="删除"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        <button
+                          onClick={() => testSite(s)}
+                          disabled={testingId === s.id}
+                          className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+                          title="测试后端能不能连上"
+                        >
+                          <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
+                        </button>
+                      </div>
+                    </div>
                   )
                 })}
-              </tbody>
-            </table>
           </div>
         )}
       </Card>
