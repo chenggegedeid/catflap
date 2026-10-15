@@ -56,8 +56,15 @@ func ProxyRouters(g *gin.RouterGroup) {
 		app.ProxySiteTestView,
 	)
 
-	// 局域网扫描：和穿透那边共用 core/lanscan 的实现。
-	// 站点表单里「扫描局域网选机器」用它填 backend。
+	// 站点表单的可选项（域名、网段、本机地址）。在 api 层聚合，
+	// 不让 proxy 依赖 ddns —— 见 proxy_site_options.go 的说明。
+	g.GET("proxy/site-options", app.ProxySiteOptionsView)
+
+	// 站点的一键开关（启用 / 显示在主页），和穿透服务卡片的操作对齐
+	g.POST("proxy/site/flag",
+		middleware.BindJsonMiddleware[proxy_api.SiteFlagRequest], app.ProxySiteFlagView)
+
+	// 局域网扫描：和穿透那边共用 core/lanscan 的实现
 	g.GET("proxy/lan/subnets", app.ProxyLanSubnetsView)
 	g.POST("proxy/lan/scan",
 		middleware.BindJsonMiddleware[proxy_api.ProxyLanScanRequest], app.ProxyLanScanView)

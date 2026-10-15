@@ -552,6 +552,8 @@ export interface ProxyListener {
 
 /** 一个站点，对应 nginx 的一个 server 块 */
 export interface ProxySite {
+  /** 在导航主页上显示这个站点（和穿透服务那个标记是一回事） */
+  showOnHome?: boolean
   id: number
   /** 域名，分流依据，至少一个。对应 nginx 的 server_name a.com www.a.com */
   hosts: string[]
@@ -785,4 +787,22 @@ export interface AuditConfigView {
   days: string[]
   suspiciousCount: number
   totalIPs: number
+}
+
+// ===================== 站点表单的可选项 =====================
+
+export interface ProxyDomainOption {
+  host: string
+  full: string
+  /** 这条解析走哪条栈：v4 / v6 / dual */
+  stack: string
+  provider: string
+  label: string
+  enabled: boolean
+}
+
+export interface ProxySiteOptions {
+  domains: ProxyDomainOption[]
+  subnets: LanSubnet[]
+  localIPs: string[]
 }
