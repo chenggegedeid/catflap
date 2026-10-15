@@ -16,6 +16,8 @@ import type {
   ProxyEntry,
   ProxyAccess,
   ProxyProbeResult,
+  ProxyTunnelPayload,
+  ProxyTunnelState,
   ProxySite,
   RedirectConfig,
   MCEntryConfig,
@@ -612,6 +614,17 @@ export const setProxyAccessLog = (enabled: boolean) =>
     method: 'POST',
     body: JSON.stringify({ enabled }),
   })
+
+// ===================== Cloudflare Tunnel =====================
+
+export const setProxyTunnel = (body: ProxyTunnelPayload) =>
+  request<ProxyTunnelState>('/api/proxy/tunnel', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const restartProxyTunnel = () =>
+  request<ProxyTunnelState>('/api/proxy/tunnel/restart', { method: 'POST' })
 
 export interface ProxySitePayload {
   hosts: string[]
