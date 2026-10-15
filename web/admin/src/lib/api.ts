@@ -10,6 +10,7 @@ import type {
   LanHost,
   LanSubnet,
   LogEntry,
+  LogSummary,
   NatTypeInfo,
   NetInterface,
   NotifyChannelType,
@@ -183,6 +184,17 @@ export const uploadUpdate = (file: File) => {
 // ===================== 运行日志 =====================
 
 export const getLogDays = () => request<string[]>('/api/system/log/days')
+
+/**
+ * 分类摘要：只回各模块的条数与异常数，不读内容。
+ * 折叠态用它 —— 为了显示「穿透 1204 条」去下载 2MB 日志是不划算的。
+ */
+export const getLogSummary = (params: { day?: string; file?: string }) => {
+  const q = new URLSearchParams()
+  if (params.day) q.set('day', params.day)
+  if (params.file) q.set('file', params.file)
+  return request<LogSummary>(`/api/system/log/summary?${q.toString()}`)
+}
 
 export const getLogs = (params: {
   day: string
