@@ -31,6 +31,7 @@
 | [`design/`](design/) | 品牌与架构设计、功能路线图 | 想知道「为什么要做成这样」「下一步做什么」 |
 | [`compliance/`](compliance/) | 许可、来源归属、合规边界、第三方代码政策 | 要引入外部代码、要对外发布、收到许可相关质询 |
 | [`upstream/`](upstream/) | 上游相关**存档**（被本项目改写过的那份原始 README） | 追溯「上游原来是怎么写的」 |
+| [`guides/`](guides/) | **按场景的操作指南**（怎么在某种网络环境里装好、配好） | 要落地部署，尤其是没有 IPv4 公网 / CGNAT 的环境 |
 
 ## 建议的阅读顺序
 
@@ -38,6 +39,8 @@
   （尤其是其中的**目录约定**与**上游同步策略**）→ [`decisions/`](decisions/) 两条 ADR
 - **准备部署** → [`../deploy/README.md`](../deploy/README.md) → [`快速上手.md`](快速上手.md) →
   [`部署与升级.md`](部署与升级.md) → [`../SECURITY.md`](../SECURITY.md)
+- **没有 IPv4 公网（CGNAT）/ 只有 IPv6** → [`guides/IPv6-与单端口入口部署指南.md`](guides/IPv6-与单端口入口部署指南.md)
+  （这条路线不需要打洞、不需要 UPnP，端口也不会变）
 - **准备改代码** → [`design/`](design/) 的架构部分 → [`../core/README.md`](../core/README.md)
 - **准备发版** → [`design/路线图.md`](design/路线图.md) → [`compliance/`](compliance/) →
   [`../.github/workflows/release.yml`](../.github/workflows/release.yml)
