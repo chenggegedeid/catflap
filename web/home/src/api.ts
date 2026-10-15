@@ -84,6 +84,19 @@ export interface AuthStatus {
 }
 export const getAuthStatus = () => get<AuthStatus>('/auth/status')
 
+/**
+ * 退出登录。
+ *
+ * 登录态就是个放在 localStorage 的 token，服务端不存会话，所以"退出"就是
+ * 把它扔掉 —— 不需要一个后端接口陪跑。token 与管理后台同源共享，清掉之后
+ * 后台那边也一样登出了，符合预期。
+ */
+export const logout = async () => {
+  localStorage.removeItem(TOKEN_KEY)
+  // 桌面版的免登录 secret 也一起清掉，否则"退出"之后它还会把后台重新开进来
+  sessionStorage.removeItem(DESKTOP_SECRET_KEY)
+}
+
 // ============ Home Config ============
 // 防御: Go 序列化空切片有时会变 null,这里统一兜底成空数组
 export async function getConfig(): Promise<HomeConfig> {
@@ -155,6 +168,8 @@ export interface UpdateAppRequest {
   color?: string
   categoryId?: string
   addresses?: AppAddresses
+  /** STUN 应用的手填补充入口（v6 / 内网）；v4 由穿透维护，不收 */
+  manualAddresses?: AppAddresses
 }
 export interface AppPositionItem {
   id: string

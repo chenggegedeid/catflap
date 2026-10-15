@@ -92,6 +92,16 @@ type App struct {
 	// type=static:
 	Addresses *AppAddresses `json:"addresses,omitempty"`
 
+	// ManualAddresses 用户手填的入口，用来补充「自动探测拿不到」的那几类。
+	//
+	// 最典型的场景：一台机器只有公网 IPv6（家宽没 IPv4），穿透给的是 v4 地址，
+	// 而 v6 和「内网怎么进」只有用户自己知道。以前只能再复制一个图标分别填，
+	// 现在填在这里，同一个图标就覆盖三种入口。
+	//
+	// 合并规则见 hydrate.go：**手填优先，自动探测兜底**。唯一的例外是
+	// WANv4 —— 那是穿透的本职，始终以实时探测为准（隧道重打后地址会变）。
+	ManualAddresses *AppAddresses `json:"manualAddresses,omitempty"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  ExternalLink,
+  ChevronDown,
   Globe2,
   Home as HomeIcon,
   Image as ImageIcon,
   LayoutGrid,
   // 起别名：文件里已经有一个自己的 Lock（配置读写锁），重名会撞
   Lock as LockIcon,
+  LogIn,
+  LogOut,
   Pencil,
   Plus,
   RotateCcw,
@@ -93,36 +95,46 @@ function openWithWhiteLoading(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-/**
- * 要登录才可见的分组，在访客侧的占位。
- *
- * 只说「需要登录」，不显示分组名、不显示有几个应用 —— 那些本身就是信息泄露
- * （"内网服务""NAS 管理"这种名字就够让人知道该打哪儿了）。内容由后端过滤，
- * 这里拿到的只是一个 ID。
- */
-function LockedCategorySection() {
-  return (
-    <section>
-      <h3 className="wp-section mb-4 px-2 text-sm font-semibold uppercase tracking-wider">🔒 需要登录</h3>
-      <div className="grid min-h-[5rem] grid-cols-4 content-start justify-items-center gap-x-3 gap-y-8 px-2 sm:grid-cols-6 lg:grid-cols-8">
-        <a
-          href="/catflap/"
-          className="flex w-full flex-col items-center gap-2 rounded-2xl border border-dashed px-2 py-3 text-center text-xs opacity-80 transition hover:opacity-100"
-          title="登录 Catflap 管理后台后即可看到这个分组"
-        >
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-200/60 text-lg">🔒</div>
-          <span className="leading-tight">登录查看</span>
-        </a>
-      </div>
-    </section>
-  )
+/** 卡片副标题里那几类入口的显示顺序与名字 */
+const ADDRESS_ENTRIES: { key: keyof AppAddresses; label: string }[] = [
+  { key: 'wanV4', label: '公网 IPv4' },
+  { key: 'wanV6', label: '公网 IPv6' },
+  { key: 'lan', label: '内网' },
+]
+
+/** 这个应用当前有哪些可用入口（空的不列） */
+function addressEntries(app: AppView): { key: keyof AppAddresses; label: string; url: string }[] {
+  return ADDRESS_ENTRIES.filter((e) => app.addresses?.[e.key]).map((e) => ({
+    ...e,
+    url: app.addresses![e.key]!,
+  }))
+}
+
+/** 卡片副标题：`v4 · v6 · 内网` 或 `未配置地址`（没有入口信息时） */
+function addressSummary(entries: { key: keyof AppAddresses; label: string }[]): string {
+  if (entries.length === 0) return '未配置地址'
+  const short: Record<string, string> = { wanV4: 'v4', wanV6: 'v6', lan: '内网' }
+  return entries.map((e) => short[e.key] ?? e.label).join(' · ')
+}
+
+/** 多个入口时，哪一个是"点了就进"的默认（按网络偏好） */
+function defaultEntryKey(app: AppView, prefer: NetworkPrefer): keyof AppAddresses {
+  const fallback: Record<NetworkPrefer, (keyof AppAddresses)[]> = {
+    wanV4: ['wanV4', 'wanV6', 'lan'],
+    wanV6: ['wanV6', 'wanV4', 'lan'],
+    lan: ['lan', 'wanV4', 'wanV6'],
+  }
+  for (const key of fallback[prefer]) {
+    if (app.addresses?.[key]) return key
+  }
+  return 'wanV4'
 }
 
 function sortByPagedOrder(apps: AppView[]): AppView[] {
   return [...apps].sort((a, b) => a.pagedOrder - b.pagedOrder)
 }
 
-function groupByCategory(apps: AppView[], categories: Category[], lockedCategoryIds: string[] = []) {
+function groupByCategory(apps: AppView[], categories: Category[]) {
   const sorted = [...categories].sort((a, b) => a.order - b.order)
   const validIds = new Set(sorted.map((c) => c.id))
   const byCategoryScroll = (a: AppView, b: AppView) => a.scrollOrder - b.scrollOrder
@@ -133,13 +145,7 @@ function groupByCategory(apps: AppView[], categories: Category[], lockedCategory
   const uncategorized = apps
     .filter((a) => !a.categoryId || !validIds.has(a.categoryId))
     .sort(byCategoryScroll)
-
-  // 要登录才可见的分组：后端已经把名字和内容都摘掉了，只留下 ID。这里只渲染
-  // 一个不泄露任何信息的占位——让人知道有东西，但看不到是什么、有几个。
-  // 名字一律不显示，否则"内网服务"这种分组名本身就泄密。
-  const locked = lockedCategoryIds.map((id) => ({ id }))
-
-  return { groups, uncategorized, locked }
+  return { groups, uncategorized }
 }
 
 /* ============ 基础组件 ============ */
@@ -180,6 +186,68 @@ function Clock({ showTime, title }: { showTime: boolean; title: string }) {
           <div className="text-2xl font-bold leading-none">{time}</div>
           <div className="mt-1 text-sm font-medium opacity-90">{date}</div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 右上角入口区。
+ *
+ * 全部收在这里，左下角不再放任何浮动控件 —— 访客不该一眼就看到管理入口在哪。
+ * 未登录只剩一颗「登录」；登录后才出现设置、后台、退出。
+ *
+ * 这些是**展示层**的判断，真正的权限在服务端：锁住的分组根本不会下发到
+ * 这个页面（见 GetHomeConfigView），所以这里就算被绕过也拿不到东西。
+ */
+function TopRightActions({
+  authed,
+  onOpenSettings,
+}: {
+  authed: boolean
+  onOpenSettings: () => void
+}) {
+  return (
+    <div className="absolute right-0 top-0 flex items-center gap-2">
+      {authed ? (
+        <>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            title="主页设置"
+            className="wp-chip grid h-9 w-9 place-items-center rounded-full backdrop-blur-md"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+          <a
+            href="/catflap/"
+            title="打开管理后台"
+            className="wp-chip flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold backdrop-blur-md"
+          >
+            <LayoutGrid className="h-4 w-4" />
+            后台
+          </a>
+          <button
+            type="button"
+            onClick={async () => {
+              await api.logout()
+              window.location.reload()
+            }}
+            title="退出登录"
+            className="wp-chip grid h-9 w-9 place-items-center rounded-full backdrop-blur-md"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </>
+      ) : (
+        <a
+          href="/catflap/"
+          title="登录后可管理服务"
+          className="wp-chip flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold backdrop-blur-md"
+        >
+          <LogIn className="h-4 w-4" />
+          登录
+        </a>
       )}
     </div>
   )
@@ -295,6 +363,125 @@ function AppIcon({
         {app.name}
       </span>
     </button>
+  )
+}
+
+/**
+ * 卡片形态的应用（Sun-Panel 那种横卡）。
+ *
+ * 相比纯图标，卡片能多放两样东西：
+ * - 地址类型副标题（v4 · v6 · 内网）：一眼看出这个图标能从哪几个入口进
+ * - 在线状态：穿透服务的实时状态，不用点进去猜
+ *
+ * 一个图标可以同时有多个入口（见 AppAddresses），所以点击时如果不止一个，
+ * 就弹个选择让用户挑，而不是硬猜。
+ */
+function AppCard({
+  app,
+  prefer,
+  onContextMenu,
+  draggable,
+  isDragging,
+  onDragStart,
+  onDragEnter,
+  onDragEnd,
+}: {
+  app: AppView
+  prefer: NetworkPrefer
+  onContextMenu: (e: React.MouseEvent, app: AppView) => void
+  draggable?: boolean
+  isDragging?: boolean
+  onDragStart?: (e: React.DragEvent<HTMLButtonElement>, app: AppView) => void
+  onDragEnter?: (e: React.DragEvent<HTMLButtonElement>, app: AppView) => void
+  onDragEnd?: () => void
+}) {
+  const [pickOpen, setPickOpen] = useState(false)
+  const entries = addressEntries(app)
+
+  const open = (url: string) => {
+    setPickOpen(false)
+    openWithWhiteLoading(url)
+  }
+
+  const handleClick = () => {
+    if (entries.length === 0) return
+    if (entries.length === 1) {
+      open(entries[0].url)
+      return
+    }
+    // 多个入口时先让用户挑：默认走偏好那类，但 v6 / 内网也可能正是他要的
+    setPickOpen(true)
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        draggable={draggable}
+        onDragStart={(e) => {
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move'
+            try {
+              e.dataTransfer.setData('text/plain', app.id)
+            } catch {
+              // ignore
+            }
+          }
+          onDragStart?.(e, app)
+        }}
+        onDragEnter={(e) => onDragEnter?.(e, app)}
+        onDragOver={(e) => {
+          if (draggable) {
+            e.preventDefault()
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+          }
+        }}
+        onDragEnd={() => onDragEnd?.()}
+        onClick={handleClick}
+        onContextMenu={(e) => onContextMenu(e, app)}
+        className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left outline-none transition ${
+          isDragging ? 'opacity-40' : ''
+        }`}
+      >
+        <div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl shadow-md transition duration-200 group-hover:scale-105">
+          <IconPreview icon={app.icon} fallback={app.name} color={app.color} className="h-full w-full" />
+          {app.online === true && (
+            <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-400" />
+          )}
+          {app.online === false && (
+            <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-slate-400" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="wp-label truncate text-sm font-semibold">{app.name}</div>
+          <div className="wp-meta truncate text-xs opacity-70">{addressSummary(entries)}</div>
+        </div>
+        {entries.length > 1 && (
+          <ChevronDown className="wp-meta h-3.5 w-3.5 shrink-0 opacity-50" />
+        )}
+      </button>
+
+      {pickOpen && (
+        <div
+          className="absolute left-2 right-2 top-full z-40 mt-1 overflow-hidden rounded-xl bg-white py-1 shadow-2xl ring-1 ring-black/5"
+          onMouseLeave={() => setPickOpen(false)}
+        >
+          {entries.map((en) => (
+            <button
+              key={en.key}
+              type="button"
+              onClick={() => open(en.url)}
+              className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition hover:bg-slate-100 ${
+                en.key === defaultEntryKey(app, prefer) ? 'font-semibold text-blue-600' : 'text-slate-700'
+              }`}
+            >
+              <span className="shrink-0">{en.label}</span>
+              <span className="truncate font-mono text-[11px] text-slate-400">{en.url}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -692,8 +879,28 @@ function AppFormModal({
           )}
 
           {isStun && (
-            <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-700">
-              这是来自 STUN 的应用，地址由内网穿透自动维护，仅可修改名称 / 图标 / 颜色 / 分类。
+            <div className="space-y-2 rounded-2xl bg-slate-50 p-3">
+              <div className="text-xs font-semibold text-slate-500">补充访问地址（可选）</div>
+              <div className="text-[11px] leading-relaxed text-slate-400">
+                公网 IPv4 由内网穿透自动维护，这里补的是它拿不到的那几种。
+                比如家宽只有公网 IPv6，填上 v6 就能在同一个图标里直接走 v6，
+                不用再复制一个图标。
+              </div>
+              <input
+                value={form.wanV6}
+                onChange={(e) => setForm((p) => ({ ...p, wanV6: e.target.value }))}
+                placeholder="公网 IPv6  如 https://[2409:8a60::1]:8443"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              />
+              <input
+                value={form.lan}
+                onChange={(e) => setForm((p) => ({ ...p, lan: e.target.value }))}
+                placeholder="内网  如 http://192.168.1.10:2573"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              />
+              <div className="text-[11px] text-slate-400">
+                公网 IPv4 那一项在卡片上显示的是穿透的实时地址，由系统维护、不在这里填。
+              </div>
             </div>
           )}
 
@@ -1066,8 +1273,8 @@ function App() {
   const grouped = useMemo(
     () =>
       config
-        ? groupByCategory(config.apps, config.categories, config.lockedCategoryIds)
-        : { groups: [], uncategorized: [], locked: [] },
+        ? groupByCategory(config.apps, config.categories)
+        : { groups: [], uncategorized: [] },
     [config],
   )
 
@@ -1489,6 +1696,9 @@ function App() {
       }
       if (appForm.initial.type === 'static') {
         body.addresses = { wanV4: form.wanV4, wanV6: form.wanV6, lan: form.lan }
+      } else {
+        // STUN 应用：v4 由穿透维护，只把用户补的 v6 / 内网存进 manualAddresses
+        body.manualAddresses = { wanV4: '', wanV6: form.wanV6, lan: form.lan }
       }
       await api.updateApp(body)
     } else {
@@ -1802,7 +2012,17 @@ function App() {
       {photoLoaded && <div className="fixed inset-0 bg-black/10" />}
 
       <section className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 sm:px-6 sm:py-12 min-[2000px]:pt-16">
-        <Clock showTime={config.showTime} title={config.title} />
+        {/* 顶部：标题居中，管理入口收到右上角 */}
+        <div className="relative">
+          <Clock showTime={config.showTime} title={config.title} />
+          <TopRightActions
+            authed={!!config.authed}
+            onOpenSettings={() => {
+              // 没登录就不开设置面板：里面每一项都是写操作
+              if (requireLogin()) setShowSettings(true)
+            }}
+          />
+        </div>
 
         {/* 搜索框 */}
         <div
@@ -1944,9 +2164,6 @@ function App() {
         {isScrollMode && (
           <div className="mx-auto mt-10 w-full max-w-5xl px-6 pb-24">
             <div className="space-y-12 pt-6">
-              {grouped.locked.map(({ id }) => (
-                <LockedCategorySection key={id} />
-              ))}
               {grouped.groups.map(({ category, apps }) => (
                 <section
                   key={category.id}
@@ -1963,9 +2180,9 @@ function App() {
                       </span>
                     )}
                   </h3>
-                  <div className="grid min-h-[5rem] grid-cols-4 content-start justify-items-center gap-x-3 gap-y-8 px-2 sm:grid-cols-6 lg:grid-cols-8">
+                  <div className="grid min-h-[5rem] grid-cols-1 content-start gap-x-3 gap-y-3 px-2 sm:grid-cols-2 lg:grid-cols-3 min-[2000px]:grid-cols-4">
                     {apps.map((app) => (
-                      <AppIcon
+                      <AppCard
                         key={app.id}
                         app={app}
                         prefer={networkPrefer}
@@ -1993,9 +2210,9 @@ function App() {
                 <h3 className="wp-section mb-4 px-2 text-sm font-semibold uppercase tracking-wider">
                   未分类
                 </h3>
-                <div className="grid min-h-[5rem] grid-cols-4 content-start justify-items-center gap-x-3 gap-y-8 px-2 sm:grid-cols-6 lg:grid-cols-8">
+                <div className="grid min-h-[5rem] grid-cols-1 content-start gap-x-3 gap-y-3 px-2 sm:grid-cols-2 lg:grid-cols-3 min-[2000px]:grid-cols-4">
                   {grouped.uncategorized.map((app) => (
-                    <AppIcon
+                    <AppCard
                       key={app.id}
                       app={app}
                       prefer={networkPrefer}
@@ -2696,46 +2913,31 @@ function App() {
         </div>
       )}
 
-      {/* 右下浮动按钮组 */}
-      {/* 手机上竖着贴右边会压住最右那列图标，改成底部一横排 */}
-      <div className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 flex-row gap-3 sm:bottom-7 sm:left-auto sm:right-7 sm:translate-x-0 sm:flex-col">
-        <button
-          type="button"
-          onClick={() => {
-            if (requireLogin()) setAppForm({ open: true })
-          }}
-          className="wp-chip grid h-11 w-11 place-items-center rounded-full backdrop-blur-md"
-          title="添加应用"
-        >
-          <Plus className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={cycleNetworkPrefer}
-          className="wp-chip grid h-11 w-11 place-items-center rounded-full backdrop-blur-md"
-          title={`当前: ${networkPreferLabel[networkPrefer]}, 点击切换`}
-        >
-          <HomeIcon className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            // 没登录就别开面板了，面板里每一项都是写操作
-            if (showSettings || requireLogin()) setShowSettings((v) => !v)
-          }}
-          className="wp-chip grid h-11 w-11 place-items-center rounded-full backdrop-blur-md"
-          title="Home 设置"
-        >
-          <Settings className="h-5 w-5" />
-        </button>
-        <a
-          href="/catflap/"
-          className="wp-chip grid h-11 w-11 place-items-center rounded-full backdrop-blur-md"
-          title="打开后台"
-        >
-          <ExternalLink className="h-5 w-5" />
-        </a>
-      </div>
+      {/* 右下浮动按钮组（只有登录后才出现）。
+          访客看不到任何浮动控件 —— 连"这儿有东西可点"都不该看出来。
+          设置与后台已收进右上角，这里只留两个高频动作。 */}
+      {config.authed && (
+        <div className="fixed bottom-5 right-5 z-30 flex flex-row gap-3 sm:bottom-7 sm:right-7 sm:flex-col">
+          <button
+            type="button"
+            onClick={() => {
+              if (requireLogin()) setAppForm({ open: true })
+            }}
+            className="wp-chip grid h-11 w-11 place-items-center rounded-full backdrop-blur-md"
+            title="添加应用"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={cycleNetworkPrefer}
+            className="wp-chip grid h-11 w-11 place-items-center rounded-full backdrop-blur-md"
+            title={`当前: ${networkPreferLabel[networkPrefer]}, 点击切换`}
+          >
+            <HomeIcon className="h-5 w-5" />
+          </button>
+        </div>
+      )}
 
       {/* 弹窗 */}
       {appForm.open && (

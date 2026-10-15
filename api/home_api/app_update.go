@@ -18,6 +18,8 @@ type AppUpdateRequest struct {
 	Color      string             `json:"color"`
 	CategoryID string             `json:"categoryId"`
 	Addresses  *home.AppAddresses `json:"addresses,omitempty"`
+	// ManualAddresses 手填的补充入口，主要给 STUN 应用用（v6 / 内网）
+	ManualAddresses *home.AppAddresses `json:"manualAddresses,omitempty"`
 }
 
 func (HomeApi) AppUpdateView(c *gin.Context) {
@@ -52,6 +54,11 @@ func (HomeApi) AppUpdateView(c *gin.Context) {
 			if app.Type == "static" && cr.Addresses != nil {
 				copy := *cr.Addresses
 				app.Addresses = &copy
+			}
+			// STUN 应用的补充入口（v6 / 内网）。v4 不收：那是穿透的实时结果
+			if app.Type == "stun" && cr.ManualAddresses != nil {
+				copy := *cr.ManualAddresses
+				app.ManualAddresses = &copy
 			}
 			app.UpdatedAt = time.Now()
 			return nil

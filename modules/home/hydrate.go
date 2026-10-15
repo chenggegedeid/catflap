@@ -56,6 +56,18 @@ func hydrateApp(app App) AppView {
 			v.Addresses = *app.Addresses
 		}
 	}
+
+	// 手填的入口补上来。WANv4 不覆盖 —— 那是穿透的实时结果，重打后地址会变，
+	// 手填一个旧的只会把用户带到死地址上。v6 / 内网没有"自动维护"可言，
+	// 没人填就是空着，所以手填优先。
+	if m := app.ManualAddresses; m != nil {
+		if v.Addresses.WANv6 == "" {
+			v.Addresses.WANv6 = m.WANv6
+		}
+		if v.Addresses.LAN == "" {
+			v.Addresses.LAN = m.LAN
+		}
+	}
 	return v
 }
 
