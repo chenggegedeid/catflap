@@ -80,6 +80,11 @@ jobs:
       - name: 校验脚本里的路径引用
         run: python3 scripts/check_path_refs.py
 
+      # 仓库是公开的：别把 AI 会话记录、本机内网 IP、代理口令之类带进来。
+      # 提交后再删，历史里也还留着，所以要在提交前挡住。
+      - name: 校验仓库无隐私内容
+        run: python3 scripts/check_privacy.py
+
       # 已知漏洞扫描。需要访问 vuln.go.dev，外部服务偶发抽风不该拦住合并，
       # 所以这里不阻断；正式的周期性报告在 security.yml 里出。
       - name: govulncheck（非阻断）
