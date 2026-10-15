@@ -26,6 +26,8 @@ import type {
   TunnelSavePayload,
   TunnelRuntimeState,
   ProxySite,
+
+  ProxySiteOptions,
   RedirectConfig,
   MCEntryConfig,
   RedirectInspection,
@@ -893,3 +895,16 @@ export const getProxyLanSubnets = () => request<LanSubnet[]>('/api/proxy/lan/sub
 
 export const scanProxyLan = (cidr: string) =>
   request<LanHost[]>('/api/proxy/lan/scan', { method: 'POST', body: JSON.stringify({ cidr }) })
+
+/**
+ * 站点表单的可选项：已配的 DDNS 域名、本机网段、本机地址。
+ * 在 api 层聚合（proxy 不直接依赖 ddns）。
+ */
+export const getProxySiteOptions = () => request<ProxySiteOptions>('/api/proxy/site-options')
+
+/** 站点的一键开关（启用 / 显示在主页） */
+export const setProxySiteFlag = (id: number, flag: 'enabled' | 'showOnHome', value: boolean) =>
+  request<unknown>('/api/proxy/site/flag', {
+    method: 'POST',
+    body: JSON.stringify({ id, flag, value }),
+  })

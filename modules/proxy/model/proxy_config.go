@@ -91,9 +91,16 @@ type Site struct {
 	// 证书透明日志里，扫描器也在扫整个网段。所以给站点加一道 IP 门禁。
 	Access AccessControl `json:"access"`
 
-	Enabled     bool      `json:"enabled"`
-	Description string    `json:"description"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description"`
+
+	// ShowOnHome 在导航主页上显示这个站点。
+	//
+	// 和穿透服务那个标记是同一回事，只是存在各自的模块里 ——
+	// 主页那边统一收集，两边不用互相知道。
+	ShowOnHome bool `json:"showOnHome,omitempty"`
+
+	UpdatedAt time.Time `json:"updatedAt"`
 
 	// LegacyHost 旧版的单域名字段，只用来读老配置。
 	// ReadConfig 迁移完就清空，之后不再写进文件。

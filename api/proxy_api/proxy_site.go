@@ -1,6 +1,9 @@
 package proxy_api
 
 import (
+	"strings"
+	"time"
+
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/proxy"
 	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
@@ -103,4 +106,60 @@ func (ProxyApi) ProxySiteTestView(c *gin.Context) {
 		return
 	}
 	res.OkWithData(proxy.ProbeBackend(cr.toModel()), c)
+}
+
+// ===================== 列表上的快捷操作 =====================
+
+// SiteFlagRequest 改站点上一个布尔标记
+type SiteFlagRequest struct {
+	ID    uint   `json:"id"`
+	Value bool   `json:"value"`
+	Flag  string `json:"flag"` // "enabled" / "showOnHome"
+}
+
+// ProxySiteFlagView 改站点的一个开关（启用 / 显示在主页）。
+//
+// 为什么单开一个接口而不是走「编辑保存」：列表上一键启停不该为了勾一个框
+// 把整个表单打开一遍。
+//
+// 实现上**复用 SaveSite**（它会统一处理落盘与重开监听），只改一个字段 ——
+// 不自己另写一遍配置读写，避免和那边走不同的路径。
+func (ProxyApi) ProxySiteFlagView(c *gin.Context) {
+	cr := middleware.GetBindRequest[SiteFlagRequest](c)
+	if cr.ID == 0 {
+		res.FailWithMsg("id 不能为空", c)
+		return
+	}
+
+	flag := strings.ToLower(strings.TrimSpace(cr.Flag))
+
+	var site *proxymodel.Site
+	for i := range proxy.Runtime.Config.Sites {
+		if proxy.Runtime.Config.Sites[i].ID == cr.ID {
+			site = &proxy.Runtime.Config.Sites[i]
+			break
+		}
+	}
+	if site == nil {
+		res.FailWithMsg("站点不存在", c)
+		return
+	}
+
+	switch flag {
+	case "enabled":
+		site.Enabled = cr.Value
+	case "showonhome":
+		site.ShowOnHome = cr.Value
+	default:
+		res.FailWithMsg("不认识的开关", c)
+		return
+	}
+	site.UpdatedAt = time.Now()
+
+	saved, err := proxy.SaveSite(*site)
+	if err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithData(saved, c)
 }

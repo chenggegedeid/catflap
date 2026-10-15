@@ -7,6 +7,8 @@ import {
   Globe,
   HardDrive,
   Pencil,
+  Power,
+  Home as HomeIcon,
   Plus,
   Settings2,
   ShieldCheck,
@@ -22,6 +24,8 @@ import * as api from '../lib/api'
 import type {
   Certificate,
   LanHost,
+  ProxyDomainOption,
+  ProxySiteOptions,
   LanPort,
   LanSubnet,
   ProxyConfig,
@@ -390,6 +394,43 @@ function SiteModal({
   const [scan, setScan] = useState<{ open: boolean; subnets: LanSubnet[] }>({ open: false, subnets: [] })
   const [scanErr, setScanErr] = useState('')
 
+  // 站点表单的可选项：已配的域名（从 DDNS 来）、本机地址。
+  // 拉不到不该拦住表单 —— 那就退化成手填。
+  const [options, setOptions] = useState<ProxySiteOptions>({
+    domains: [],
+    subnets: [],
+    localIPs: [],
+  })
+  useEffect(() => {
+    api
+      .getProxySiteOptions()
+      .then(setOptions)
+      .catch(() => undefined)
+  }, [])
+
+  // 按服务商分组，域名多的时候好找
+  const groupedDomains = useMemo(() => {
+    const m = new Map<string, ProxyDomainOption[]>()
+    for (const d of options.domains) {
+      const key = d.provider || '其它'
+      const list = m.get(key) ?? []
+      list.push(d)
+      m.set(key, list)
+    }
+    return [...m.entries()]
+  }, [options.domains])
+
+  /** 选了一个已配域名：填进第一个空行，没有空行就加一行 */
+  const pickDomain = (host: string) => {
+    setForm((p) => {
+      const idx = p.hosts.findIndex((h) => !h.trim())
+      if (idx >= 0) {
+        return { ...p, hosts: p.hosts.map((h, k) => (k === idx ? host : h)) }
+      }
+      return { ...p, hosts: [...p.hosts, host] }
+    })
+  }
+
   const baseDomain = entry.baseDomain ?? ''
   // 要补的那截主域名，判据和后端 expandHost 一致：没有点才补
   const suffixOf = (h: string) => {
@@ -588,6 +629,35 @@ function SiteModal({
           <Plus className="h-3 w-3" />
           添加域名
         </button>
+
+        {/* 从已配的 DDNS 记录里挑：不用手打，也知道它是 v4 / v6 / 双栈 */}
+        {options.domains.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2">
+            <span className="text-[11px] font-semibold text-slate-500">从已配置的域名里选</span>
+            <select
+              value=""
+              onChange={(e) => {
+                if (!e.target.value) return
+                pickDomain(e.target.value)
+                e.target.value = ''
+              }}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400"
+            >
+              <option value="">选择…</option>
+              {groupedDomains.map(([provider, list]) => (
+                <optgroup key={provider} label={provider}>
+                  {list.map((d, i) => (
+                    <option key={`${d.host}-${i}`} value={d.host}>
+                      {d.host}
+                      {d.label ? `（${d.label}）` : ''} — {stackLabel(d.stack)}
+                      {!d.enabled ? ' · 未启用' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
           {portForward ? (
             form.https ? (
@@ -822,6 +892,13 @@ function SiteModal({
   )
 }
 
+/** 栈标记的中文。v4 / v6 / dual 三种 */
+function stackLabel(stack: string): string {
+  if (stack === 'v6') return '仅 IPv6'
+  if (stack === 'dual') return '双栈'
+  return '仅 IPv4'
+}
+
 // ===================== 监听端口一览 =====================
 
 /** 一个端口一块，对着 netstat 看到的那几行 */
@@ -940,6 +1017,24 @@ export function ReverseProxy() {
     }
     setSiteModal({ open: false })
     await refresh()
+  }
+
+  // 切换中锁定按钮：后端改完要重开监听，要好几秒。
+  // 这几秒按钮上什么都不变的话用户以为没点着，再点一下又切回去了
+  const [flagBusy, setFlagBusy] = useState(0)
+
+  const toggleSiteFlag = async (s: ProxySite, flag: 'enabled' | 'showOnHome') => {
+    const next = flag === 'enabled' ? !s.enabled : !s.showOnHome
+    setFlagBusy(s.id)
+    try {
+      await api.setProxySiteFlag(s.id, flag, next)
+      toast(flag === 'enabled' ? (next ? '已启用' : '已停用') : next ? '已添加到主页' : '已从主页移除')
+      await refresh()
+    } catch (e) {
+      toast('操作失败: ' + errText(e))
+    } finally {
+      setFlagBusy(0)
+    }
   }
 
   const removeSite = async (s: ProxySite) => {
@@ -1277,6 +1372,33 @@ export function ReverseProxy() {
                             title="测试后端"
                           >
                             <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
+                          </button>
+                          {/* 一键启停：和穿透服务卡片一样，不用为了勾个框
+                              把整个表单打开一遍 */}
+                          <button
+                            onClick={() => toggleSiteFlag(s, 'enabled')}
+                            disabled={flagBusy === s.id}
+                            className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
+                              s.enabled
+                                ? 'text-emerald-500 hover:bg-emerald-50'
+                                : 'text-slate-300 hover:bg-slate-100'
+                            }`}
+                            title={s.enabled ? '已启用，点一下停用' : '已停用，点一下启用'}
+                          >
+                            <Power className="h-3 w-3" />
+                          </button>
+                          {/* 上主页：在导航主页上显示这个站点 */}
+                          <button
+                            onClick={() => toggleSiteFlag(s, 'showOnHome')}
+                            disabled={flagBusy === s.id}
+                            className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
+                              s.showOnHome
+                                ? 'text-blue-500 hover:bg-blue-50'
+                                : 'text-slate-300 hover:bg-slate-100'
+                            }`}
+                            title={s.showOnHome ? '在主页显示中，点一下取消' : '在导航主页上显示'}
+                          >
+                            <HomeIcon className="h-3 w-3" />
                           </button>
                           <button
                             onClick={() => setSiteModal({ open: true, initial: s })}
