@@ -13,11 +13,18 @@ import (
 // DesktopSecretHeader 桌面 webview 注入的免登录 secret 头
 const DesktopSecretHeader = "X-Catflap-Desktop"
 
-// LoopbackOnly 限制接口只能从本机发起，用于「未授权即可执行」的敏感操作
-// （首次初始化设置密码）。放行依据是 TCP 对端地址 Request.RemoteAddr，
-// 而不是 c.ClientIP()——后者会读 X-Forwarded-For / X-Real-IP，
-// 在 gin 默认信任全部代理的前提下，攻击者伪造一个 "X-Forwarded-For: 127.0.0.1"
-// 就能骗过校验。这里从源头拿连接地址，伪造代理头无效。
+// LoopbackOnly 限制接口只能从本机发起，用于「未授权即可执行」的敏感操作。
+//
+// ⚠️ 当前**没有生产代码在用**：唯一的使用者曾是 POST /api/auth/setup，
+// 现在那个接口刻意放开了来源限制（见
+// docs/decisions/0005-初始化接口放开来源限制.md）。保留它是因为下面那套
+// 「从 TCP 对端地址判断、不信代理头」的写法是可复用的，将来做白名单 /
+// 只允许本机调用的管理接口时会直接拿它用；测试也还留着当回归。
+//
+// 放行依据是 TCP 对端地址 Request.RemoteAddr，而不是 c.ClientIP()——
+// 后者会读 X-Forwarded-For / X-Real-IP，在 gin 默认信任全部代理的前提下，
+// 攻击者伪造一个 "X-Forwarded-For: 127.0.0.1" 就能骗过校验。
+// 这里从源头拿连接地址，伪造代理头无效。**自己写同类判断时务必照这个来。**
 func LoopbackOnly(c *gin.Context) {
 	if !IsLoopbackRequest(c) {
 		res.FailForbidden(c)

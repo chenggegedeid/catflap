@@ -171,14 +171,20 @@ sudo cp deploy/systemd/catflap.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now catflap
 ```
 
-**首次初始化必须在本机完成**（非本机 IP 调初始化接口会被程序拒绝）：
+**装完立刻打开 `http://<内网IP>:3791/catflap/` 设置管理员密码。**
+
+首次初始化**不限制来源**，局域网里任何设备的浏览器都能打开 —— 服务器没有
+桌面浏览器也没关系：
 
 ```bash
 curl -s http://127.0.0.1:3791/api/auth/status   # 看是否已初始化
-# 然后浏览器打开 http://127.0.0.1:3791/catflap/ 设置管理员密码
 ```
 
-设完密码后，就可以从局域网其它设备访问 `http://<内网IP>:3791/catflap/`。
+> ⚠️ **在设好密码之前，能访问到这个地址的人都可以抢先设置密码**，而改密码
+> 需要旧密码 —— 也就是机器会被接管。所以别把它晾在那儿。取舍的完整说明见
+> [docs/decisions/0005](docs/decisions/0005-初始化接口放开来源限制.md)。
+
+设完密码后，就可以从局域网其它设备访问了。
 
 > 默认端口 **3791**（特意避开被各类 dev server / 面板当默认值的常见端口）。
 > 撞上了不用挪别人：设环境变量 `CATFLAP_PORT=8081` 即可改（systemd 下加
