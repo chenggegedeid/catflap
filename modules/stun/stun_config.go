@@ -1,6 +1,7 @@
 package stun
 
 import (
+	device "github.com/chenggegedeid/catflap/modules/device"
 	"github.com/chenggegedeid/catflap/modules/stun/model"
 	"github.com/chenggegedeid/catflap/utils/utilsFile"
 	"os"
@@ -27,6 +28,16 @@ func ReadConfig() (model.Config, error) {
 			logrus.Error("Config读取失败：", err)
 			return config, err
 		}
+		if migrateServices(&config) {
+			// 拆完了要立刻写一次盘：不然 stunConfig.json 里还留着老的设备数据，
+			// 虽然下次启动会重新拆（幂等，不会出错），但文件里一直有一份
+			// 已经不用的 devices，看着像两份数据打架。
+			// 这里写盘会顺带把 devices 字段清掉（dehydrate 的效果）。
+			if err := UpdateConfig(config); err != nil {
+				logrus.Errorf("[stun] 迁移后落盘失败（不影响运行，下次启动会重试）：%v", err)
+			}
+		}
+		hydrateDevices(&config)
 		normalizeServices(&config)
 
 	}
@@ -123,6 +134,9 @@ func UpdateConfig(config model.Config) error {
 	// 更新时间戳
 	config.UpdatedAt = time.Now()
 
+	// 写盘前把内存里的设备树拆回独立的服务列表（见 dehydrateDevices）
+	dehydrateDevices(&config)
+
 	// 写入配置文件
 	if err := utilsFile.WriteJsonFile(ConfigPath, config); err != nil {
 		logrus.Error("Config写入失败：", err)
@@ -131,4 +145,125 @@ func UpdateConfig(config model.Config) error {
 
 	logrus.Info("STUN配置文件已更新")
 	return nil
+}
+
+// migrateServices 把老配置里嵌在设备下的服务搬到 Config.Services。
+//
+// 为什么要搬：设备已经归 modules/device 管了（穿透/反代/端口转发共用
+// 那一份），服务嵌在设备里就跟着一起搬走了 —— 得有个自己的地方放。
+//
+// **只在读出来的老配置里 Devices[].Services 非空时执行**（幂等）：
+// 搬完把 Devices 清空，之后不再写回。
+func migrateServices(config *model.Config) bool {
+	if config == nil || len(config.Devices) == 0 {
+		return false
+	}
+
+	// 已经有拆好的服务了，说明迁移过了
+	if len(config.Services) > 0 {
+		config.Devices = nil
+		return false
+	}
+
+	out := make([]model.Service, 0, 8)
+	for _, d := range config.Devices {
+		for _, svc := range d.Services {
+			svc.DeviceID = d.DeviceID
+			out = append(out, svc)
+		}
+	}
+
+	config.Services = out
+	// 设备不再存在这里（主人在 devices.json），清掉避免以后又迁一次
+	config.Devices = nil
+
+	if len(out) > 0 {
+		logrus.Infof("[stun] 已把 %d 个服务从设备里拆到独立列表（设备归 modules/device 管）", len(out))
+	}
+	return true
+}
+
+// ===== 设备树与服务列表的互相转换 =====
+//
+// 设备的"主人"是 modules/device（穿透/反代/端口转发共用一份），
+// 服务存在自己的 Config.Services 里。
+//
+// 但穿透的现有代码（调度器、查找、通知……几十处）都是按
+// `设备 → 它的服务列表` 这棵树来写的。为它们全部改一遍风险太大，
+// 所以这里做一层转换：
+//
+//	读配置 → hydrateDevices：device 表 + Services  → 组装成 Devices 树（内存）
+//	写配置 → dehydrateDevices：Devices 树 → 拆回 Services（存盘）
+//
+// **Config.Devices 因此只是内存视图，不落盘**（json tag 带 omitempty 且
+// 写盘前会被清空）。这样一来那几十处引用一行都不用动，
+// 而设备数据在文件里仍然只有一份。
+
+// hydrateDevices 用设备表和服务列表组装出设备树
+func hydrateDevices(config *model.Config) {
+	if config == nil {
+		return
+	}
+	// 设备基础信息从公共模块拿（唯一的一份）
+	devs := deviceList()
+	byID := map[uint][]model.Service{}
+	for _, svc := range config.Services {
+		byID[svc.DeviceID] = append(byID[svc.DeviceID], svc)
+	}
+
+	out := make([]model.Device, 0, len(devs))
+	for _, d := range devs {
+		out = append(out, model.Device{
+			DeviceID:  d.DeviceID,
+			Name:      d.Name,
+			IP:        d.IP,
+			Services:  byID[d.DeviceID],
+			CreatedAt: d.CreatedAt,
+			UpdatedAt: d.UpdatedAt,
+		})
+	}
+	config.Devices = out
+}
+
+// dehydrateDevices 把设备树拆回独立的服务列表，并清空设备字段（不落盘）
+func dehydrateDevices(config *model.Config) {
+	if config == nil {
+		return
+	}
+
+	// **服务已经独立存储时，不要从设备树重建** —— 会把服务清空。
+	//
+	// 这个分支是给"刚做完迁移"用的：migrateServices 把服务拆到 Services
+	// 之后会清空 Devices，紧接着 UpdateConfig 落盘又会走到这里。
+	// 如果无条件从设备树重建，刚拆出来的服务就会被覆盖成空 ——
+	// 端到端实测踩到过一次，3 个服务全丢。
+	if len(config.Devices) == 0 && len(config.Services) > 0 {
+		config.Devices = nil
+		return
+	}
+
+	out := make([]model.Service, 0, 8)
+	for _, d := range config.Devices {
+		for _, svc := range d.Services {
+			svc.DeviceID = d.DeviceID
+			out = append(out, svc)
+		}
+	}
+	config.Services = out
+	config.Devices = nil
+}
+
+// deviceModel 公共设备模块的 Device 类型别名，
+// 让下面的转换代码读起来不纠结"这个 Device 是哪个包的"
+type deviceModel = device.Device
+
+// deviceList 取设备列表。
+// 单列一个函数是因为它可能在 device 模块还没初始化完时被调用（启动竞态），
+// 那时返回空列表而不是崩。
+func deviceList() []deviceModel {
+	defer func() {
+		// 兜底：任何意外都不该让读配置失败
+		_ = recover()
+	}()
+	return device.List()
 }
