@@ -3,6 +3,7 @@ package stun
 import (
 	"strings"
 
+	"github.com/chenggegedeid/catflap/core"
 	"github.com/chenggegedeid/catflap/core/lanscan"
 )
 
@@ -34,3 +35,9 @@ func init() {
 		return out
 	}
 }
+
+// AdminPort Catflap 后台自己占的端口。
+//
+// 给 api 层做校验用：穿透服务的内网端口不能是它（否则等于把管理后台
+// 穿透到公网），代理站点的后端地址也不能指向它（同一个道理）。
+func AdminPort() int { return core.ListenPort() }

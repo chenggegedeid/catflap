@@ -1,6 +1,7 @@
 package stun_api
 
 import (
+	"fmt"
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/modules/stun/model"
@@ -76,6 +77,16 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	// 更新服务字段
 	svc := &stun.Runtime.Config.Devices[deviceIndex].Services[serviceIndex]
 	svc.Name = cr.Name
+	// 和新增时同样的校验（见 stun_service_add.go 的说明）：
+	// 内网端口不能是后台端口，否则等于把管理后台穿透到公网。
+	// 这里也要判 —— 不然"先建成别的端口、再改成管理端口"就绕过去了。
+	if admin := stun.AdminPort(); admin > 0 && cr.InternalPort == uint16(admin) {
+		res.FailWithMsg(fmt.Sprintf(
+			"内网端口不能是 Catflap 自己的后台端口 %d——那等于把管理后台穿透到公网，任何人都能来试密码",
+			admin), c)
+		return
+	}
+
 	svc.InternalPort = cr.InternalPort
 	svc.Protocol = cr.Protocol
 	svc.Https = cr.Https
