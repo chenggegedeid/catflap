@@ -40,6 +40,17 @@ type ProxyConfig struct {
 	// 家里绝大多数人只有一个域名，让他在每一条站点上重复抄一遍没有意义。
 	BaseDomain string `json:"baseDomain"`
 
+	// Tunnel Cloudflare Tunnel（cloudflared）托管。
+	//
+	// 没有 IPv4 公网（运营商 CGNAT）时，打洞出来的端口是 NAT 给的、URL 必须带
+	// 端口；而 Tunnel 是 cloudflared 主动往外连 Cloudflare，入口在 CF 那边，
+	// 于是访问地址既没有端口，也不需要打洞、不需要 DDNS、不需要在路由器上放行。
+	//
+	// 这里不内置 cloudflared（它是独立程序，体积不小且版本迭代快），而是托管
+	// 用户自己装的：填好程序路径和 tunnel token，由 Catflap 负责拉起、看住、
+	// 关掉，状态和日志都在面板上看。
+	Tunnel TunnelConfig `json:"tunnel"`
+
 	Sites []Site `json:"sites"`
 
 	// 下面两个是旧版的单端口字段，只用来读老配置。
@@ -119,6 +130,32 @@ const (
 type AccessControl struct {
 	Mode  AccessMode `json:"mode"`
 	Rules []string   `json:"rules"`
+}
+
+// TunnelConfig Cloudflare Tunnel 的配置
+type TunnelConfig struct {
+	// Enabled 用不用。关掉时如果正在跑会停掉进程。
+	Enabled bool `json:"enabled"`
+	// BinaryPath cloudflared 的路径。留空时按下面的默认名字在 PATH 里找。
+	BinaryPath string `json:"binaryPath"`
+	// Token tunnel 的 token（在 Cloudflare Zero Trust 后台创建隧道时给的一长串）。
+	//
+	// 它是这条隧道的全部凭证：拿它就能以你的名义起一条隧道。所以按 Secret
+	// 处理——面板上回显成掩码，日志里也绝不打印。
+	Token string `json:"token"`
+	// ExtraArgs 额外参数，一般留空。比如想指定 --protocol quic。
+	ExtraArgs string `json:"extraArgs"`
+}
+
+// TunnelState 隧道的运行状态（不落盘，运行时才有）
+type TunnelState struct {
+	Running bool   `json:"running"`
+	Message string `json:"message"` // 最近的状态或失败原因
+	// TokenSet 只表示"填没填"，不回显真实 token——那是凭证，不该在页面上飘
+	TokenSet bool `json:"tokenSet"`
+	// BinaryPath 实际在用的路径，方便确认找到的是不是你装的那个
+	BinaryPath string `json:"binaryPath"`
+	StartedAt  string `json:"startedAt"`
 }
 
 // PrimaryHost 第一个域名，用在错误提示和日志里
