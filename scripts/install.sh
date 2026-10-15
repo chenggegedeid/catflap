@@ -4,6 +4,10 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh | sudo bash
 #
+# 直接下载下来再跑，会进入**交互式菜单**（可选版本、安装目录、运行账号、端口）：
+#
+#   curl -fsSL .../install.sh -o install.sh && sudo bash install.sh
+#
 # 也能干别的：
 #   sudo bash install.sh                # 安装或升级到最新版
 #   sudo bash install.sh --uninstall    # 卸载（默认保留配置与数据）
@@ -47,6 +51,9 @@ PORT="${CATFLAP_PORT:-}"
 RUN_AS="${CATFLAP_RUN_AS:-catflap}"
 DRY_RUN=0
 ACTION="install"
+# 有没有显式给过参数。给了就完全按参数走（适合自动化），一个都没给且终端可用
+# 时才进交互菜单。
+ARGS_GIVEN=0
 
 # ── 小工具 ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -68,13 +75,13 @@ need_cmd() {
 # ── 参数 ────────────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version)   VERSION="${2:-}"; shift 2 ;;
-    --mirror)    MIRROR="${2:-}"; shift 2 ;;
-    --port)      PORT="${2:-}"; shift 2 ;;
-    --dry-run)   DRY_RUN=1; shift ;;
-    --uninstall) ACTION="uninstall"; shift ;;
-    --purge)     ACTION="purge"; shift ;;
-    --run-as-root) RUN_AS="root"; shift ;;
+    --version)   VERSION="${2:-}"; ARGS_GIVEN=1; shift 2 ;;
+    --mirror)    MIRROR="${2:-}"; ARGS_GIVEN=1; shift 2 ;;
+    --port)      PORT="${2:-}"; ARGS_GIVEN=1; shift 2 ;;
+    --dry-run)   DRY_RUN=1; ARGS_GIVEN=1; shift ;;
+    --uninstall) ACTION="uninstall"; ARGS_GIVEN=1; shift ;;
+    --purge)     ACTION="purge"; ARGS_GIVEN=1; shift ;;
+    --run-as-root) RUN_AS="root"; ARGS_GIVEN=1; shift ;;
     -h|--help)
       # 只打印文件开头那段连续的注释，并且去掉行首的 "# "。
       # 之前写的是 sed -n '3,30p'，注释块结束之后就把代码也打出来了（REPO=… 之类），
@@ -85,6 +92,93 @@ while [ $# -gt 0 ]; do
     *)           die "不认识的参数：$1（用 --help 看用法）" ;;
   esac
 done
+
+# ── 交互菜单 ────────────────────────────────────────────────────────────────
+#
+# 只在「没给任何参数」且「标准输入是终端」时才进菜单。
+#
+# 为什么要判断 -t 0：curl ... | sudo bash 这种写法里，stdin 被脚本自己占着，
+# 菜单读不到东西（读到的可能是脚本剩下还没被 shell 读走的内容），会莫名其妙
+# 地选错或者直接卡住。给过任何参数也一律不进菜单 —— 自动化场景要的是确定性。
+#
+# 菜单只负责把这几个变量问出来，后面走的还是原来那条安装路径，
+# 不存在「菜单装的和命令装的不一样」这种情况。
+
+ask() {
+  # $1 提示，$2 默认值
+  #
+  # 提示语一律写 stderr：这个函数是用 $(ask ...) 取返回值的，
+  # 提示语走 stdout 的话会和用户输入粘在一起被一起捕获 ——
+  # 第一版就是这个 bug，菜单里选什么都被判成「没有这个选项」。
+  printf '  %s' "$1" >&2
+  [ -n "${2:-}" ] && printf '（默认 %s）' "$2" >&2
+  printf ' > ' >&2
+  read -r ans || ans=""
+  ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+  if [ -z "$ans" ]; then printf '%s' "${2:-}"; else printf '%s' "$ans"; fi
+}
+
+menu() {
+  echo
+  echo "*************************************************"
+  echo "**                 欢迎使用                    **"
+  echo "**                Catflap 管理脚本             **"
+  echo "*************************************************"
+  echo
+  echo "  1 安装 / 升级 Catflap"
+  echo "  2 卸载（保留配置与数据）"
+  echo "  3 完全卸载（连配置与数据一起删）"
+  echo "  0 退出"
+  echo
+  choice="$(ask '请输入对应数字' '1')"
+  case "$choice" in
+    1) ACTION="install" ;;
+    2) ACTION="uninstall" ;;
+    3) ACTION="purge" ;;
+    0) echo "已退出"; exit 0 ;;
+    *) die "没有这个选项：$choice" ;;
+  esac
+
+  [ "$ACTION" = "install" ] || return 0
+
+  echo
+  echo "--- 版本 ---"
+  echo "  直接回车 = 装最新版；也可以填指定版本，例如 1.0.0"
+  VERSION="$(ask '版本号')"
+
+  echo
+  echo "--- 安装目录 ---"
+  echo "  常用：/opt/catflap（默认）、/etc/catflap、/usr/share/catflap"
+  INSTALL_DIR="$(ask '安装目录' '/opt/catflap')"
+  BIN="${INSTALL_DIR}/catflap"
+
+  echo
+  echo "--- 服务用什么账号跑 ---"
+  echo "  1 catflap（专用用户，默认，更安全）"
+  echo "  2 root（需要用 80/443 或动 iptables 时选这个）"
+  acct="$(ask '请选择' '1')"
+  case "$acct" in
+    1) RUN_AS="catflap" ;;
+    2) RUN_AS="root" ;;
+    *) die "没有这个选项：$acct" ;;
+  esac
+
+  echo
+  echo "--- 监听端口 ---"
+  PORT="$(ask '端口' '3791')"
+
+  echo
+  printf '  即将：安装到 %s，用 %s 跑，端口 %s\n' "$INSTALL_DIR" "$RUN_AS" "$PORT"
+  confirm="$(ask '确认开始？[y/N]' 'y')"
+  case "$confirm" in
+    y|Y|yes|YES) ;;
+    *) echo "已取消"; exit 0 ;;
+  esac
+}
+
+if [ "$ARGS_GIVEN" -eq 0 ] && [ -t 0 ]; then
+  menu
+fi
 
 # ── 卸载 ────────────────────────────────────────────────────────────────────
 if [ "$ACTION" = "uninstall" ] || [ "$ACTION" = "purge" ]; then
