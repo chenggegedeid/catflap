@@ -206,3 +206,24 @@ func (ProxyApi) ProxyForwardDeleteView(c *gin.Context) {
 	}
 	res.OkWithMsg("已删除", c)
 }
+
+// ===================== 拖动排序 =====================
+
+type ReorderSitesRequest struct {
+	// IDs 站点 ID 按想要的顺序（第一个最前）
+	IDs []uint `json:"ids"`
+}
+
+// ProxySitesReorderView 拖动排序后保存站点（服务）顺序
+func (ProxyApi) ProxySitesReorderView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ReorderSitesRequest](c)
+	if len(cr.IDs) == 0 {
+		res.FailWithMsg("ids 不能为空", c)
+		return
+	}
+	if err := proxy.ReorderSites(cr.IDs); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithMsg("已保存", c)
+}

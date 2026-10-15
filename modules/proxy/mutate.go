@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,13 @@ func SaveSite(in model.Site) (model.Site, error) {
 		}
 		for i := range cfg.Sites {
 			if cfg.Sites[i].ID == site.ID {
+				// **保留纯展示标记**：前端保存表单时不带 showOnHome
+				// （那是列表上的快捷开关，不属于编辑表单），
+				// 整体替换会把它冲成 false —— 表现是"点过主页，编辑一次就没了"。
+				//
+				// 这个坑实测踩到过：点上主页 → 编辑保存一次 → 标记丢失。
+				// 原则是"表单管不到的字段，保存时不该被动"。
+				site.ShowOnHome = cfg.Sites[i].ShowOnHome
 				cfg.Sites[i] = site
 				saved = site
 				return nil
@@ -489,6 +497,9 @@ func SaveForward(in model.Forward) (model.Forward, error) {
 			found := false
 			for i := range cfg.Forwards {
 				if cfg.Forwards[i].ID == f.ID {
+					// 保留不在表单里的字段（CreatedAt 是其一）。
+					// 以后加新的纯展示标记时也要在这里保住 ——
+					// 站点那边踩过"编辑一次就把标记冲没"的坑。
 					f.CreatedAt = cfg.Forwards[i].CreatedAt
 					cfg.Forwards[i] = f
 					found = true
@@ -522,4 +533,50 @@ func DeleteForward(id uint) error {
 		}
 		return errors.New("端口转发不存在")
 	})
+}
+
+// ReorderSites 拖动排序后保存站点顺序。
+//
+// 和 device.Reorder 同样的策略：只认已有 ID，多余的忽略；
+// 没在列表里的排后面。并发下前端给的顺序可能不全，不该因此报错。
+func ReorderSites(ids []uint) error {
+	return Runtime.Update(func(cfg *model.ProxyConfig) error {
+		byID := map[uint]*model.Site{}
+		for i := range cfg.Sites {
+			byID[cfg.Sites[i].ID] = &cfg.Sites[i]
+		}
+		next := 1
+		for _, id := range ids {
+			s, ok := byID[id]
+			if !ok {
+				continue
+			}
+			s.SortOrder = next
+			next++
+			delete(byID, id)
+		}
+		rest := make([]*model.Site, 0, len(byID))
+		for _, s := range byID {
+			rest = append(rest, s)
+		}
+		sort.Slice(rest, func(i, j int) bool { return rest[i].ID < rest[j].ID })
+		for _, s := range rest {
+			s.SortOrder = next
+			next++
+		}
+		return nil
+	})
+}
+
+// SortSites 按 (SortOrder, ID) 排好返回，界面按这个顺序显示
+func SortSites(in []model.Site) []model.Site {
+	out := make([]model.Site, len(in))
+	copy(out, in)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
 }

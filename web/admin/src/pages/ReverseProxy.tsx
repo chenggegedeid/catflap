@@ -19,17 +19,14 @@ import {
   Zap,
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
-import { LanScanModal } from '../components/LanScanModal'
 import { modalBackdrop } from '../components/modal'
 import * as api from '../lib/api'
 import type {
   Certificate,
   Device,
-  LanHost,
   ProxyDomainOption,
   ProxySiteOptions,
   LanPort,
-  LanSubnet,
   ProxyConfig,
   ProxyEntry,
   ProxyListener,
@@ -270,7 +267,7 @@ function EntryModal({
       }
     >
       <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
-        没单独指定端口的站点都挂在这两个端口上，靠域名区分——
+        没单独指定端口的服务都挂在这两个端口上，靠域名区分——
         就是 nginx 里一堆 server 块共用 <span className="font-mono">listen 80</span> /{' '}
         <span className="font-mono">listen 443 ssl</span> 的那个意思
       </div>
@@ -278,7 +275,7 @@ function EntryModal({
       <div className="rounded-xl bg-blue-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 ring-1 ring-blue-200/70">
         <div className="mb-1 font-semibold text-slate-700">想「只开一个端口」就填这儿</div>
         把 HTTPS 端口填成一个固定的高位端口（比如 <span className="font-mono">8443</span>），
-        所有二级域名站点都不指定端口、挂上来按域名分发 —— 对外就只有这一个端口要放通。
+        所有二级域名的服务都不指定端口、挂上来按域名分发 —— 对外就只有这一个端口要放通。
         <div className="mt-1.5">
           本机有公网 IPv6 时（没有 IPv4 公网、只有 IPv6 的家宽很常见），
           <span className="font-semibold">这个端口直接就能从外网访问，不需要打洞</span>：
@@ -352,6 +349,9 @@ interface SiteFormState {
   hosts: string[]
   pathPrefix: string
   stripPrefix: boolean
+  /** 选中的设备（它的 IP + 下面的端口 = 完整的代理地址） */
+  deviceId: number
+  backendPort: string
   backend: string
   backendHttps: boolean
   listenPort: string
@@ -380,6 +380,8 @@ function SiteModal({
     hosts: initial?.hosts?.length ? [...initial.hosts] : [''],
     pathPrefix: initial?.pathPrefix ?? '',
     stripPrefix: initial?.stripPrefix ?? false,
+    deviceId: 0,
+    backendPort: '',
     backend: initial?.backend ?? '',
     backendHttps: initial?.backendHttps ?? false,
     listenPort: initial?.listenPort ? String(initial.listenPort) : '',
@@ -394,9 +396,38 @@ function SiteModal({
   const [testing, setTesting] = useState(false)
   const [probe, setProbe] = useState<{ ok: boolean; text: string } | null>(null)
   const [err, setErr] = useState('')
-  // 局域网扫描：和穿透那边共用同一个弹窗组件，只是填的字段不同
-  const [scan, setScan] = useState<{ open: boolean; subnets: LanSubnet[] }>({ open: false, subnets: [] })
-  const [scanErr, setScanErr] = useState('')
+
+  // 设备列表（服务要挂在某台设备上）+ 扫这台设备得到的端口
+  const [devices, setDevices] = useState<Device[]>([])
+  const [hostPorts, setHostPorts] = useState<LanPort[]>([])
+  const [scanning, setScanning] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    api
+      .getDevices()
+      .then((l) => {
+        if (!alive) return
+        setDevices(l)
+        // 编辑已有服务时：从 backend 的 IP 反查出设备，端口填进框
+        const ip = String(initial?.backend ?? '').split(':')[0]
+        const port = String(initial?.backend ?? '').split(':')[1] ?? ''
+        if (ip) {
+          const d = l.find((x) => x.ip === ip)
+          if (d) {
+            setForm((p) => ({ ...p, deviceId: d.id, backendPort: port }))
+          } else if (port) {
+            // IP 没匹配到设备：至少把端口填上，让用户自己选一台
+            setForm((p) => ({ ...p, backendPort: port }))
+          }
+        }
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial?.id])
 
   // 站点表单的可选项：已配的域名（从 DDNS 来）、本机地址。
   // 拉不到不该拦住表单 —— 那就退化成手填。
@@ -446,6 +477,55 @@ function SiteModal({
 
   const setHost = (i: number, v: string) =>
     setForm((p) => ({ ...p, hosts: p.hosts.map((h, k) => (k === i ? v : h)) }))
+  /** 选了设备 → 拼出完整代理地址；换设备时提醒一下（这是换到另一台机器） */
+  const pickDevice = (id: number) => {
+    const d = devices.find((x) => x.id === id)
+    if (!d) {
+      setForm((p) => ({ ...p, deviceId: 0, backend: '' }))
+      return
+    }
+    const prev = devices.find((x) => x.id === form.deviceId)
+    if (prev && prev.id !== d.id) {
+      // 换机器是件大事（服务会跑到别处），确认一下，别手滑点错
+      if (!window.confirm(`要把这个服务从「${prev.name}」换到「${d.name}」吗？`)) return
+    }
+    setForm((p) => ({
+      ...p,
+      deviceId: d.id,
+      backend: p.backendPort ? `${d.ip}:${p.backendPort}` : `${d.ip}:`,
+    }))
+    setHostPorts([])
+  }
+
+  /** 填端口 → 立刻拼进 backend */
+  const setBackendPort = (port: string) => {
+    const d = devices.find((x) => x.id === form.deviceId)
+    setForm((p) => ({
+      ...p,
+      backendPort: port,
+      backend: d && port ? `${d.ip}:${port}` : p.backend,
+    }))
+  }
+
+  /** 扫这台设备开了哪些端口（只探这一台，一两秒） */
+  const scanThisDevice = async () => {
+    const d = devices.find((x) => x.id === form.deviceId)
+    if (!d) return
+    setScanning(true)
+    setErr('')
+    try {
+      const ports = await api.scanHostPorts(d.ip)
+      setHostPorts(ports)
+      if (ports.length === 0) {
+        setErr(`没探到 ${d.name}（${d.ip}）上开放的端口。机器开着吗？`)
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '扫描失败')
+    } finally {
+      setScanning(false)
+    }
+  }
+
   const addHost = () => setForm((p) => ({ ...p, hosts: [...p.hosts, ''] }))
   const dropHost = (i: number) => setForm((p) => ({ ...p, hosts: p.hosts.filter((_, k) => k !== i) }))
 
@@ -464,7 +544,7 @@ function SiteModal({
   // 端口这一格到底会落在哪，一句话说清。用户最容易误解的就是
   // 「留空」和「选了 HTTPS 却在 80 上也开着」这两件事。
   const portHint = customPort
-    ? `这个站点单独占 ${customPort}，只有它在上面`
+    ? `这个服务单独占 ${customPort}，只有它在上面`
     : entry.httpPort > 0 && form.https && entry.httpsPort > 0
       ? `留空 = 跟默认入口走，:${entry.httpPort} 和 :${entry.httpsPort} 上都能访问`
       : shownPort > 0
@@ -518,38 +598,10 @@ function SiteModal({
     }
   }
 
-  /** 打开扫描弹窗：先取本机网段，再让用户挑 */
-  const openScan = async () => {
-    setScanErr('')
-    try {
-      const subnets = await api.getProxyLanSubnets()
-      if (subnets.length === 0) {
-        setScanErr('没找到可扫描的局域网网段')
-        return
-      }
-      setScan({ open: true, subnets })
-    } catch (e) {
-      setScanErr('读不到本机网段: ' + errText(e))
-    }
-  }
-
-  /** 扫描结果里点了某个端口：填进 backend，能看出是 https 就顺手勾上 */
-  const pickScannedPort = (host: LanHost, port: LanPort) => {
-    setForm((p) => ({
-      ...p,
-      backend: `${host.ip}:${port.port}`,
-      // 扫描认得出来的 HTTPS 服务（端口名带 HTTPS）就顺手勾上"后端是 HTTPS"——
-      // 不勾的话我们会用 http 去连一个 https 服务，直接连不上。
-      // 认不出来时保持用户原来的选择，不擅自改。
-      backendHttps: /https/i.test(port.name || '') ? true : p.backendHttps,
-    }))
-    setScan({ open: false, subnets: [] })
-  }
-
   return (
     <>
       <Modal
-        title={initial ? '编辑站点' : '添加站点'}
+        title={initial ? '编辑服务' : '添加服务'}
       onCancel={onCancel}
       footer={
         <>
@@ -580,7 +632,7 @@ function SiteModal({
         </>
       }
     >
-      {/* 这条站点在干什么，一眼看完 */}
+      {/* 这条服务在干什么，一眼看完 */}
       <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs ring-1 ring-slate-200/70">
         <Globe className="h-3.5 w-3.5 shrink-0 text-blue-500" />
         <span className="truncate font-mono text-slate-700">
@@ -721,7 +773,7 @@ function SiteModal({
 
       {noCertWithoutDomain && (
         <Warn>
-          没填域名，证书又是「自动匹配」——自动匹配是按访问用的域名挑证书的，而这条站点没有域名可挑：
+          没填域名，证书又是「自动匹配」——自动匹配是按访问用的域名挑证书的，而这条服务没有域名可挑：
           现在还没有默认证书，可用证书也不止一张，握手会直接失败，浏览器只报{' '}
           <span className="font-mono">ERR_SSL_PROTOCOL_ERROR</span>。
           上面挑一张具体证书，或者去「证书」页把一张设为默认。
@@ -730,42 +782,66 @@ function SiteModal({
       )}
 
       {orphan && (
-        <Warn>默认入口一个都没开，这条站点存下来也没人监听。去「默认入口」填个端口，或者在上面给它单独填一个</Warn>
+        <Warn>默认入口一个都没开，这条服务存下来也没人监听。去「默认入口」填个端口，或者在上面给它单独填一个</Warn>
       )}
 
       {/* ==== 后端这一侧 ==== */}
       <div className="!mt-5 border-t border-slate-100 pt-4">
         <div className={labelCls}>代理地址</div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {/* 设备：只选，不手填 IP */}
           <select
-            value={form.backendHttps ? 'https' : 'http'}
-            onChange={(e) => setForm((p) => ({ ...p, backendHttps: e.target.value === 'https' }))}
-            className={`${fieldCls} w-24 shrink-0 font-mono`}
+            value={form.deviceId || ''}
+            onChange={(e) => pickDevice(Number(e.target.value) || 0)}
+            className={`${fieldCls} min-w-0 flex-1`}
           >
-            <option value="http">http</option>
-            <option value="https">https</option>
+            <option value="">选择设备…</option>
+            {devices.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}（{d.ip}）
+              </option>
+            ))}
           </select>
+
           <input
-            value={form.backend}
-            onChange={(e) => setForm((p) => ({ ...p, backend: e.target.value }))}
-            placeholder="192.168.1.20:5000"
-            className={`${fieldCls} min-w-0 flex-1 font-mono`}
+            value={form.backendPort}
+            onChange={(e) => setBackendPort(e.target.value)}
+            placeholder="端口"
+            inputMode="numeric"
+            className={`${fieldCls} w-24 shrink-0 font-mono`}
           />
-          {/* 扫局域网选机器：和穿透那边是同一套扫描（core/lanscan），
-              不用记 IP、也不用手打端口 */}
+
+          {/* 扫**这台设备**上的端口（不是全局扫描） */}
           <button
             type="button"
-            onClick={openScan}
-            className="flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-            title="扫描局域网，从结果里选机器和端口"
+            onClick={scanThisDevice}
+            disabled={!form.deviceId || scanning}
+            className="flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50 disabled:opacity-40"
+            title="扫这台机器开了哪些端口"
           >
-            <Radar className="h-3.5 w-3.5" />
-            扫描
+            <Radar className={`h-3.5 w-3.5 ${scanning ? 'animate-pulse' : ''}`} />
+            {scanning ? '扫描中' : '扫这台'}
           </button>
         </div>
+
+        {hostPorts.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-slate-50 p-2">
+            {hostPorts.map((p) => (
+              <button
+                key={p.port}
+                type="button"
+                onClick={() => setBackendPort(String(p.port))}
+                className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
+              >
+                {p.port}
+                {p.name && <span className="ml-1 opacity-70">{p.name}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
-          内网服务的 地址:端口。跑在本机的服务填 <span className="font-mono">127.0.0.1:端口</span>
-          ；服务自己是 HTTPS（自签也算）就把左边换成 https
+          选设备 + 填端口就好，不用记 IP。机器没在列表里就去「设备」页加一台。
         </div>
       </div>
 
@@ -876,22 +952,8 @@ function SiteModal({
       </label>
 
       {err && <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
-      {scanErr && <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{scanErr}</div>}
     </Modal>
 
-    {/* 扫描选机器：和穿透页共用同一个弹窗组件，后端也是同一套（core/lanscan） */}
-    {scan.open && (
-      <LanScanModal
-        subnets={scan.subnets}
-        onCancel={() => setScan({ open: false, subnets: [] })}
-        onPick={(h) => {
-          // 只点了机器没点端口：填 IP，端口留给用户自己填
-          setForm((p) => ({ ...p, backend: h.ip }))
-          setScan({ open: false, subnets: [] })
-        }}
-        onPickPort={pickScannedPort}
-      />
-    )}
     </>
   )
 }
@@ -1087,7 +1149,7 @@ export function ReverseProxy() {
   }
 
   /**
-   * 照着这条站点再开一个。
+   * 照着这条服务再开一个。
    *
    * ID 清零就是为了"新增"而不是"覆盖" —— 和穿透页的复制服务一个道理。
    * 域名要换（同一个域名不能挂两条），所以清掉让用户重填；
@@ -1101,7 +1163,7 @@ export function ReverseProxy() {
   }
 
   const removeSite = async (s: ProxySite) => {
-    if (!window.confirm(`确认删除站点 ${s.hosts?.[0] ?? `:${s.listenPort}`}？`)) return
+    if (!window.confirm(`确认删除服务 ${s.hosts?.[0] ?? `:${s.listenPort}`}？`)) return
     try {
       await api.deleteProxySite(s.id)
       toast('已删除')
@@ -1187,7 +1249,7 @@ export function ReverseProxy() {
         </div>
       </div>
 
-      {/* 监听状态：哪些端口开着、各挂了几个站点 */}
+      {/* 监听状态：哪些端口开着、各挂了几个服务 */}
       <Card className="!py-3.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className={`h-2 w-2 shrink-0 rounded-full ${stateDot}`} />
@@ -1256,14 +1318,14 @@ export function ReverseProxy() {
         )}
       </Card>
 
-      {/* 站点列表：**按设备分组** —— 和穿透页的「设备列表」同一套布局。
+      {/* 服务列表：**按设备分组** —— 和穿透页的「设备列表」同一套布局。
           站点靠后端地址的 IP 自动归属到设备，不用手动挂。 */}
       <Card className="!p-0">
         <div className="px-5 pt-4">
           <CardHeader
             title={
               <span>
-                站点 <span className="ml-1 font-normal text-slate-400">{sites.length}</span>
+                服务 <span className="ml-1 font-normal text-slate-400">{sites.length}</span>
               </span>
             }
             action={
@@ -1271,7 +1333,7 @@ export function ReverseProxy() {
                 onClick={() => setSiteModal({ open: true })}
                 className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
               >
-                <Plus className="h-3 w-3" /> 添加站点
+                <Plus className="h-3 w-3" /> 添加服务
               </button>
             }
           />
@@ -1315,16 +1377,16 @@ export function ReverseProxy() {
                 onClick={() => setSiteModal({ open: true })}
                 className="mt-7 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white shadow-md shadow-blue-500/20 hover:bg-blue-600"
               >
-                添加第一个站点
+                添加第一个服务
               </button>
               <div className="mt-2.5 text-[11px] text-slate-400">
-                一个站点一个域名，域名解析到本机就行。要单独的端口、单独的证书也行
+                一个服务一个域名，域名解析到本机就行。要单独的端口、单独的证书也行
               </div>
             </div>
           </div>
         ) : (
           /*
-           * 站点列表用**卡片**，和穿透页的服务卡片同一套布局。
+           * 服务列表用**卡片**，和穿透页的服务卡片同一套布局。
            *
            * 为什么不用表格：两边都是"一堆可开关的入口"，操作方式应该一致 ——
            * 用户在一个页面学会的操作，到另一个页面就该能直接用。

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"os"
 	"testing"
 
 	"github.com/chenggegedeid/catflap/modules/proxy/model"
@@ -152,5 +153,54 @@ func TestMigratePortForwardNoop(t *testing.T) {
 	migratePortForward(&cfg2)
 	if len(cfg2.Sites) != 1 || len(cfg2.Forwards) != 1 {
 		t.Error("已有 Forwards 时不该再拆")
+	}
+}
+
+// 编辑保存不能把"上主页"标记冲掉。
+//
+// 实测踩到的 bug：前端编辑表单不带 showOnHome（那是列表上的快捷开关），
+// 保存时后端用传入的模型整体替换旧站点 → 标记被冲成 false。
+// 表现是"点过主页，编辑一次就没了"。
+//
+// 原则：**表单管不到的字段，保存时不该被动**。
+func TestSaveSiteKeepsShowOnHome(t *testing.T) {
+	// 建好 config 目录：SaveSite 会落盘，缺目录会失败
+	if err := os.MkdirAll("config", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := model.ProxyConfig{
+		Enabled:   true,
+		HTTPPorts: []int{80},
+		Sites: []model.Site{
+			{
+				ID:         1,
+				Hosts:      []string{"nas.example.com"},
+				Backend:    "192.168.1.20:5000",
+				Enabled:    true,
+				ShowOnHome: true, // 用户点了上主页
+			},
+		},
+	}
+	Runtime.Config = cfg
+
+	// 模拟前端「编辑保存」：带了表单字段，但不带 showOnHome
+	_, err := SaveSite(model.Site{
+		ID:          1,
+		Hosts:       []string{"nas.example.com"},
+		Backend:     "192.168.1.20:5000",
+		Enabled:     true,
+		Description: "改了名字",
+	})
+	if err != nil {
+		t.Fatalf("保存失败：%v", err)
+	}
+
+	got := Runtime.Snapshot().Sites[0]
+	if !got.ShowOnHome {
+		t.Error("编辑保存后 showOnHome 被冲掉了（应保留旧值）")
+	}
+	if got.Description != "改了名字" {
+		t.Errorf("表单里的字段应该更新，实际 %q", got.Description)
 	}
 }

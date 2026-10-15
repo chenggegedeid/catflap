@@ -9,10 +9,10 @@
  * 目标同样按 IP 归属到设备，所以每条转发上能看出是转到哪台机器。
  */
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ArrowRight, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowRight, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
-import type { Device, ProxyConfig, ProxyForward } from '../types'
+import type { Device, LanPort, ProxyConfig, ProxyForward } from '../types'
 
 export function Forwards() {
   const [cfg, setCfg] = useState<ProxyConfig | null>(null)
@@ -124,6 +124,7 @@ export function Forwards() {
       {modal.open && (
         <ForwardModal
           initial={modal.initial}
+          devices={devices}
           onCancel={() => setModal({ open: false })}
           onSubmit={async () => {
             setModal({ open: false })
@@ -200,22 +201,81 @@ function ForwardRow({
 
 function ForwardModal({
   initial,
+  devices,
   onCancel,
   onSubmit,
 }: {
   initial?: ProxyForward
+  devices: Device[]
   onCancel: () => void
   onSubmit: () => void
 }) {
   const [listenPort, setListenPort] = useState(
     initial?.listenPort ? String(initial.listenPort) : '',
   )
+  const [deviceId, setDeviceId] = useState(0)
+  const [targetPort, setTargetPort] = useState('')
   const [target, setTarget] = useState(initial?.target ?? '')
+  const [hostPorts, setHostPorts] = useState<LanPort[]>([])
+  const [scanning, setScanning] = useState(false)
   const [protocol, setProtocol] = useState(initial?.protocol || 'tcp')
   const [enabled, setEnabled] = useState(initial?.enabled ?? true)
   const [description, setDescription] = useState(initial?.description ?? '')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // 编辑已有转发时：从 target 的 IP 反查设备，端口填进框
+  useEffect(() => {
+    if (!initial?.target || devices.length === 0) return
+    const ip = String(initial.target).split(':')[0]
+    const port = String(initial.target).split(':')[1] ?? ''
+    const d = devices.find((x) => x.ip === ip)
+    if (d) {
+      setDeviceId(d.id)
+      setTargetPort(port)
+    } else if (port) {
+      setTargetPort(port)
+    }
+  }, [devices, initial?.target])
+
+  /** 选设备 → 拼 target；换设备时确认（这是换到另一台机器） */
+  const pickDevice = (id: number) => {
+    const d = devices.find((x) => x.id === id)
+    if (!d) {
+      setDeviceId(0)
+      return
+    }
+    const prev = devices.find((x) => x.id === deviceId)
+    if (prev && prev.id !== d.id) {
+      if (!window.confirm(`要把这条转发从「${prev.name}」换到「${d.name}」吗？`)) return
+    }
+    setDeviceId(d.id)
+    setTarget(targetPort ? `${d.ip}:${targetPort}` : `${d.ip}:`)
+    setHostPorts([])
+  }
+
+  const setPort = (port: string) => {
+    const d = devices.find((x) => x.id === deviceId)
+    setTargetPort(port)
+    if (d && port) setTarget(`${d.ip}:${port}`)
+  }
+
+  /** 扫这台机器开了哪些端口（只探一台） */
+  const scanThis = async () => {
+    const d = devices.find((x) => x.id === deviceId)
+    if (!d) return
+    setScanning(true)
+    setErr('')
+    try {
+      const ports = await api.scanHostPorts(d.ip)
+      setHostPorts(ports)
+      if (ports.length === 0) setErr(`没探到 ${d.name}（${d.ip}）上开放的端口`)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '扫描失败')
+    } finally {
+      setScanning(false)
+    }
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -272,15 +332,55 @@ function ForwardModal({
             </label>
           </div>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">目标地址</div>
-            <input
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder="192.168.1.20:80"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
-            />
+            <div className="mb-1 text-xs font-semibold text-slate-500">目标</div>
+            <div className="flex flex-wrap gap-2">
+              <select
+                value={deviceId || ''}
+                onChange={(e) => pickDevice(Number(e.target.value) || 0)}
+                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              >
+                <option value="">选择设备…</option>
+                {devices.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}（{d.ip}）
+                  </option>
+                ))}
+              </select>
+              <input
+                value={targetPort}
+                onChange={(e) => setPort(e.target.value)}
+                placeholder="端口"
+                inputMode="numeric"
+                className="w-24 shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
+              />
+              <button
+                type="button"
+                onClick={scanThis}
+                disabled={!deviceId || scanning}
+                className="flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50 disabled:opacity-40"
+                title="扫这台机器开了哪些端口"
+              >
+                <Radar className={`h-3.5 w-3.5 ${scanning ? 'animate-pulse' : ''}`} />
+                {scanning ? '扫描中' : '扫这台'}
+              </button>
+            </div>
+            {hostPorts.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-slate-50 p-2">
+                {hostPorts.map((p) => (
+                  <button
+                    key={p.port}
+                    type="button"
+                    onClick={() => setPort(String(p.port))}
+                    className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600"
+                  >
+                    {p.port}
+                    {p.name && <span className="ml-1 opacity-70">{p.name}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mt-1 text-[11px] text-slate-400">
-              目标那台机器要在「设备」里加过，否则保存时会被拒
+              选设备 + 填端口。机器没在列表里就去「设备」页加一台。
             </div>
           </label>
           <label className="block">

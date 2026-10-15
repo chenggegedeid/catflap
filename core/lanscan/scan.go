@@ -461,3 +461,66 @@ func ipLess(a, b string) bool {
 	}
 	return false
 }
+
+// ===================== 扫单台机器 =====================
+
+// ScanHostPorts 探一台机器上开了哪些端口。
+//
+// 和扫网段的区别：网段是"找出有哪些机器"，这里是"这台机器上有什么" ——
+// 服务表单里选好设备之后点扫描用的就是它，只探一个 IP，
+// 一两秒出结果（扫网段要几十秒）。
+//
+// 返回按端口号排序，每条带认得出来的名字（如「群晖 DSM」）。
+// 机器关机 / 不通时返回空列表，不报错 —— 那是正常结果，不是错误。
+func ScanHostPorts(ip string, timeout time.Duration) []LanPort {
+	ip = strings.TrimSpace(ip)
+	if ip == "" || net.ParseIP(ip) == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		timeout = 700 * time.Millisecond // 单台可以比扫网段更耐心一点
+	}
+
+	// 先用几个常用端口确认机器活着，活着才继续 ——
+	// 关机的话这一步就返回，省掉后面十几次拨号
+	alive := false
+	var aliveMu sync.Mutex
+	aliveJobs := make([]func(), 0, len(lanAliveProbePorts))
+	for _, p := range lanAliveProbePorts {
+		p := p
+		aliveJobs = append(aliveJobs, func() {
+			open, up := probePort(context.Background(), ip, p, timeout)
+			if open || up {
+				aliveMu.Lock()
+				alive = true
+				aliveMu.Unlock()
+			}
+		})
+	}
+	runJobs(len(aliveJobs), aliveJobs)
+	if !alive {
+		return nil
+	}
+
+	var (
+		mu    sync.Mutex
+		found = make([]LanPort, 0, 8)
+	)
+	jobs := make([]func(), 0, len(lanPorts))
+	for _, lp := range lanPorts {
+		lp := lp
+		jobs = append(jobs, func() {
+			open, _ := probePort(context.Background(), ip, lp.Port, timeout)
+			if !open {
+				return
+			}
+			mu.Lock()
+			found = append(found, LanPort{Port: lp.Port, Name: lp.Name})
+			mu.Unlock()
+		})
+	}
+	runJobs(lanScanWorkers, jobs)
+
+	sort.Slice(found, func(i, j int) bool { return found[i].Port < found[j].Port })
+	return found
+}
