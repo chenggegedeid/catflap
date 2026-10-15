@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, RotateCw } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
-import type { TrafficDailyTotals, TrafficRealtime, TrafficTrend } from '../types'
+import type { AuditIPStat, TrafficDailyTotals, TrafficRealtime, TrafficTrend } from '../types'
 
 /** 刷新间隔（毫秒）。后端只读内存，2 秒一次没有压力。 */
 const REFRESH_MS = 2000
@@ -165,6 +165,9 @@ export function TrafficPanel() {
           </div>
         </Card>
       </div>
+
+      {/* 可疑 IP：仪表盘上直接能看到"有没有人在扫我"，并能一键拉黑 */}
+      <SuspiciousPanel />
 
       {rt?.totals.since ? (
         <div className="px-1 text-[11px] text-slate-400">
@@ -347,4 +350,93 @@ function fmtCount(n: number): string {
   if (n >= 1e8) return `${(n / 1e8).toFixed(1)} 亿`
   if (n >= 1e4) return `${(n / 1e4).toFixed(1)} 万`
   return String(n)
+}
+
+/**
+ * 仪表盘上的可疑 IP 块。
+ *
+ * 为什么要放仪表盘：用户进管理页时的两个问题是"流量怎么样"和
+ * "有没有被扫"。第二个问题的答案不该藏到另一个页面里。
+ *
+ * 这里只展示 + 提供"去处理"的入口，完整的 IP 管理在「访问审计」页 ——
+ * 仪表盘上堆太多操作会变成第二个审计页。
+ */
+function SuspiciousPanel() {
+  const [list, setList] = useState<AuditIPStat[]>([])
+  const [busy, setBusy] = useState('')
+  const [msg, setMsg] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.getAuditIPs({ sort: 'errors', suspicious: true, limit: 5 })
+      setList(r.list ?? [])
+    } catch {
+      // 审计没开或没数据都不该影响仪表盘其它块
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const block = async (ip: string) => {
+    setBusy(ip)
+    try {
+      await api.blockIP({ ip, reason: '仪表盘快捷拉黑', minutes: 60 * 24 })
+      setMsg(`已封禁 ${ip}（1 天）`)
+      window.setTimeout(() => setMsg(''), 2800)
+      await load()
+    } catch (e) {
+      setMsg('封禁失败：' + (e instanceof Error ? e.message : ''))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  if (list.length === 0) return null
+
+  return (
+    <Card className="!p-0">
+      <div className="px-5 pt-4">
+        <CardHeader
+          title="可疑来源"
+          action={
+            <a
+              href="#/audit"
+              className="rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50"
+            >
+              查看全部 ↗
+            </a>
+          }
+        />
+      </div>
+      <div className="px-5 pb-4">
+        <div className="mb-2 text-[11px] text-slate-400">
+          24 小时内异常访问（4xx）密集的来源。点「拉黑」临时封 1 天。
+        </div>
+        <div className="space-y-1.5">
+          {list.map((x) => (
+            <div key={x.ip} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-rose-50/50 px-3 py-2">
+              <span className="font-mono text-xs text-slate-700">{x.ip}</span>
+              <span className="text-[11px] text-slate-500">{x.requests} 次</span>
+              <span className="text-[11px] font-semibold text-rose-600">异常 {x.errors}</span>
+              {x.paths.length > 0 && (
+                <span className="truncate font-mono text-[10px] text-slate-400">
+                  在扫 {x.paths.slice(0, 2).join('、')}
+                </span>
+              )}
+              <button
+                onClick={() => block(x.ip)}
+                disabled={busy === x.ip}
+                className="ml-auto rounded-lg bg-rose-500 px-2 py-0.5 text-xs font-semibold text-white hover:bg-rose-600 disabled:opacity-50"
+              >
+                {busy === x.ip ? '处理中…' : '拉黑'}
+              </button>
+            </div>
+          ))}
+        </div>
+        {msg && <div className="mt-2 text-[11px] text-slate-500">{msg}</div>}
+      </div>
+    </Card>
+  )
 }

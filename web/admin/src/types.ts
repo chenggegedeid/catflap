@@ -724,3 +724,65 @@ export interface TrafficTrend {
   /** 键是站点 ID 的字符串形式 */
   bySite: Record<string, TrafficSiteTraffic>
 }
+
+// ===================== 访问审计与 IP 管理 =====================
+
+export interface AuditBlockEntry {
+  ip: string
+  reason: string
+  addedAt: string
+  /** 到期时间；空 = 永久 */
+  expiresAt?: string
+  /** 自动拉黑的（区别于手动）。自动的可能误伤，界面上要能区分 */
+  auto: boolean
+}
+
+/** 按来源 IP 聚合的统计 */
+export interface AuditIPStat {
+  ip: string
+  firstSeen: string
+  lastSeen: string
+  requests: number
+  bytesIn: number
+  bytesOut: number
+  /** 4xx/5xx 计数 —— 扫端口、猜路径的请求绝大多数落在这里 */
+  errors: number
+  /** 访问过的路径（最多 30 条）。看它扫什么就能判断意图 */
+  paths: string[]
+  hosts: string[]
+  userAgents: string[]
+  blocked: boolean
+  blockReason: string
+  blockExpiresAt?: string
+}
+
+/** 一次访问 */
+export interface AuditRecord {
+  time: string
+  ip: string
+  method: string
+  host: string
+  /** 只有路径，**没有 query string** —— 那可能带 token */
+  path: string
+  status: number
+  bytesIn: number
+  bytesOut: number
+  durationMs: number
+  userAgent: string
+  siteId: number
+}
+
+export interface AuditConfigView {
+  enabled: boolean
+  keepDays: number
+  maxFileMB: number
+  autoBlock: boolean
+  autoBlockThreshold: number
+  autoBlockMinutes: number
+  whitelist: string[]
+  trustedProxies: string[]
+  blocks: AuditBlockEntry[]
+  days: string[]
+  suspiciousCount: number
+  totalIPs: number
+}
