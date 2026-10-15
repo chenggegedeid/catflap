@@ -164,7 +164,19 @@ func TestMigratePortForwardNoop(t *testing.T) {
 //
 // 原则：**表单管不到的字段，保存时不该被动**。
 func TestSaveSiteKeepsShowOnHome(t *testing.T) {
-	// 建好 config 目录：SaveSite 会落盘，缺目录会失败
+	// SaveSite 会落盘到 config/proxyConfig.json —— 必须切到临时目录，
+	// 否则会在源码树里留下 modules/proxy/config/（已经误提交过两次）。
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+	// 切过去之后还要建 config/ —— SaveSite 直接写 config/proxyConfig.json，
+	// 不会自己建目录
 	if err := os.MkdirAll("config", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -185,15 +197,15 @@ func TestSaveSiteKeepsShowOnHome(t *testing.T) {
 	Runtime.Config = cfg
 
 	// 模拟前端「编辑保存」：带了表单字段，但不带 showOnHome
-	_, err := SaveSite(model.Site{
+	_, saveErr := SaveSite(model.Site{
 		ID:          1,
 		Hosts:       []string{"nas.example.com"},
 		Backend:     "192.168.1.20:5000",
 		Enabled:     true,
 		Description: "改了名字",
 	})
-	if err != nil {
-		t.Fatalf("保存失败：%v", err)
+	if saveErr != nil {
+		t.Fatalf("保存失败：%v", saveErr)
 	}
 
 	got := Runtime.Snapshot().Sites[0]
