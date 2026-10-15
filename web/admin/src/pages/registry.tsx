@@ -19,7 +19,7 @@ import { ComponentManager } from './Components'
 import { Dashboard } from './Dashboard'
 import { Ddns } from './Ddns'
 import { Logs } from './Logs'
-import { Placeholder } from './Placeholder'
+import { Notify } from './Notify'
 import { ReverseProxy } from './ReverseProxy'
 import { Settings } from './Settings'
 import { Stun } from './Stun'
@@ -165,9 +165,10 @@ export const pages = {
     element: <Logs />,
   },
   notify: {
-    label: '通知设置',
+    label: '通知',
     icon: Bell,
-    element: <Placeholder name="通知设置" />,
+    subtitle: '渠道全局配一次，各服务按名字选用',
+    element: <Notify />,
   },
 } satisfies Record<string, PageMeta>
 

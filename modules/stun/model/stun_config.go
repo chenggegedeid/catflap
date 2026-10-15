@@ -98,9 +98,18 @@ type Service struct {
 	Enabled     bool   `json:"enabled"`     // 服务是否启用 (默认 true)
 	Description string `json:"description"` // 服务描述信息 (可选)
 
-	WebHookConfig webhook.WebhookConfig `json:"webhookconfig"` // Webhook 配置文件
+	WebHookConfig webhook.WebhookConfig `json:"webhookconfig"` // 旧的内联 webhook，已被通知中心取代（保留做回退）
 	Redirect      RedirectConfig        `json:"redirect"`      // 固定域名跟着外部端口走
 	MCEntry       MCEntryConfig         `json:"mcEntry"`       // MC Java 版联机：SRV 记录跟着外部端口走
+
+	// ChannelIDs 这个服务出事时发到哪些通知渠道。
+	//
+	// 存的是**全局渠道的 ID**，不再把 URL/密钥内联在这里 —— 同一个群机器人
+	// 地址不该在 5 个服务里存 5 份。改一次渠道，所有引用它的服务立刻生效。
+	//
+	// 空 = 这个服务不发通知。旧的 WebHookConfig 字段保留：迁移万一有问题，
+	// 打开通知中心的 LegacyWebhookFallback 就能退回读它。
+	ChannelIDs []string `json:"channelIds,omitempty"`
 
 	UpdatedAt time.Time `json:"updatedAt"` // 最后更新时间
 }

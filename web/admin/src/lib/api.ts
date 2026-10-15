@@ -12,6 +12,8 @@ import type {
   LogEntry,
   NatTypeInfo,
   NetInterface,
+  NotifyChannelType,
+  NotifyConfigView,
   ProxyConfig,
   ProxyEntry,
   ProxyAccess,
@@ -762,3 +764,38 @@ export const runTask = (id: string) =>
     method: 'POST',
     body: JSON.stringify({ id }),
   })
+
+// ===================== 通知中心 =====================
+
+export interface NotifyChannelSavePayload {
+  id: string
+  name: string
+  type: NotifyChannelType
+  enabled: boolean
+  config: Record<string, string>
+}
+
+export interface NotifyRuleSavePayload {
+  id: string
+  name: string
+  event: string
+  channelIds: string[]
+  enabled: boolean
+}
+
+export const getNotifyConfig = () => request<NotifyConfigView>('/api/notify/config')
+
+export const saveNotifyChannel = (body: NotifyChannelSavePayload) =>
+  request<{ id: string }>('/api/notify/channel', { method: 'POST', body: JSON.stringify(body) })
+
+export const deleteNotifyChannel = (id: string) =>
+  request<unknown>('/api/notify/channel/delete', { method: 'POST', body: JSON.stringify({ id }) })
+
+export const testNotifyChannel = (body: { id?: string; type?: string; config?: Record<string, string> }) =>
+  requestWithMsg<unknown>('/api/notify/channel/test', { method: 'POST', body: JSON.stringify(body) })
+
+export const saveNotifyRule = (body: NotifyRuleSavePayload) =>
+  request<unknown>('/api/notify/rule', { method: 'POST', body: JSON.stringify(body) })
+
+export const deleteNotifyRule = (id: string) =>
+  request<unknown>('/api/notify/rule/delete', { method: 'POST', body: JSON.stringify({ id }) })
