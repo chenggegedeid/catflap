@@ -1,8 +1,9 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { LockKeyhole, ShieldCheck } from 'lucide-react'
-import { MIN_PASSWORD_LENGTH, login, setupPassword, setToken } from '../lib/api'
+import { LockKeyhole, ShieldCheck, User } from 'lucide-react'
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, login, setupPassword, setToken } from '../lib/api'
 
 export function Login({ onSuccess }: { onSuccess: () => void }) {
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(false)
   const [error, setError] = useState('')
@@ -17,7 +18,9 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true)
     setError('')
     try {
-      const { token } = await login(password, remember)
+      // 用户名留空也允许：升级上来的老配置里没有"用户名"这个概念，
+      // 后端会放行。这样老用户不会一升级就登不进去。
+      const { token } = await login(username, password, remember)
       setToken(token)
       onSuccess()
     } catch (err) {
@@ -31,10 +34,11 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
     <AuthLayout
       icon={<LockKeyhole className="h-7 w-7" />}
       title="登录 Catflap"
-      subtitle="请输入管理员密码"
+      subtitle="请输入用户名和密码"
     >
       <form onSubmit={submit} className="space-y-4">
-        <PasswordField value={password} onChange={setPassword} placeholder="管理员密码" autoFocus />
+        <UsernameField value={username} onChange={setUsername} autoFocus />
+        <PasswordField value={password} onChange={setPassword} placeholder="密码" />
         <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-500 select-none">
           <input
             type="checkbox"
@@ -52,6 +56,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
 }
 
 export function Setup({ onSuccess }: { onSuccess: () => void }) {
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
@@ -63,6 +68,10 @@ export function Setup({ onSuccess }: { onSuccess: () => void }) {
       setError(`密码至少 ${MIN_PASSWORD_LENGTH} 位`)
       return
     }
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      setError(`密码最多 ${MAX_PASSWORD_LENGTH} 位`)
+      return
+    }
     if (password !== confirm) {
       setError('两次输入的密码不一致')
       return
@@ -70,7 +79,7 @@ export function Setup({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true)
     setError('')
     try {
-      const { token } = await setupPassword(password)
+      const { token } = await setupPassword(username, password)
       setToken(token)
       onSuccess()
     } catch (err) {
@@ -84,14 +93,14 @@ export function Setup({ onSuccess }: { onSuccess: () => void }) {
     <AuthLayout
       icon={<ShieldCheck className="h-7 w-7" />}
       title="欢迎使用 Catflap"
-      subtitle="首次使用，请设置管理员密码"
+      subtitle="首次使用，请设置用户名和密码"
     >
       <form onSubmit={submit} className="space-y-4">
+        <UsernameField value={username} onChange={setUsername} autoFocus />
         <PasswordField
           value={password}
           onChange={setPassword}
-          placeholder={`设置密码（至少 ${MIN_PASSWORD_LENGTH} 位）`}
-          autoFocus
+          placeholder={`设置密码（${MIN_PASSWORD_LENGTH}-${MAX_PASSWORD_LENGTH} 位）`}
         />
         <PasswordField value={confirm} onChange={setConfirm} placeholder="确认密码" />
         {error && <p className="text-sm text-rose-500">{error}</p>}
@@ -128,6 +137,38 @@ function AuthLayout({
   )
 }
 
+/**
+ * 用户名输入框。
+ *
+ * 留空也能提交 —— 升级上来的老配置里没有用户名这个概念，
+ * 后端会放行；强制要求填会让那批用户登不进去。placeholder 里说清楚默认值。
+ */
+function UsernameField({
+  value,
+  onChange,
+  autoFocus,
+}: {
+  value: string
+  onChange: (v: string) => void
+  autoFocus?: boolean
+}) {
+  return (
+    <div className="relative">
+      <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <input
+        type="text"
+        value={value}
+        autoFocus={autoFocus}
+        autoComplete="username"
+        maxLength={32}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="用户名（留空用 admin）"
+        className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+      />
+    </div>
+  )
+}
+
 function PasswordField({
   value,
   onChange,
@@ -144,6 +185,9 @@ function PasswordField({
       type="password"
       value={value}
       autoFocus={autoFocus}
+      // 只在**设置新密码**时限制输入长度；登录页也带这个上限是合理的 ——
+      // 超过上限的密码当初就不可能设成功
+      maxLength={MAX_PASSWORD_LENGTH}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"

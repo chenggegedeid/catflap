@@ -113,32 +113,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ===================== Auth =====================
 
-// MIN_PASSWORD_LENGTH 和后端 auth.MinPasswordLength 保持一致。
-// 这里没有用户名，别人只能一串一串地试密码，长度就是唯一的门槛。
-export const MIN_PASSWORD_LENGTH = 8
+// 密码长度区间，和后端 auth.MinPasswordLength / MaxPasswordLength 一致。
+// 下限 6：加了用户名之后攻击者要同时猜中两个，6 位够用。
+// 上限 24：主要是防"把整段文字粘进密码框"，不是安全上限。
+export const MIN_PASSWORD_LENGTH = 6
+export const MAX_PASSWORD_LENGTH = 24
 
 export const getAuthStatus = () =>
   request<{ initialized: boolean }>('/api/auth/status')
 
-export const setupPassword = (password: string) =>
-  request<{ token: string }>('/api/auth/setup', {
+// username 留空后端会回落到默认（admin）—— 老配置没有用户名这个概念
+export const setupPassword = (username: string, password: string) =>
+  request<{ token: string; username: string }>('/api/auth/setup', {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   })
 
 // login 的 remember=true 会让后端签发 7 天有效的 token；默认只给 24 小时。
 // 后端 modules/auth/auth_config.go 里的两个常量是这里注释的依据。
-export const login = (password: string, remember = false) =>
+//
+// username 留空也能登：升级上来的老配置里不存在用户名，后端会放行。
+export const login = (username: string, password: string, remember = false) =>
   request<{ token: string }>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ password, remember }),
+    body: JSON.stringify({ username, password, remember }),
   })
 
-// 改完密码旧 token 全部作废，后端会回一个新的，记得存下来顶替旧的
-export const changePassword = (oldPassword: string, newPassword: string) =>
-  request<{ token: string }>('/api/auth/password', {
+// 改完密码旧 token 全部作废，后端会回一个新的，记得存下来顶替旧的。
+// newUsername 留空表示只改密码、不动用户名。
+export const changePassword = (oldPassword: string, newPassword: string, newUsername = '') =>
+  request<{ token: string; username: string }>('/api/auth/password', {
     method: 'PUT',
-    body: JSON.stringify({ oldPassword, newPassword }),
+    body: JSON.stringify({ oldPassword, newPassword, newUsername }),
   })
 
 export const getVersion = () => request<{ version: string }>('/api/version')

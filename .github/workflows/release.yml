@@ -277,8 +277,18 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
 
-          # 正文里带上校验和，方便用户手工核对
+          # 正文 = 这个版本改了什么（从 CHANGELOG 抽）+ 校验和 + 安装方式。
+          #
+          # 第一段是重点：以前只有下面那堆模板，用户在 GitHub 上点开每个 Release
+          # 都只看到一串资产文件名，完全不知道该不该升级。
+          # 抽不到对应段落时给一句提示，别让整段空着。
           {
+            echo "## 更新内容"
+            echo ""
+            python scripts/release_notes.py "${TAG#v}" || echo "（CHANGELOG 里没有这一版的记录）"
+            echo ""
+            echo "---"
+            echo ""
             echo "## 校验和"
             echo ""
             echo '```'
@@ -298,9 +308,11 @@ jobs:
             echo "- 不要用 root 运行，见 SECURITY.md 的部署安全清单"
           } > release-body.md
 
+          # 注意：不要加 --generate-notes。它和 --notes-file 一起用时会被后者
+          # 整个覆盖掉（不会合并），留着只是误导别人以为两个都生效。
+          # 提交列表的价值不如整理过的 CHANGELOG，所以只保留我们的正文。
           gh release create "${TAG}" \
             --title "${TAG}" \
-            --generate-notes \
             --notes-file release-body.md \
             ${PRERELEASE_FLAG} \
             dist/*

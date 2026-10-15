@@ -10,6 +10,9 @@ import (
 )
 
 type SetupRequest struct {
+	// Username 登录名。留空用 auth.DefaultUsername（"admin"）——
+	// 老的安装流程只有密码，不能因为没传就失败
+	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
@@ -24,7 +27,7 @@ type SetupRequest struct {
 // 想更严就装完立刻初始化，或者在前面挂一层认证。
 func (AuthApi) SetupView(c *gin.Context) {
 	cr := middleware.GetBindRequest[SetupRequest](c)
-	if err := auth.Runtime.Setup(cr.Password); err != nil {
+	if err := auth.Runtime.Setup(cr.Username, cr.Password); err != nil {
 		if errors.Is(err, auth.ErrPasswordBusy) {
 			res.FailTooManyRequests(c)
 			return
@@ -32,7 +35,9 @@ func (AuthApi) SetupView(c *gin.Context) {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
-	token, err := auth.Runtime.Login(cr.Password, false)
+	// 初始化后立刻登录。这里用**空 remoteAddr**：刚刚设的密码，
+	// 不可能撞上限速；而且这是本机第一次登录，不该受任何桶影响。
+	token, err := auth.Runtime.Login(cr.Username, cr.Password, "", false)
 	if err != nil {
 		if errors.Is(err, auth.ErrPasswordBusy) {
 			res.FailTooManyRequests(c)
@@ -41,5 +46,7 @@ func (AuthApi) SetupView(c *gin.Context) {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
-	res.OkWithData(gin.H{"token": token}, c)
+	// 把实际生效的用户名回给前端：留空时前端不知道默认成了什么，
+	// 下次登录会懵
+	res.OkWithData(gin.H{"token": token, "username": auth.NormalizeUsernameDefault(cr.Username)}, c)
 }
