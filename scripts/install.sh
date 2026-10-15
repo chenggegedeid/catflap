@@ -205,11 +205,17 @@ fi
 need_cmd curl
 command -v systemctl >/dev/null 2>&1 || die "没找到 systemd，本脚本只支持 systemd 的系统"
 [ -r /etc/os-release ] || die "看不出系统版本（没有 /etc/os-release）"
-# shellcheck disable=SC1091
-. /etc/os-release
-case "${ID:-}" in
+# ⚠️ 必须放在子 shell 里读，不能直接 `. /etc/os-release`。
+#
+# 那个文件里有一行 VERSION="13 (trixie)"（Debian 自己的版本号），
+# source 进来就会把本脚本的 VERSION 变量覆盖掉 —— 于是脚本拿 Debian 的版本号
+# 去拼下载链接： .../releases/download/v13 (trixie)/catflap，
+# curl 报 "Malformed input to a URL function"，光看报错完全想不到是这里。
+# （Debian 13 trixie 上实测踩到。）
+OS_ID="$(. /etc/os-release && printf '%s' "${ID:-}")"
+case "${OS_ID}" in
   debian|ubuntu|raspbian|deepin|uos|kylin) ;;
-  *) warn "本脚本主要面向 Debian / Ubuntu，当前是 ${ID:-未知}，继续但请自行确认" ;;
+  *) warn "本脚本主要面向 Debian / Ubuntu，当前是 ${OS_ID:-未知}，继续但请自行确认" ;;
 esac
 
 # ── 架构 ────────────────────────────────────────────────────────────────────
@@ -236,9 +242,27 @@ if [ -z "$VERSION" ]; then
   latest="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
             | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -n1)"
   [ -n "$latest" ] || die "查不到最新版本（网络不通，或仓库还没有 Release）。可以指定版本：--version v1.0.0"
+  # 拿到什么就信什么是危险的：API 偶尔返回空串、带换行或者别的东西，
+  # 拼进 URL 之后 curl 只会说 "Malformed input to a URL function"，
+  # 看不出真正原因。这里先把关，不合格就说清楚。
+  case "$latest" in
+    v[0-9]*[0-9]) ;;
+    *) die "从 GitHub 拿到的版本号不像样（${latest}）。请手动指定：--version v1.0.0" ;;
+  esac
   VERSION="$latest"
 fi
+
+# 去掉可能存在的空格与 v 前缀再重新拼 TAG：菜单里手敲版本号很容易带上空格，
+# 而带空格的 URL 同样会让 curl 报那个看不懂的 malformed。
+# 先去空格、再去 v 前缀，最后重新拼上 v —— 顺序不能反。
+# 反了的话 " v1.0.0 " 会先被去掉 v（去不掉，前面有空格），
+# 再去掉空格变成 v1.0.0，最后拼成 vv1.0.0。
+VERSION="$(printf '%s' "$VERSION" | tr -d '[:space:]')"
 VERSION="${VERSION#v}"
+[ -n "$VERSION" ] || die "版本号是空的"
+case "$VERSION" in
+  *[!0-9A-Za-z._-]*) die "版本号里有非法字符：${VERSION}" ;;
+esac
 TAG="v${VERSION}"
 log "版本：${TAG}"
 
