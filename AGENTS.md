@@ -28,7 +28,6 @@ modules/<模块>/model/           配置/数据结构
 core/                           日志、退出时保存
 utils/                          通用工具（res 统一响应、utilsFile 读写 JSON 等）
 web/admin, web/home             前端源码 + 已提交的 dist
-test/                           手工实验用的独立小程序（多数有自己的 go.mod），不是单元测试
 docs/                           面向用户的文档（中文）
 ```
 
@@ -98,7 +97,6 @@ go vet ./...
 go test ./api/... ./modules/... ./routers/... ./utils/...
 ```
 
-- 不要直接 `go test ./...`：`test/` 下是手工实验程序，有的会真的去连外网 STUN 服务器
 - 涉及桌面版的改动再加：`go build -tags desktop ./...`
 - 涉及平台分支的改动再加：`$env:GOOS="linux"; go build ./...; Remove-Item Env:GOOS`
 - 完整发布构建：`task build`（需要 Wails v3 CLI）

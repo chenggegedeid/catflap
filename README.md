@@ -71,69 +71,45 @@ Catflap 是一个**独立项目**：有自己的名称、图标、功能路线�
 
 ## 目录结构
 
-> 约定：**存量目录冻结，增量严格分类。**
-> Go 的包路径**就是**目录路径，改动 `modules/`、`api/` 这类目录等于全库改 import，
-> 因此这些目录与上游保持一致；所有**新增**内容按功能分类归位。
-
 ```
 catflap/
-├─ .github/                  协作配置
-│  ├─ workflows/             ci.yml（每次提交）/ release.yml（打 tag 自动出包）
-│  ├─ ISSUE_TEMPLATE/        Issue 模板
-│  └─ PULL_REQUEST_TEMPLATE.md
+├─ .github/                  协作配置：workflows / Issue 模板
 ├─ branding/                 ★ 品牌资产唯一来源（改品牌只动这里）
-│  ├─ logo/                  矢量图标：主图标 / 单色版 / 横版文字标
-│  ├─ icon/                  favicon 与桌面版图标
+│  ├─ logo/  icon/           矢量图标、favicon、托盘小图
 │  └─ README.md              色板、用法、导出规范
 ├─ core/                     框架层（Go 包）
-│  ├─ component/             ★ 组件契约 + 注册表 + 依赖拓扑排序
-│  ├─ provider/              ★ 提供者注册表（DNS / 通知 / 存储）
-│  ├─ bus/                   ★ 事件总线（模块间解耦）
+│  ├─ component/  provider/  组件注册表、提供者注册表
+│  ├─ bus/                   事件总线（模块间解耦）
 │  └─ enter.go  logrus.go    日志、关闭信号等基础设施
-├─ modules/                  业务模块（一个目录一个功能，与上游同名同序）
-│  ├─ auth/ cert/ ddns/ home/ plainhttp/ proxy/ srv/ stun/ update/ webhook/
+├─ modules/                  业务模块（一个目录一个功能）
+│  └─ auth/ cert/ ddns/ home/ proxy/ stun/ task/ update/ webhook/ wol/
 ├─ api/                      HTTP 接口层（按模块分子目录）
-├─ routers/ middleware/      路由装配与中间件
-├─ utils/                    无状态工具（jwt / pwd / res / http / file）
+├─ routers/  middleware/     路由装配与中间件
+├─ utils/                    无状态工具
 ├─ web/
 │  ├─ admin/                 管理面板（React 19 + TS + Vite + Tailwind）
 │  └─ home/                  导航主页
-├─ deploy/                   ★ 部署物料
-│  ├─ systemd/               catflap.service（含安全加固）
-│  ├─ docker/                Dockerfile 与 compose 示例
-│  └─ README.md              各平台部署步骤
+├─ deploy/                   ★ 部署物料：systemd / docker / 各平台步骤
 ├─ docs/                     文档，索引见 docs/README.md
-│  ├─ about.md               上游区（位置由上游决定）
-│  ├─ 快速上手.md             上游区
-│  ├─ 部署与升级.md           上游区
-│  ├─ img/                   上游区（文档配图）
+│  ├─ guides/                ★ 按场景的部署指南（IPv6、单端口入口……）
 │  ├─ decisions/             ★ 架构决策记录（ADR）
-│  ├─ design/                ★ 品牌与架构设计、路线图
-│  ├─ compliance/            ★ 许可、来源与合规
-│  └─ upstream/              ★ 归档：被本项目改写过的那份原始 README
-├─ config/  data/            运行期数据（含明文凭据，已 gitignore）
-├─ go.mod  go.sum
-├─ Taskfile.yml  app.go  main_*.go        上游区（构建入口与任务定义）
-└─ AGENTS.md  BUILD.md  ads.md  todo.md   上游区（上游的说明与笔记）
-   icon_64.png  icon_256.png  lICON.PNG  linkstar.xmind  test/   上游区
+│  ├─ design/  compliance/   设计与路线图 / 许可与合规
+│  └─ upstream/              归档：上游原始 README
+├─ scripts/                  打包与校验脚本（fpk / 安装器 / 守门检查）
+├─ build/                    桌面版打包资源（Wails）
+├─ app.go  main_cli.go  main_desktop.go   后端启动与两个编译入口
+├─ Taskfile.yml  BUILD.md    一键编译 / 编译说明
+└─ AGENTS.md                 给 AI 编码助手的仓库约束
 ```
 
-★ = 本项目新增的部分。
+★ = 本项目新增/重点维护的部分。
 
-### 根目录为什么不能全清干净
+### 关于目录的两条约定
 
-`README.md` 之外，根目录还有一些看着散的东西：`app.go`、`Taskfile.yml`、`AGENTS.md`、
-`BUILD.md`、`icon_*.png`、`lICON.PNG`、`test/`。
-
-**不要随手挪它们**：
-
-- `app.go` / `Taskfile.yml` 是构建入口（挪了直接编不过）；
-- `main_desktop.go` 用 `//go:embed` 引用了 `icon_*.png`，动路径连编译都过不去；
-- `test/` 是早期试验程序目录，**刻意保持原样**：不参与产品构建，也不套用本项目的
-  gofmt 门禁（格式化它只会凭空多出一堆与功能无关的 diff）。
-
-新增的东西按用途归位：`branding/`、`deploy/`、`docs/{decisions,design,compliance}/`、
-`core/{bus,component,provider}/`、`.github/`、`scripts/`。笔记、临时脚本、截图一律进 `docs/`。
+- **Go 的包路径就是目录路径**：改 `modules/`、`api/` 这类目录等于全库改 import，
+  动之前先想清楚；新增内容按功能归位（表见 CONTRIBUTING.md）。
+- `docs/img/` 放 README 与文档配图；`config/`、`data/` 是运行期数据（含明文凭据），
+  已 gitignore。
 
 ## 安装
 

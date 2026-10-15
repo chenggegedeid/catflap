@@ -44,7 +44,10 @@ func fitWindow(w, h int) (int, int) {
 	return max(w, minWinWidth), max(h, minWinHeight)
 }
 
-//go:embed icon_64.png
+// 托盘图标。品牌资产的唯一来源在 branding/icon/，这里只引用不另存一份——
+// 以前根目录散着一个 icon_64.png，和 branding 各说各话，改图标得改两处。
+//
+//go:embed branding/icon/tray-64.png
 var trayIcon []byte
 
 // desktopSecret 本次进程的桌面免登录 secret，注入后端并随 admin URL 传给 webview。

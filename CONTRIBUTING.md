@@ -19,15 +19,13 @@ Go 的包路径**就是**目录路径。把 `modules/stun/` 挪进 `modules/netw
   | 一家新的 DNS / 通知 / 存储服务商 | 只加一个 `register.go`，不要改 `switch`（见下） |
   | 品牌资产（图标、色板） | `branding/`，这是唯一来源 |
   | 部署物料（unit、Dockerfile、脚本） | `deploy/` |
-  | 文档 | 本项目区文档进 `docs/{decisions,design,compliance,upstream}/` |
-- **上游已有的文件一律留在上游路径**，哪怕它看起来该被整理。`docs/about.md`、`docs/快速上手.md`、
-  `docs/部署与升级.md`、`docs/img/`、`AGENTS.md`、`BUILD.md`、`ads.md`、`todo.md`、`test/`
-  以及根目录那几个图标 —— 它们的位置由上游决定。挪走的代价是**每次 `git merge upstream`
-  都多一份手工冲突修复**（`CONFLICT (modify/delete)`）。判断方法：`git log --follow` 看它是不是
-  上游带过来的，是就别动。
-- 根目录的本项目区只允许放：`NOTICE`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、
-  `.gitignore`、`.gitattributes`、`.editorconfig`、`.dockerignore`。
-  **不要往根目录丢笔记、临时脚本、截图。**
+  | 文档 | 决策进 `docs/decisions/`、指南进 `docs/guides/`、设计与路线图进 `docs/design/` |
+- **不要往根目录丢笔记、临时脚本、截图**——笔记进 `docs/`，截图进 `docs/img/`，
+  一次性脚本用完就删。
+- 历史说明：早期为兼容上游合并，上游带来的文件一律留在原路径。自
+  [ADR-0004](docs/decisions/0004-改用自有-go-module-名.md) 放弃合并、
+  [ADR-0006](docs/decisions/0006-移除上游区目录约束.md) 清理遗留后，这条约束已撤销，
+  现在按上面这张表归位即可。
 
 ## 开发环境
 

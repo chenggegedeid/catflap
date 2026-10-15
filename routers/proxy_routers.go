@@ -32,6 +32,17 @@ func ProxyRouters(g *gin.RouterGroup) {
 		app.ProxyAccessLogView,
 	)
 
+	// Cloudflare Tunnel：设置与手动重启
+	g.POST(
+		"proxy/tunnel",
+		middleware.BindJsonMiddleware[proxy_api.TunnelSaveRequest],
+		app.ProxyTunnelSaveView,
+	)
+	g.POST(
+		"proxy/tunnel/restart",
+		app.ProxyTunnelRestartView,
+	)
+
 	// 站点增 / 改 / 删
 	g.POST(
 		"proxy/site",
