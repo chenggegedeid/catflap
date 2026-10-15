@@ -73,7 +73,14 @@ func updateNetworkAddress(stunServer string) bool {
 		return false
 	}
 
-	logrus.Infof("通过 STUN 服务器 %s 获取到的网络地址: LocalIP=%s, PublicIP=%s", stunServer, addrInfo.LocalIP, addrInfo.PublicIP)
+	// 只在**地址真的变了**才打 info。
+	//
+	// 以前这行是无条件打在每次轮询上的，而这个轮询默认 5 秒一次 ——
+	// 一天就是一万七千条一模一样的日志，journal 被刷爆，
+	// 真正有价值的「家宽 IP 变了」那条反而被埋进去找不着。
+	// 稳态下用 Debug 就够：想看轮询在不在，把日志级别调到 debug。
+	logrus.Debugf("通过 STUN 服务器 %s 获取到的网络地址: LocalIP=%s, PublicIP=%s",
+		stunServer, addrInfo.LocalIP, addrInfo.PublicIP)
 
 	// 如果公网ip是10网段，就失败（部分 STUN 服务器会错误地返回内网地址）
 	if strings.HasPrefix(addrInfo.PublicIP, "10.") {
@@ -90,6 +97,9 @@ func updateNetworkAddress(stunServer string) bool {
 		// 更新网络信息
 		Runtime.Network.LocalIP = addrInfo.LocalIP
 		Runtime.Network.PublicIP = addrInfo.PublicIP
+
+		logrus.Infof("网络地址变化: LocalIP=%s, PublicIP=%s（来自 STUN 服务器 %s）",
+			addrInfo.LocalIP, addrInfo.PublicIP, stunServer)
 
 		// 更新NatRouter
 		go updateNatRouter()
