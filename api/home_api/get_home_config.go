@@ -24,14 +24,10 @@ type HomeConfigViewResponse struct {
 	Categories []home.Category `json:"categories"`
 	Apps       []home.AppView  `json:"apps"`
 
-	// LockedCategoryIDs 因为要登录而被藏起来的分组 ID。
+	// Authed 这次请求带没带有效登录态。前端据此决定右上角显示「登录」还是
+	// 「设置 / 后台 / 退出」。
 	//
-	// 前端拿它给访客渲染一个「登录查看」的占位分组——让人知道这儿有东西，
-	// 但不泄露是什么。已登录时为空。
-	LockedCategoryIDs []string `json:"lockedCategoryIds"`
-
-	// Authed 这次请求带没带有效登录态。前端据此决定要不要显示"登录/退出"入口。
-	// 注意它只是个展示用的提示，真正的过滤在服务端做了，不信前端传的任何东西。
+	// 注意它只是展示用：真正的过滤在服务端做了（见下），不信前端传的任何东西。
 	Authed bool `json:"authed"`
 }
 
@@ -40,8 +36,9 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 	// 导航主页是公开的，但这个接口同时给「访客浏览」和「主人编辑」两种场景用，
 	// 所以要看一眼这次请求有没有登录态：有就给全量，没有就先把要求登录的分组摘掉。
 	//
-	// 摘的动作必须在服务端做。放前端藏的话，访客打开页面源码 / 直接调这个
-	// 接口照样能看到内网服务名和端口——那等于没设防。
+	// 摘的动作必须在服务端做，而且**摘干净**：
+	// 不回 lockedCategoryIds、不留占位 —— 访客拿到的 JSON 里就不存在那些分组，
+	// 从响应里数不出"您藏了几个分组"。占位数本身就是信息（有几个东西值得惦记）。
 	authed := middleware.IsAuthed(c)
 
 	var resp HomeConfigViewResponse
@@ -59,7 +56,6 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 			SearchHistory:         append([]string{}, cfg.SearchHistory...),
 			Categories:            append([]home.Category{}, cfg.Categories...),
 			Apps:                  home.HydrateApps(cfg.Apps),
-			LockedCategoryIDs:     []string{},
 			Authed:                authed,
 		}
 
@@ -82,10 +78,6 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 		}
 
 		resp.Categories = kept
-		resp.LockedCategoryIDs = make([]string, 0, len(locked))
-		for id := range locked {
-			resp.LockedCategoryIDs = append(resp.LockedCategoryIDs, id)
-		}
 
 		apps := make([]home.AppView, 0, len(resp.Apps))
 		for _, a := range resp.Apps {

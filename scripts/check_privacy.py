@@ -56,6 +56,9 @@ SCAN_SUFFIX = {
     ".json", ".yml", ".yaml", ".toml", ".css", ".html", ".txt",
 }
 
+# 本检查器自身的文件：它必须包含这些模式才能工作，扫它只会自己抓自己
+SELF = "scripts/check_privacy.py"
+
 
 def tracked_files() -> list[str]:
     out = subprocess.run(
@@ -81,6 +84,8 @@ def main() -> int:
             continue
 
         if pathlib.Path(rel).suffix.lower() not in SCAN_SUFFIX:
+            continue
+        if posix == SELF:
             continue
         p = ROOT / rel
         try:
