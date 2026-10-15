@@ -63,20 +63,26 @@ func planBindings(cfg model.ProxyConfig) []binding {
 
 	var out []binding
 
-	// 每个 HTTP 入口都收下全部共享站点：勾了 HTTPS 的站点在这儿依然能用
-	// 明文访问，内网里直接敲 IP 或者还没配证书的时候不至于打不开
+	// HTTP 入口：自动和选 http 的站点才挂上来。
+	// 选了 https 的是**只**要 HTTPS（用户明确指定的），不该在这儿也开一份。
+	var httpSites []model.Site
+	for _, s := range shared {
+		if s.WantsHTTP() {
+			httpSites = append(httpSites, s)
+		}
+	}
 	for _, p := range httpPorts {
-		if len(shared) == 0 {
+		if len(httpSites) == 0 {
 			break
 		}
-		out = append(out, binding{Port: p, Sites: shared})
+		out = append(out, binding{Port: p, Sites: httpSites})
 	}
 
 	// 每个 HTTPS 入口同理
 	if len(httpsPorts) > 0 {
 		var tlsSites []model.Site
 		for _, s := range shared {
-			if s.HTTPS {
+			if s.WantsHTTPS() {
 				tlsSites = append(tlsSites, s)
 			}
 		}
