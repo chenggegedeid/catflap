@@ -100,7 +100,7 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 		Enabled:        cr.Enabled,
 		Description:    cr.Description,
 		WebHookConfig:  cr.WebHookConfig,
-		ChannelIDs:     cr.ChannelIDs,
+		ChannelIDs:     nonNilStrings(cr.ChannelIDs),
 		Redirect:       cr.Redirect,
 		MCEntry:        normalizeMCEntry(cr.Protocol, cr.MCEntry),
 		UpdatedAt:      time.Now(),
