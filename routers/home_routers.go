@@ -42,9 +42,9 @@ func HomeRoutersProtected(g *gin.RouterGroup) {
 	g.PUT("home/search-engine/default",
 		middleware.BindJsonMiddleware[home_api.SearchEngineDefaultRequest], app.SearchEngineDefaultView)
 
-	// 搜索历史（写）
-	g.POST("home/search-history/add",
-		middleware.BindJsonMiddleware[home_api.SearchHistoryAddRequest], app.SearchHistoryAddView)
+	// 搜索历史（写）——**已废弃**，保留只为兼容浏览器里缓存的旧前端。
+	// 历史已改存浏览器本地，这三个端点只是返回一句"请刷新页面"。
+	g.POST("home/search-history/add", app.SearchHistoryAddView)
 	g.DELETE("home/search-history/clear", app.SearchHistoryClearView)
 
 	// 分类
