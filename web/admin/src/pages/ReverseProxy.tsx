@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  Radar,
   AlertCircle,
   ArrowRight,
   ExternalLink,
@@ -15,9 +16,19 @@ import {
   Zap,
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
+import { LanScanModal } from '../components/LanScanModal'
 import { modalBackdrop } from '../components/modal'
 import * as api from '../lib/api'
-import type { Certificate, ProxyConfig, ProxyEntry, ProxyListener, ProxySite } from '../types'
+import type {
+  Certificate,
+  LanHost,
+  LanPort,
+  LanSubnet,
+  ProxyConfig,
+  ProxyEntry,
+  ProxyListener,
+  ProxySite,
+} from '../types'
 
 // ===================== 小工具 =====================
 
@@ -375,6 +386,9 @@ function SiteModal({
   const [testing, setTesting] = useState(false)
   const [probe, setProbe] = useState<{ ok: boolean; text: string } | null>(null)
   const [err, setErr] = useState('')
+  // 局域网扫描：和穿透那边共用同一个弹窗组件，只是填的字段不同
+  const [scan, setScan] = useState<{ open: boolean; subnets: LanSubnet[] }>({ open: false, subnets: [] })
+  const [scanErr, setScanErr] = useState('')
 
   const baseDomain = entry.baseDomain ?? ''
   // 要补的那截主域名，判据和后端 expandHost 一致：没有点才补
@@ -459,9 +473,38 @@ function SiteModal({
     }
   }
 
+  /** 打开扫描弹窗：先取本机网段，再让用户挑 */
+  const openScan = async () => {
+    setScanErr('')
+    try {
+      const subnets = await api.getProxyLanSubnets()
+      if (subnets.length === 0) {
+        setScanErr('没找到可扫描的局域网网段')
+        return
+      }
+      setScan({ open: true, subnets })
+    } catch (e) {
+      setScanErr('读不到本机网段: ' + errText(e))
+    }
+  }
+
+  /** 扫描结果里点了某个端口：填进 backend，能看出是 https 就顺手勾上 */
+  const pickScannedPort = (host: LanHost, port: LanPort) => {
+    setForm((p) => ({
+      ...p,
+      backend: `${host.ip}:${port.port}`,
+      // 扫描认得出来的 HTTPS 服务（端口名带 HTTPS）就顺手勾上"后端是 HTTPS"——
+      // 不勾的话我们会用 http 去连一个 https 服务，直接连不上。
+      // 认不出来时保持用户原来的选择，不擅自改。
+      backendHttps: /https/i.test(port.name || '') ? true : p.backendHttps,
+    }))
+    setScan({ open: false, subnets: [] })
+  }
+
   return (
-    <Modal
-      title={initial ? '编辑站点' : '添加站点'}
+    <>
+      <Modal
+        title={initial ? '编辑站点' : '添加站点'}
       onCancel={onCancel}
       footer={
         <>
@@ -634,6 +677,17 @@ function SiteModal({
             placeholder="192.168.1.20:5000"
             className={`${fieldCls} min-w-0 flex-1 font-mono`}
           />
+          {/* 扫局域网选机器：和穿透那边是同一套扫描（core/lanscan），
+              不用记 IP、也不用手打端口 */}
+          <button
+            type="button"
+            onClick={openScan}
+            className="flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+            title="扫描局域网，从结果里选机器和端口"
+          >
+            <Radar className="h-3.5 w-3.5" />
+            扫描
+          </button>
         </div>
         <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
           内网服务的 地址:端口。跑在本机的服务填 <span className="font-mono">127.0.0.1:端口</span>
@@ -748,7 +802,23 @@ function SiteModal({
       </label>
 
       {err && <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
+      {scanErr && <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{scanErr}</div>}
     </Modal>
+
+    {/* 扫描选机器：和穿透页共用同一个弹窗组件，后端也是同一套（core/lanscan） */}
+    {scan.open && (
+      <LanScanModal
+        subnets={scan.subnets}
+        onCancel={() => setScan({ open: false, subnets: [] })}
+        onPick={(h) => {
+          // 只点了机器没点端口：填 IP，端口留给用户自己填
+          setForm((p) => ({ ...p, backend: h.ip }))
+          setScan({ open: false, subnets: [] })
+        }}
+        onPickPort={pickScannedPort}
+      />
+    )}
+    </>
   )
 }
 

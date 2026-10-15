@@ -1,4 +1,4 @@
-package stun
+package lanscan
 
 import (
 	"context"
@@ -11,6 +11,36 @@ import (
 	"sync"
 	"time"
 )
+
+// ===================== 注入点 =====================
+//
+// 这个包只做**纯网络探测**：网卡、网段、端口。它不认识"本机主 IP 是哪个"
+// 与"哪些设备已经添加过"—— 那是各业务模块自己的知识。
+//
+// 所以用回调注入，而不是反过来让 core 依赖业务模块（依赖方向搞反了，
+// 以后每个模块想用扫描都得改 core）。
+
+// LocalIPFunc 本机主 IP。用来把"你正待着的那段"排在最前。
+// 没注入就返回空，扫描照常工作，只是排序少个依据。
+var LocalIPFunc func() string
+
+// KnownHostsFunc 已经添加过的机器：IP → 显示名。
+// 扫描结果里会标出"已在列表"，免得用户照着结果又加一遍（会出现两个同 IP 设备）。
+var KnownHostsFunc func() map[string]string
+
+func localIP() string {
+	if LocalIPFunc == nil {
+		return ""
+	}
+	return strings.TrimSpace(LocalIPFunc())
+}
+
+func knownHosts() map[string]string {
+	if KnownHostsFunc == nil {
+		return nil
+	}
+	return KnownHostsFunc()
+}
 
 // 局域网扫描。
 //
@@ -194,7 +224,7 @@ func ListLanSubnets() []LanSubnet {
 	}
 
 	// 本机主 IP 所在的那段排最前：绝大多数时候要扫的就是它
-	local := strings.TrimSpace(Runtime.Network.LocalIP)
+	local := localIP()
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].LocalIP == local && out[j].LocalIP != local
 	})
@@ -203,7 +233,7 @@ func ListLanSubnets() []LanSubnet {
 
 // localIPv4s 本机自己占着的所有内网地址。
 //
-// 不能只认 Runtime.Network.LocalIP：装了 VMware / Hyper-V / WSL 的机器上，
+// 不能只认一个"本机主 IP"：装了 VMware / Hyper-V / WSL 的机器上，
 // 每块虚拟网卡都给本机分了一个地址。扫到那段虚拟网时，本机的那个地址
 // 会以一台普通设备的样子冒出来，用户照着加进设备列表，其实加的是自己。
 func localIPv4s() map[string]bool {
@@ -226,7 +256,7 @@ func localIPv4s() map[string]bool {
 			}
 		}
 	}
-	if ip := strings.TrimSpace(Runtime.Network.LocalIP); ip != "" {
+	if ip := localIP(); ip != "" {
 		out[ip] = true
 	}
 	return out
@@ -401,13 +431,11 @@ func ScanLan(ctx context.Context, cidr string) ([]LanHost, error) {
 
 	// 已经在设备列表里的标出来：不标的话用户会照着扫描结果又加一遍，
 	// 列表里就出现两个同 IP 的设备，而这个错要等服务加错地方才发现
+	known := knownHosts()
 	for i := range hosts {
-		for _, d := range Runtime.Config.Devices {
-			if strings.TrimSpace(d.IP) == hosts[i].IP {
-				hosts[i].Added = true
-				hosts[i].AddedName = d.Name
-				break
-			}
+		if name, ok := known[hosts[i].IP]; ok {
+			hosts[i].Added = true
+			hosts[i].AddedName = name
 		}
 		sort.Slice(hosts[i].Ports, func(a, b int) bool {
 			return hosts[i].Ports[a].Port < hosts[i].Ports[b].Port
