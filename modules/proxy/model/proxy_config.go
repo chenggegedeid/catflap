@@ -85,6 +85,12 @@ type Site struct {
 	// CertID 指定证书；0 = 按 SNI 自动匹配（证书里的域名对得上就用哪张）
 	CertID uint `json:"certId"`
 
+	// Access 谁能访问这个站点。
+	//
+	// 把服务暴露到公网之后，光靠「域名没人知道」是不算防护的——域名会出现在
+	// 证书透明日志里，扫描器也在扫整个网段。所以给站点加一道 IP 门禁。
+	Access AccessControl `json:"access"`
+
 	Enabled     bool      `json:"enabled"`
 	Description string    `json:"description"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -92,6 +98,27 @@ type Site struct {
 	// LegacyHost 旧版的单域名字段，只用来读老配置。
 	// ReadConfig 迁移完就清空，之后不再写进文件。
 	LegacyHost string `json:"host,omitempty"`
+}
+
+// AccessMode 访问控制模式
+type AccessMode string
+
+const (
+	// AccessModeAllowAll 谁都能访问（默认，不填就是它）
+	AccessModeAllowAll AccessMode = ""
+	// AccessModeAllow 白名单：只有列表里的 IP/网段能访问
+	AccessModeAllow AccessMode = "allow"
+	// AccessModeDeny 黑名单：列表里的 IP/网段被拒，其余放行
+	AccessModeDeny AccessMode = "deny"
+)
+
+// AccessControl 站点级的 IP 门禁。
+//
+// Rules 里每一项是一个 IP 或一个 CIDR 网段，两种都收：
+// 家里宽带的 IP 会变，写单个 IP 迟早失效，写网段更耐用。
+type AccessControl struct {
+	Mode  AccessMode `json:"mode"`
+	Rules []string   `json:"rules"`
 }
 
 // PrimaryHost 第一个域名，用在错误提示和日志里

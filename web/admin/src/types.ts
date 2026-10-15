@@ -547,7 +547,22 @@ export interface ProxySite {
   certId: number
   enabled: boolean
   description: string
+  /** IP 门禁 */
+  access?: ProxyAccess
   updatedAt?: string
+}
+
+/**
+ * 站点级 IP 门禁。
+ *
+ * 服务暴露到公网后，光靠「域名没人知道」不算防护——域名会出现在证书透明
+ * 日志里，扫描器也在扫整个网段。
+ */
+export interface ProxyAccess {
+  /** '' = 谁都能访问；allow = 白名单；deny = 黑名单 */
+  mode: '' | 'allow' | 'deny'
+  /** IP 或 CIDR 网段，如 203.0.113.0/24；家宽 IP 会变，写网段更耐用 */
+  rules: string[]
 }
 
 export interface ProxyConfig {
