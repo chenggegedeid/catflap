@@ -19,6 +19,7 @@ import (
 	_ "github.com/chenggegedeid/catflap/modules/cert"
 	_ "github.com/chenggegedeid/catflap/modules/ddns"
 	_ "github.com/chenggegedeid/catflap/modules/home"
+	_ "github.com/chenggegedeid/catflap/modules/notify"
 	_ "github.com/chenggegedeid/catflap/modules/proxy"
 	_ "github.com/chenggegedeid/catflap/modules/stun"
 	_ "github.com/chenggegedeid/catflap/modules/system"

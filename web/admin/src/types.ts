@@ -600,3 +600,51 @@ export interface ProxyProbeResult {
   latencyMs: number
   message: string
 }
+
+// ===================== 通知中心 =====================
+
+export type NotifyChannelType =
+  | 'webhook'
+  | 'dingtalk'
+  | 'wecom'
+  | 'feishu'
+  | 'bark'
+  | 'serverchan'
+  | 'pushplus'
+
+/** 全局通知渠道。各服务只存它的 ID，不再内联 URL / 密钥。 */
+export interface NotifyChannel {
+  id: string
+  name: string
+  type: NotifyChannelType
+  enabled: boolean
+  /** 密钥类字段在这里是掩码；留空提交表示不改动 */
+  config: Record<string, string>
+  /** 哪些规则在用它（删除前提示） */
+  usedByRules: string[]
+  /** 由旧的服务内联 webhook 迁移而来 */
+  migratedFrom?: string
+}
+
+export interface NotifyRule {
+  id: string
+  name: string
+  event: string
+  channelIds: string[]
+  enabled: boolean
+}
+
+export interface NotifyEventMeta {
+  type: string
+  group: string
+  title: string
+}
+
+export interface NotifyConfigView {
+  channels: NotifyChannel[]
+  rules: NotifyRule[]
+  events: NotifyEventMeta[]
+  migrated: boolean
+  cooldownSeconds: number
+  legacyWebhookFallback: boolean
+}
