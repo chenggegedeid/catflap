@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "httpPorts": [
+    80
+  ],
+  "httpsPorts": null,
+  "certId": 0,
+  "accessLog": false,
+  "baseDomain": "",
+  "sites": [
+    {
+      "id": 1,
+      "hosts": [
+        "nas.example.com"
+      ],
+      "pathPrefix": "",
+      "stripPrefix": false,
+      "backend": "192.168.1.20:5000",
+      "backendHttps": false,
+      "listenPort": 0,
+      "scheme": "",
+      "https": false,
+      "certId": 0,
+      "access": {
+        "mode": "",
+        "rules": null
+      },
+      "enabled": true,
+      "description": "改了名字",
+      "showOnHome": true,
+      "updatedAt": "2026-10-16T00:47:20.0102758+08:00"
+    }
+  ],
+  "forwards": null,
+  "createdAt": "0001-01-01T00:00:00Z",
+  "updatedAt": "2026-10-16T00:47:20.0102758+08:00"
+}

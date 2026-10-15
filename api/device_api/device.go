@@ -3,7 +3,9 @@ package device_api
 import (
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/chenggegedeid/catflap/core/lanscan"
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/device"
 	"github.com/chenggegedeid/catflap/modules/proxy"
@@ -135,4 +137,61 @@ func hostOfAddr(addr string) string {
 
 func itoa(n int) string {
 	return strconv.Itoa(n)
+}
+
+// ===================== 扫单台机器的端口 =====================
+
+type ScanHostRequest struct {
+	IP string `json:"ip"`
+}
+
+// DeviceScanHostView 探一台机器上开了哪些端口。
+//
+// 给服务表单用：选好设备之后点「扫描」，列出这台机器的开放端口，
+// 点一下就填进端口框 —— 不用去记端口号，也不用扫整个网段（那太慢）。
+func (DeviceApi) DeviceScanHostView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ScanHostRequest](c)
+
+	ip := strings.TrimSpace(cr.IP)
+	if ip == "" {
+		res.FailWithMsg("先选一台设备", c)
+		return
+	}
+
+	// 超时兜底：机器关机时拨号会等满超时，不能把请求一直挂着。
+	// 扫一台最多 3 秒，超时就返回已探到的（可能是空）。
+	done := make(chan []lanscan.LanPort, 1)
+	go func() {
+		done <- lanscan.ScanHostPorts(ip, 700*time.Millisecond)
+	}()
+
+	select {
+	case ports := <-done:
+		if ports == nil {
+			ports = []lanscan.LanPort{}
+		}
+		res.OkWithData(ports, c)
+	case <-time.After(3 * time.Second):
+		// 超时不报错，返回空列表让界面提示"没探到"
+		res.OkWithData([]lanscan.LanPort{}, c)
+	}
+}
+
+type ReorderRequest struct {
+	// IDs 设备 ID 按想要的顺序排列（第一个最前）
+	IDs []uint `json:"ids"`
+}
+
+// DeviceReorderView 拖动排序后保存设备顺序
+func (DeviceApi) DeviceReorderView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ReorderRequest](c)
+	if len(cr.IDs) == 0 {
+		res.FailWithMsg("ids 不能为空", c)
+		return
+	}
+	if err := device.Reorder(cr.IDs); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithMsg("已保存", c)
 }

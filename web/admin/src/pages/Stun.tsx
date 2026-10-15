@@ -2084,17 +2084,6 @@ export function Stun() {
     })
   }
 
-  const removeDevice = async (d: StunDevice) => {
-    if (!window.confirm(`确认删除设备「${d.name}」？该设备下所有服务也将被删除`)) return
-    try {
-      await api.deleteStunDevice(getDeviceId(d))
-      toast('设备删除成功')
-      await refresh()
-    } catch (e) {
-      toast('删除失败: ' + (e instanceof Error ? e.message : ''))
-    }
-  }
-
   const submitService = async (form: ServiceFormState) => {
     const payload: api.StunServicePayload = {
       deviceId: serviceModal.deviceId,
@@ -2415,25 +2404,22 @@ export function Stun() {
                         active ? 'opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
                       }`}
                     >
+                      {/*
+                        设备的增删改**只在「设备」页做** —— 设备是穿透/反代/转发
+                        共用的一份，在每个功能页都能改的话不知道该在哪改；
+                        而且删设备要检查上面还有没有服务（穿透服务靠 deviceId
+                        关联，一删就静默失效），那套检查只在设备页才完整。
+                        这里给个入口跳过去，不在这儿改。
+                      */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          setDeviceModal({ open: true, initial: d })
+                          window.location.hash = '#/devices'
                         }}
-                        title="编辑设备"
-                        className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-emerald-50 hover:text-emerald-600"
+                        title="在「设备」页管理这台机器"
+                        className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeDevice(d)
-                        }}
-                        title="删除设备"
-                        className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <ExternalLink className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </li>

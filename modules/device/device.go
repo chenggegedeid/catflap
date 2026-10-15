@@ -22,6 +22,7 @@ Package device 设备表 —— 内网里那些机器。
 package device
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +33,16 @@ import (
 // IP 是它的标识 —— 归属关系（这个服务在哪台机器上）由 IP 推导，
 // 不需要在服务上再存一个 deviceId。
 type Device struct {
-	DeviceID  uint      `json:"id"`   // 沿用穿透那边的字段名，减少迁移时的改动
-	Name      string    `json:"name"` // "本机" / "群晖NAS" / "树莓派"
-	IP        string    `json:"ip"`   // 设备 IP
+	DeviceID uint   `json:"id"`   // 沿用穿透那边的字段名，减少迁移时的改动
+	Name     string `json:"name"` // "本机" / "群晖NAS" / "树莓派"
+	IP       string `json:"ip"`   // 设备 IP
+
+	// SortOrder 界面上的排列顺序，小的在前。
+	//
+	// 只影响显示，不影响任何转发行为。0 表示没排过 ——
+	// 排序时按 (SortOrder, ID) 排，没排过的就按 ID 自然顺序，
+	// 老配置升级后顺序不变。
+	SortOrder int       `json:"sortOrder,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -64,7 +72,19 @@ func List() []Device {
 	defer runtime.mu.RUnlock()
 	out := make([]Device, len(runtime.Devices))
 	copy(out, runtime.Devices)
+	sortDevices(out)
 	return out
+}
+
+// sortDevices 按 (SortOrder, ID) 排。
+// 没设过 SortOrder 的都是 0，同级再按 ID —— 老配置升级后顺序不变。
+func sortDevices(list []Device) {
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].SortOrder != list[j].SortOrder {
+			return list[i].SortOrder < list[j].SortOrder
+		}
+		return list[i].DeviceID < list[j].DeviceID
+	})
 }
 
 // Get 按 ID 取
@@ -230,4 +250,42 @@ func normalizeIP(ip string) string {
 	ip = strings.TrimPrefix(ip, "[")
 	ip = strings.TrimSuffix(ip, "]")
 	return strings.ToLower(ip)
+}
+
+// Reorder 按给定的 ID 顺序重排，并落盘。
+//
+// 传进来的顺序就是界面上的顺序（第一个排最前）。
+// 只认已有设备的 ID，多余的忽略 —— 前端给的顺序可能因为
+// 并发（别人刚删了一台）而不全，不该因此报错。
+func Reorder(ids []uint) error {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	byID := map[uint]*Device{}
+	for i := range runtime.Devices {
+		byID[runtime.Devices[i].DeviceID] = &runtime.Devices[i]
+	}
+
+	next := 1
+	for _, id := range ids {
+		d, ok := byID[id]
+		if !ok {
+			continue
+		}
+		d.SortOrder = next
+		next++
+		delete(byID, id) // 同一 ID 出现两次时只认第一次
+	}
+	// 没在列表里的（前端可能漏给）排在后面，保持相对顺序
+	rest := make([]*Device, 0, len(byID))
+	for _, d := range byID {
+		rest = append(rest, d)
+	}
+	sort.Slice(rest, func(i, j int) bool { return rest[i].DeviceID < rest[j].DeviceID })
+	for _, d := range rest {
+		d.SortOrder = next
+		next++
+	}
+
+	return writeConfigLocked(runtime.Devices)
 }

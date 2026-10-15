@@ -43,6 +43,7 @@ import type {
   WebhookConfig,
   WebhookTemplate,
   Device,
+  LanPort,
   ProxyForward,
 } from '../types'
 
@@ -950,3 +951,15 @@ export const saveForward = (f: Partial<ProxyForward>) =>
 
 export const deleteForward = (id: number) =>
   request<unknown>('/api/proxy/forward', { method: 'DELETE', body: JSON.stringify({ id }) })
+
+/** 拖动排序后保存设备顺序 */
+export const reorderDevices = (ids: number[]) =>
+  request<unknown>('/api/device/reorder', { method: 'POST', body: JSON.stringify({ ids }) })
+
+/** 扫一台机器上开了哪些端口（服务表单里选好设备后点扫描） */
+export const scanHostPorts = (ip: string) =>
+  request<LanPort[]>('/api/device/scan-ports', { method: 'POST', body: JSON.stringify({ ip }) })
+
+/** 拖动排序后保存站点（服务）顺序 */
+export const reorderSites = (ids: number[]) =>
+  request<unknown>('/api/proxy/sites/reorder', { method: 'POST', body: JSON.stringify({ ids }) })

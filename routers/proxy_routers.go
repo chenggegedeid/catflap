@@ -26,6 +26,12 @@ func ProxyRouters(g *gin.RouterGroup) {
 		middleware.BindJsonMiddleware[device_api.DeviceSaveRequest], dev.DeviceSaveView)
 	g.DELETE("device",
 		middleware.BindJsonMiddleware[device_api.DeviceDeleteRequest], dev.DeviceDeleteView)
+	// 拖动排序后保存设备顺序
+	g.POST("device/reorder",
+		middleware.BindJsonMiddleware[device_api.ReorderRequest], dev.DeviceReorderView)
+	// 扫一台机器上开了哪些端口（服务表单里选好设备后点「扫这台」）
+	g.POST("device/scan-ports",
+		middleware.BindJsonMiddleware[device_api.ScanHostRequest], dev.DeviceScanHostView)
 
 	// 入口设置 + 监听状态 + 站点表，一次给全
 	g.GET(
@@ -88,6 +94,11 @@ func ProxyRouters(g *gin.RouterGroup) {
 		"proxy/forward",
 		middleware.BindJsonMiddleware[proxy_api.ForwardDeleteRequest],
 		app.ProxyForwardDeleteView)
+
+	// 拖动排序后保存站点顺序
+	g.POST("proxy/sites/reorder",
+		middleware.BindJsonMiddleware[proxy_api.ReorderSitesRequest],
+		app.ProxySitesReorderView)
 
 	// 站点的一键开关（启用 / 显示在主页），和穿透服务卡片的操作对齐
 	g.POST("proxy/site/flag",

@@ -7,7 +7,7 @@
  * 这个页面是整个流程的起点：先有设备，才能加服务。
  */
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { HardDrive, Pencil, Plus, Server, Trash2 } from 'lucide-react'
+import { GripVertical, HardDrive, Pencil, Plus, Radar, Server, Trash2 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
 import type { Device, ProxyConfig, StunConfig } from '../types'
@@ -28,6 +28,54 @@ export function Devices() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // 拖动排序：dragId 是正在拖的那台，overId 是松手时悬停的那台
+  const [dragId, setDragId] = useState(0)
+  const [overId, setOverId] = useState(0)
+
+  /** 把 dragId 放到 overId 前面，然后提交新顺序 */
+  const commitReorder = async (from: number, to: number) => {
+    const list = [...devices]
+    const i = list.findIndex((d) => d.id === from)
+    const j = list.findIndex((d) => d.id === to)
+    if (i < 0 || j < 0 || i === j) return
+    const [moved] = list.splice(i, 1)
+    list.splice(j, 0, moved)
+    // 先本地更新，界面立刻跟上；保存失败再刷回来
+    setDevices(list)
+    try {
+      await api.reorderDevices(list.map((d) => d.id))
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '排序保存失败')
+      await load()
+    }
+  }
+
+  /** 全局扫描：扫网段找机器，加进设备表 */
+  const scan = async () => {
+    setToast('正在扫描局域网…')
+    try {
+      const subnets = await api.getProxyLanSubnets()
+      if (subnets.length === 0) {
+        setToast('没找到可扫描的网段')
+        return
+      }
+      const hosts = await api.scanProxyLan(subnets[0].cidr)
+      const known = new Set(devices.map((d) => d.ip))
+      const fresh = hosts.filter((h) => !known.has(h.ip) && !h.self)
+      if (fresh.length === 0) {
+        setToast('没有发现新的机器')
+        return
+      }
+      for (const h of fresh) {
+        await api.saveDevice(0, h.name || h.ip, h.ip)
+      }
+      setToast(`已添加 ${fresh.length} 台设备`)
+      await load()
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '扫描失败')
+    }
+  }
 
   const remove = async (d: Device) => {
     if (!window.confirm(`确认删除设备「${d.name}」？`)) return
@@ -51,12 +99,22 @@ export function Devices() {
               </span>
             }
             action={
-              <button
-                onClick={() => setModal({ open: true })}
-                className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 transition hover:bg-blue-600"
-              >
-                <Plus className="h-3 w-3" /> 添加设备
-              </button>
+              <div className="flex items-center gap-1.5">
+                {/* 全局扫描在设备页：找出网段里有哪些机器 */}
+                <button
+                  onClick={scan}
+                  className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  title="扫描局域网，把发现的机器加进来"
+                >
+                  <Radar className="h-3 w-3" /> 扫描
+                </button>
+                <button
+                  onClick={() => setModal({ open: true })}
+                  className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 transition hover:bg-blue-600"
+                >
+                  <Plus className="h-3 w-3" /> 添加设备
+                </button>
+              </div>
             }
           />
         </div>
@@ -85,7 +143,28 @@ export function Devices() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-3">
               {devices.map((d) => (
-                <DeviceCard key={d.id} device={d} onEdit={() => setModal({ open: true, initial: d })} onDelete={() => remove(d)} />
+                <div
+                  key={d.id}
+                  draggable
+                  onDragStart={() => setDragId(d.id)}
+                  onDragEnd={() => {
+                    setDragId(0)
+                    setOverId(0)
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    if (d.id !== overId) setOverId(d.id)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    if (dragId) void commitReorder(dragId, d.id)
+                  }}
+                  className={`transition ${
+                    overId === d.id && dragId !== d.id ? 'ring-2 ring-blue-300' : ''
+                  } ${dragId === d.id ? 'opacity-40' : ''}`}
+                >
+                  <DeviceCard device={d} onEdit={() => setModal({ open: true, initial: d })} onDelete={() => remove(d)} />
+                </div>
               ))}
             </div>
           )}
@@ -123,6 +202,10 @@ function DeviceCard({
   return (
     <div className="flex flex-col rounded-xl border border-slate-200/80 p-3 transition hover:border-blue-200 hover:shadow-md">
       <div className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2">
+        {/* 手柄：让"可以拖动"看得出来，光靠光标变化不够明显 */}
+        <span className="cursor-grab text-slate-300" title="按住拖动可以排序">
+          <GripVertical className="h-4 w-4" />
+        </span>
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-500">
           <HardDrive className="h-4 w-4" />
         </span>

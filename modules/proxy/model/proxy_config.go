@@ -119,6 +119,10 @@ type Site struct {
 	Enabled     bool   `json:"enabled"`
 	Description string `json:"description"`
 
+	// SortOrder 界面上的排列顺序，小的在前。只影响显示，不影响转发。
+	// 0 表示没排过，排序时按 (SortOrder, ID)，老配置升级后顺序不变。
+	SortOrder int `json:"sortOrder,omitempty"`
+
 	// ShowOnHome 在导航主页上显示这个站点。
 	//
 	// 和穿透服务那个标记是同一回事，只是存在各自的模块里 ——
