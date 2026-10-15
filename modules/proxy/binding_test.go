@@ -48,20 +48,20 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "关掉了就一个监听都不开",
 			cfg: model.ProxyConfig{
-				Enabled: false, HTTPPort: 80, HTTPSPort: 443,
+				Enabled: false, HTTPPorts: []int{80}, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com")},
 			},
 			want: "",
 		},
 		{
 			name: "没站点就不开端口，免得白占 80",
-			cfg:  model.ProxyConfig{Enabled: true, HTTPPort: 80, HTTPSPort: 443},
+			cfg:  model.ProxyConfig{Enabled: true, HTTPPorts: []int{80}, HTTPSPorts: []int{443}},
 			want: "",
 		},
 		{
 			name: "默认入口：全都上 HTTP，勾了 HTTPS 的再上一份 HTTPS",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPPort: 80, HTTPSPort: 443,
+				Enabled: true, HTTPPorts: []int{80}, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com", useTLS), bsite("b.com")},
 			},
 			want: "80/http/cert0[a.com b.com] 443/https/cert0[a.com]",
@@ -69,7 +69,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "一个都没勾 HTTPS 就不开 443",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPPort: 80, HTTPSPort: 443,
+				Enabled: true, HTTPPorts: []int{80}, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com")},
 			},
 			want: "80/http/cert0[a.com]",
@@ -77,7 +77,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "HTTP 入口留空就只开 HTTPS",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPSPort: 443,
+				Enabled: true, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com", useTLS), bsite("b.com")},
 			},
 			want: "443/https/cert0[a.com]",
@@ -85,7 +85,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "停用的站点不算",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPPort: 80,
+				Enabled: true, HTTPPorts: []int{80},
 				Sites: []model.Site{bsite("a.com"), bsite("b.com", off)},
 			},
 			want: "80/http/cert0[a.com]",
@@ -93,7 +93,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "站点自己占端口：单开一个监听，协议它自己说了算",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPPort: 80, HTTPSPort: 443,
+				Enabled: true, HTTPPorts: []int{80}, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com"), bsite("b.com", onPort(8443), useTLS), bsite("c.com", onPort(8080))},
 			},
 			want: "80/http/cert0[a.com] 8080/http/cert0[c.com] 8443/https/cert0[b.com]",
@@ -109,7 +109,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "指定的端口正好是默认入口，当共享处理——同一个端口不能 bind 两次",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPPort: 80, HTTPSPort: 443,
+				Enabled: true, HTTPPorts: []int{80}, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com", onPort(443), useTLS), bsite("b.com", onPort(80))},
 			},
 			want: "80/http/cert0[a.com b.com] 443/https/cert0[a.com]",
@@ -117,7 +117,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "一个端口上大家指同一张证书，就用那张",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPSPort: 443,
+				Enabled: true, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com", useTLS, useCert(7)), bsite("b.com", useTLS, useCert(7))},
 			},
 			want: "443/https/cert7[a.com b.com]",
@@ -125,7 +125,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "证书指得不一样就退回 SNI 自动匹配",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPSPort: 443,
+				Enabled: true, HTTPSPorts: []int{443},
 				Sites: []model.Site{bsite("a.com", useTLS, useCert(7)), bsite("b.com", useTLS, useCert(9))},
 			},
 			want: "443/https/cert0[a.com b.com]",
@@ -133,7 +133,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "站点没指定证书就用入口的默认证书",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPSPort: 443, CertID: 3,
+				Enabled: true, HTTPSPorts: []int{443}, CertID: 3,
 				Sites: []model.Site{bsite("a.com", useTLS)},
 			},
 			want: "443/https/cert3[a.com]",
@@ -141,7 +141,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "站点指定了证书就盖过入口的默认证书",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPSPort: 443, CertID: 3,
+				Enabled: true, HTTPSPorts: []int{443}, CertID: 3,
 				Sites: []model.Site{bsite("a.com", useTLS, useCert(7))},
 			},
 			want: "443/https/cert7[a.com]",
@@ -149,7 +149,7 @@ func TestPlanBindings(t *testing.T) {
 		{
 			name: "自定义端口不吃入口的默认证书：那张是给默认入口配的",
 			cfg: model.ProxyConfig{
-				Enabled: true, HTTPSPort: 443, CertID: 3,
+				Enabled: true, HTTPSPorts: []int{443}, CertID: 3,
 				Sites: []model.Site{bsite("a.com", onPort(8443), useTLS)},
 			},
 			want: "8443/https/cert0[a.com]",
@@ -169,7 +169,7 @@ func TestPlanBindings(t *testing.T) {
 // 否则 Apply 会认为参数变了，把好端端的监听重开一遍。
 func TestBindingSpecStableAcrossSiteEdits(t *testing.T) {
 	cfg := model.ProxyConfig{
-		Enabled: true, HTTPPort: 80, HTTPSPort: 443,
+		Enabled: true, HTTPPorts: []int{80}, HTTPSPorts: []int{443},
 		Sites: []model.Site{bsite("a.com", useTLS)},
 	}
 	before := planBindings(cfg)
@@ -185,4 +185,67 @@ func TestBindingSpecStableAcrossSiteEdits(t *testing.T) {
 			t.Fatalf("加一个站点不该改变监听参数：%+v → %+v", before[i].spec(), after[i].spec())
 		}
 	}
+}
+
+// 入口配了多个端口时，每个端口都要开一个监听
+func TestPlanBindingsMultipleEntryPorts(t *testing.T) {
+	cfg := model.ProxyConfig{
+		Enabled:    true,
+		HTTPPorts:  []int{80, 8080},
+		HTTPSPorts: []int{443},
+		Sites: []model.Site{
+			{ID: 1, Hosts: []string{"a.com"}, Enabled: true, HTTPS: true},
+		},
+	}
+
+	got := planBindings(cfg)
+
+	// 期望：80 / 8080 各一个 HTTP 监听，443 一个 HTTPS 监听
+	if len(got) != 3 {
+		t.Fatalf("应开 3 个监听（80、8080、443），实际 %d：%v", len(got), portList(got))
+	}
+
+	var httpPorts, httpsPorts []int
+	for _, b := range got {
+		if b.TLS {
+			httpsPorts = append(httpsPorts, b.Port)
+		} else {
+			httpPorts = append(httpPorts, b.Port)
+		}
+	}
+	if len(httpPorts) != 2 {
+		t.Errorf("HTTP 监听应有 2 个，实际 %v", httpPorts)
+	}
+	if len(httpsPorts) != 1 || httpsPorts[0] != 443 {
+		t.Errorf("HTTPS 监听应为 [443]，实际 %v", httpsPorts)
+	}
+
+	// 每个端口上都要挂着那个站点
+	for _, b := range got {
+		if len(b.Sites) != 1 {
+			t.Errorf("端口 %d 上应有 1 个站点，实际 %d", b.Port, len(b.Sites))
+		}
+	}
+}
+
+// 重复端口不该开两个监听（去重在 cleanPorts 里做）
+func TestPlanBindingsDedupesPorts(t *testing.T) {
+	cfg := model.ProxyConfig{
+		Enabled:   true,
+		HTTPPorts: []int{80, 80},
+		Sites:     []model.Site{{ID: 1, Hosts: []string{"a.com"}, Enabled: true}},
+	}
+
+	got := planBindings(cfg)
+	if len(got) != 1 {
+		t.Errorf("重复端口应只开 1 个监听，实际 %d", len(got))
+	}
+}
+
+func portList(bs []binding) []int {
+	out := make([]int, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, b.Port)
+	}
+	return out
 }

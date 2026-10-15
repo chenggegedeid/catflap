@@ -146,10 +146,10 @@ func checkPortProtocol(cfg *model.ProxyConfig, site model.Site) error {
 	if port == 0 || !site.Enabled {
 		return nil
 	}
-	if port == cfg.HTTPPort && site.HTTPS {
+	if containsInt(cfg.HTTPPortList(), port) && site.HTTPS {
 		return fmt.Errorf("端口 %d 是默认 HTTP 入口，想让这个站点走 HTTPS 就别单独指定端口，或者换一个端口", port)
 	}
-	if port == cfg.HTTPSPort && !site.HTTPS {
+	if containsInt(cfg.HTTPSPortList(), port) && !site.HTTPS {
 		return fmt.Errorf("端口 %d 是默认 HTTPS 入口，这个站点没开 HTTPS——换一个端口，或者把 HTTPS 打开", port)
 	}
 
@@ -240,14 +240,19 @@ func prefixLabel(prefix string) string {
 // 这里也得跟着变，否则「反代不能抢后台端口」这条保护就会保护错端口。
 func adminPort() int { return core.ListenPort() }
 
-// EntrySettings 两个默认入口：HTTP 一个端口，HTTPS 一个端口。
+// EntrySettings 两个默认入口：HTTP 若干端口，HTTPS 若干端口。
 //
 // 对应 nginx 的 listen 80 / listen 443 ssl，也对应 GoDoxy 的
-// HTTP_ADDR / HTTPS_ADDR。站点不单独指定端口就挂在这两个上面。
+// HTTP_ADDR / HTTPS_ADDR。站点不单独指定端口就挂在默认入口上。
+//
+// 端口改成**列表**：内网走 80、外网映射走 8080 这种需求，
+// 以前得在每条站点上各填一遍"独占端口"，现在在入口加一个就行。
 type EntrySettings struct {
-	Enabled    bool
-	HTTPPort   int
-	HTTPSPort  int
+	Enabled bool
+	// HTTPPorts HTTP 入口端口，可以多个；空 = 不开这个入口
+	HTTPPorts []int
+	// HTTPSPorts HTTPS 入口端口，可以多个；空 = 不开这个入口
+	HTTPSPorts []int
 	CertID     uint
 	BaseDomain string
 }
@@ -255,17 +260,21 @@ type EntrySettings struct {
 // SetEntry 保存默认入口设置并立刻生效。
 // 端口占用之类的失败会原样返回——配置已经存下了，用户改个端口再存一次即可。
 func SetEntry(in EntrySettings) error {
-	if err := checkEntryPort("HTTP 端口", in.HTTPPort); err != nil {
+	if err := checkEntryPorts("HTTP 端口", in.HTTPPorts); err != nil {
 		return err
 	}
-	if err := checkEntryPort("HTTPS 端口", in.HTTPSPort); err != nil {
+	if err := checkEntryPorts("HTTPS 端口", in.HTTPSPorts); err != nil {
 		return err
 	}
-	if in.Enabled && in.HTTPPort == 0 && in.HTTPSPort == 0 {
+	if in.Enabled && len(in.HTTPPorts) == 0 && len(in.HTTPSPorts) == 0 {
 		return errors.New("HTTP 和 HTTPS 端口至少要填一个，否则没有入口")
 	}
-	if in.HTTPPort != 0 && in.HTTPPort == in.HTTPSPort {
-		return errors.New("HTTP 和 HTTPS 不能用同一个端口")
+	// 同一个端口不能既是 HTTP 入口又是 HTTPS 入口：
+	// 那会让两个监听抢同一个端口，bind 必有一个失败
+	for _, p := range in.HTTPPorts {
+		if containsInt(in.HTTPSPorts, p) {
+			return fmt.Errorf("端口 %d 不能同时作为 HTTP 和 HTTPS 入口", p)
+		}
 	}
 
 	base := domain.Normalize(in.BaseDomain)
@@ -276,26 +285,31 @@ func SetEntry(in EntrySettings) error {
 	return Runtime.Update(func(cfg *model.ProxyConfig) error {
 		cfg.Enabled = in.Enabled
 		cfg.BaseDomain = base
-		cfg.HTTPPort = in.HTTPPort
-		cfg.HTTPSPort = in.HTTPSPort
+		cfg.HTTPPorts = in.HTTPPorts
+		cfg.HTTPSPorts = in.HTTPSPorts
 		cfg.CertID = in.CertID
-		if in.HTTPSPort == 0 {
+		if len(in.HTTPSPorts) == 0 {
 			cfg.CertID = 0
 		}
 		return nil
 	})
 }
 
-// checkEntryPort 0 表示不开这个入口，是合法的
-func checkEntryPort(label string, port int) error {
+// checkEntryPorts 校验一组入口端口。空列表 = 不开这个入口，是合法的。
+func checkEntryPorts(label string, ports []int) error {
 	admin := adminPort()
-	switch {
-	case port == 0:
-		return nil
-	case port < 0 || port > 65535:
-		return fmt.Errorf("%s要填 1 到 65535 之间的数字", label)
-	case port == admin:
-		return fmt.Errorf("%d 是 Catflap 自己的后台端口，换一个", admin)
+	seen := map[int]bool{}
+	for _, port := range ports {
+		switch {
+		case port <= 0 || port > 65535:
+			return fmt.Errorf("%s要填 1 到 65535 之间的数字", label)
+		case port == admin:
+			return fmt.Errorf("%d 是 Catflap 自己的后台端口，换一个", admin)
+		case seen[port]:
+			// 同一个入口里填两个一样的端口，bind 会失败
+			return fmt.Errorf("%s里端口 %d 填了两次", label, port)
+		}
+		seen[port] = true
 	}
 	return nil
 }

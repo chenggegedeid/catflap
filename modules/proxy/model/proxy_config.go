@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sort"
 	"strconv"
 	"time"
 )
@@ -24,12 +25,21 @@ type ProxyConfig struct {
 	// Enabled 总开关。关掉只是不监听，站点配置一条不动
 	Enabled bool `json:"enabled"`
 
-	// HTTPPort 默认 HTTP 入口；0 = 不开这个入口
-	HTTPPort int `json:"httpPort"`
-	// HTTPSPort 默认 HTTPS 入口；0 = 不开这个入口
-	HTTPSPort int `json:"httpsPort"`
+	// HTTPPorts 默认 HTTP 入口，**可以多个**；空 = 不开这个入口。
+	//
+	// 多个入口的用处：内网直接走 80、外网映射进来走 8080，两个端口上
+	// 都要能访问同一批站点。以前只能在每条站点上填"独占端口"，
+	// 结果同一个数字要填很多遍。
+	HTTPPorts []int `json:"httpPorts"`
+	// HTTPSPorts 默认 HTTPS 入口，可以多个；空 = 不开这个入口
+	HTTPSPorts []int `json:"httpsPorts"`
 	// CertID 默认 HTTPS 入口用哪张证书；0 = 按 SNI 自动匹配
 	CertID uint `json:"certId"`
+
+	// 下面两个是旧版的单端口字段，只用来读老配置。
+	// 迁移成上面的数组后清空，之后不再写进文件。
+	LegacyHTTPPort  int `json:"httpPort,omitempty"`
+	LegacyHTTPSPort int `json:"httpsPort,omitempty"`
 
 	// AccessLog 访问日志，默认关
 	AccessLog bool `json:"accessLog"`
@@ -148,4 +158,51 @@ func (s Site) Label() string {
 		return ":" + strconv.Itoa(s.ListenPort)
 	}
 	return "(未命名站点)"
+}
+
+// ===================== 入口端口 =====================
+
+// MigratePorts 把老配置的单端口字段迁到数组里。
+//
+// **幂等**：只在数组为空且老字段有值时搬，搬完把老字段清零。
+func (c *ProxyConfig) MigratePorts() {
+	if len(c.HTTPPorts) == 0 && c.LegacyHTTPPort > 0 {
+		c.HTTPPorts = []int{c.LegacyHTTPPort}
+	}
+	if len(c.HTTPSPorts) == 0 && c.LegacyHTTPSPort > 0 {
+		c.HTTPSPorts = []int{c.LegacyHTTPSPort}
+	}
+	// 老字段不再写回
+	c.LegacyHTTPPort = 0
+	c.LegacyHTTPSPort = 0
+}
+
+// HTTPPortList 默认 HTTP 入口的端口列表（已去重、排序、剔掉非法值）。
+//
+// 用这个函数而不是直接读字段，是因为要保证拿到的永远是干净的列表 ——
+// 配置文件可能被手改出 0、负数、重复值。
+func (c ProxyConfig) HTTPPortList() []int { return cleanPorts(c.HTTPPorts) }
+
+// HTTPSPortList 默认 HTTPS 入口的端口列表
+func (c ProxyConfig) HTTPSPortList() []int { return cleanPorts(c.HTTPSPorts) }
+
+// HasHTTPS 有没有开 HTTPS 入口。
+// 界面上"有证书就默认 HTTPS"靠这个判断。
+func (c ProxyConfig) HasHTTPS() bool { return len(c.HTTPSPortList()) > 0 }
+
+// cleanPorts 剔掉非法值、去重、排序。
+// 同一个端口出现两次会让 bind 失败（"address already in use"），必须去重。
+func cleanPorts(in []int) []int {
+	out := make([]int, 0, len(in))
+	seen := map[int]bool{}
+	for _, p := range in {
+		if p <= 0 || p > 65535 || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	// 排序保证每次算出来的顺序稳定，日志和页面上不会来回跳
+	sort.Ints(out)
+	return out
 }

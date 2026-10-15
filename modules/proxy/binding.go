@@ -43,15 +43,18 @@ func planBindings(cfg model.ProxyConfig) []binding {
 		return nil
 	}
 
+	httpPorts := cfg.HTTPPortList()
+	httpsPorts := cfg.HTTPSPortList()
+
 	var shared []model.Site          // 走默认入口的
 	custom := map[int][]model.Site{} // 自己占端口的，按端口分组
 	for _, s := range cfg.Sites {
 		if !s.Enabled {
 			continue
 		}
-		// 自己占的端口正好是默认入口时按默认入口处理：
+		// 自己占的端口正好是某个默认入口时按默认入口处理：
 		// 同一个端口不可能 bind 两次，硬开只会有一个失败。
-		if s.ListenPort > 0 && s.ListenPort != cfg.HTTPPort && s.ListenPort != cfg.HTTPSPort {
+		if s.ListenPort > 0 && !containsInt(httpPorts, s.ListenPort) && !containsInt(httpsPorts, s.ListenPort) {
 			custom[s.ListenPort] = append(custom[s.ListenPort], s)
 			continue
 		}
@@ -60,22 +63,29 @@ func planBindings(cfg model.ProxyConfig) []binding {
 
 	var out []binding
 
-	if cfg.HTTPPort > 0 && len(shared) > 0 {
-		// HTTP 入口收下全部共享站点：勾了 HTTPS 的站点在这儿依然能用明文访问，
-		// 内网里直接敲 IP 或者还没配证书的时候不至于打不开
-		out = append(out, binding{Port: cfg.HTTPPort, Sites: shared})
+	// 每个 HTTP 入口都收下全部共享站点：勾了 HTTPS 的站点在这儿依然能用
+	// 明文访问，内网里直接敲 IP 或者还没配证书的时候不至于打不开
+	for _, p := range httpPorts {
+		if len(shared) == 0 {
+			break
+		}
+		out = append(out, binding{Port: p, Sites: shared})
 	}
 
-	if cfg.HTTPSPort > 0 {
+	// 每个 HTTPS 入口同理
+	if len(httpsPorts) > 0 {
 		var tlsSites []model.Site
 		for _, s := range shared {
 			if s.HTTPS {
 				tlsSites = append(tlsSites, s)
 			}
 		}
-		if len(tlsSites) > 0 {
+		for _, p := range httpsPorts {
+			if len(tlsSites) == 0 {
+				break
+			}
 			out = append(out, binding{
-				Port:   cfg.HTTPSPort,
+				Port:   p,
 				TLS:    true,
 				CertID: sharedCertID(tlsSites, cfg.CertID),
 				Sites:  tlsSites,
@@ -121,6 +131,17 @@ func sharedCertID(sites []model.Site, fallback uint) uint {
 func anyHTTPS(sites []model.Site) bool {
 	for _, s := range sites {
 		if s.HTTPS {
+			return true
+		}
+	}
+	return false
+}
+
+// containsInt 这个小列表里有没有这个值。
+// 默认入口通常只有一两个端口，用 map 反而更啰嗦。
+func containsInt(list []int, v int) bool {
+	for _, x := range list {
+		if x == v {
 			return true
 		}
 	}

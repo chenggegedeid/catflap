@@ -23,7 +23,11 @@ type ProxyConfigView struct {
 // 这里是用户的意愿；实际跑没跑起来看 Listeners——
 // 端口被占用时就是「开着但没跑起来」，原因在那条 listener 的 lastError 上。
 type EntryView struct {
-	Enabled    bool   `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// HTTPPorts / HTTPSPorts 入口端口，**可以多个**。新前端用这两个。
+	HTTPPorts  []int `json:"httpPorts"`
+	HTTPSPorts []int `json:"httpsPorts"`
+	// HTTPPort / HTTPSPort 第一个端口，给老前端兼容用（见 buildEntryView）
 	HTTPPort   int    `json:"httpPort"`
 	HTTPSPort  int    `json:"httpsPort"`
 	CertID     uint   `json:"certId"`
@@ -42,10 +46,23 @@ func (ProxyApi) ProxyConfigView(c *gin.Context) {
 }
 
 func buildEntryView(cfg proxymodel.ProxyConfig) EntryView {
+	hp := cfg.HTTPPortList()
+	sp := cfg.HTTPSPortList()
+	// 顺带回一个单端口值，老前端（只认 httpPort/httpsPort）不会因此崩掉 ——
+	// 它读第一个端口，行为和多端口时一致
+	var h, hs int
+	if len(hp) > 0 {
+		h = hp[0]
+	}
+	if len(sp) > 0 {
+		hs = sp[0]
+	}
 	return EntryView{
 		Enabled:    cfg.Enabled,
-		HTTPPort:   cfg.HTTPPort,
-		HTTPSPort:  cfg.HTTPSPort,
+		HTTPPorts:  hp,
+		HTTPSPorts: sp,
+		HTTPPort:   h,
+		HTTPSPort:  hs,
 		CertID:     cfg.CertID,
 		AccessLog:  cfg.AccessLog,
 		BaseDomain: cfg.BaseDomain,
