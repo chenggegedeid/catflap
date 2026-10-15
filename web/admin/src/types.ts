@@ -108,6 +108,12 @@ export interface StunService {
   protocol: string
   upnpMappedPort: number
   useUpnp: boolean
+  /**
+   * 打洞用的本机端口；0 = 每次随机。
+   * 外部端口是 NAT 照着本机端口分配的，本机端口随机外部端口就每次都变，
+   * 配好的「域名+端口」过一会儿就失效。钉住本机端口外部端口才稳。
+   */
+  punchLocalPort: number
   /** 仅影响链接展示成 http:// 还是 https://，不改变转发行为 */
   https: boolean
   /** 该服务对外域名，如 fw.example.com；留空回落公网 IP */

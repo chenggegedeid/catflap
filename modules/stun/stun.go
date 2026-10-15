@@ -35,32 +35,69 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 		}
 	}
 
-	// 端口复用连接STUN服务器，钉在出口网卡上：开着 TUN 时不钉，包会被 TUN 接走
-	localAddr := fmt.Sprintf("%s:0", localIP)
-	stunConn, err := CurrentOutboundIface().DialReusable(protocol, localAddr, stunServer)
-	if err != nil {
-		primaryErr := err
+	// 端口复用连接STUN服务器，钉在出口网卡上：开着 TUN 时不钉，包会被 TUN 接走。
+	//
+	// 本机端口是重点：NAT 的外部端口是照着「本机 IP + 本机端口」发的，本机端口
+	// 每次随机，外部端口就每次都不一样，用户拿到的地址过一会儿就失效。
+	// 所以优先用调用方指定的端口把它固定住；指定端口用不了（多半是被别的程序
+	// 占了）就退回随机，并在日志里讲清楚——服务照样能起来，只是外部端口不再稳定。
+	localAddrs := []string{fmt.Sprintf("%s:0", localIP)}
+	if req.PreferredLocalPort > 0 {
+		localAddrs = append(
+			[]string{fmt.Sprintf("%s:%d", localIP, req.PreferredLocalPort)},
+			localAddrs...,
+		)
+	}
+
+	var stunConn net.Conn
+	var dialErr error
+	for _, la := range localAddrs {
+		stunConn, dialErr = CurrentOutboundIface().DialReusable(protocol, la, stunServer)
+		if dialErr == nil {
+			break
+		}
+		if la != localAddrs[len(localAddrs)-1] {
+			logrus.Warnf("指定的打洞本机端口 %d 绑定失败（%v），改用随机端口——外部端口将不再固定",
+				req.PreferredLocalPort, dialErr)
+		}
+	}
+	if stunConn == nil {
+		// 可能 best STUN 掉线了，换备用的再走一遍同样的本机端口候选
 		primarySTUNServer := stunServer
-		// 可能 best STUN 掉线了，使用备用的
 		stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
 		if err != nil {
-			return fmt.Errorf("connect stun server %s failed: %v; get backup stun server: %w", primarySTUNServer, primaryErr, err)
+			return fmt.Errorf("connect stun server %s failed: %v; get backup stun server: %w", primarySTUNServer, dialErr, err)
 		}
-		// 再次发起连接
-		stunConn, err = CurrentOutboundIface().DialReusable(protocol, localAddr, stunServer)
-		if err != nil {
-			return fmt.Errorf("connect stun server %s failed: %v; connect backup stun server %s: %w", primarySTUNServer, primaryErr, stunServer, err)
+		for _, la := range localAddrs {
+			stunConn, dialErr = CurrentOutboundIface().DialReusable(protocol, la, stunServer)
+			if dialErr == nil {
+				break
+			}
+		}
+		if stunConn == nil {
+			return fmt.Errorf("connect stun server %s failed: %v; connect backup stun server %s: %w",
+				primarySTUNServer, dialErr, stunServer, dialErr)
 		}
 	}
 	defer stunConn.Close()
 
-	//获取本地端口
 	var localPort uint16
 	switch protocol {
 	case "tcp":
 		localPort = uint16(stunConn.LocalAddr().(*net.TCPAddr).Port)
 	case "udp":
 		localPort = uint16(stunConn.LocalAddr().(*net.UDPAddr).Port)
+	}
+
+	// 之后报出去的每个状态都带上本机端口。调度器据此记住它，下次重打时优先复用
+	// 同一个端口——这样即使没配固定端口，运行期间外部端口也能保持稳定。
+	// 只在函数内替换闭包，不改调用方，也不影响状态机本身。
+	{
+		report := onState
+		onState = func(s STUNState) {
+			s.LocalPort = localPort
+			report(s)
+		}
 	}
 
 	// 发送STUN 请求,获取外部端口

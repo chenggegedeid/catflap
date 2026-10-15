@@ -15,6 +15,13 @@ type STUNRequest struct {
 	UseUPnP       bool
 	WebhookConfig webhook.WebhookConfig
 
+	// PreferredLocalPort 打洞希望使用的本机端口；0 表示随机分配。
+	//
+	// 外部端口是 NAT 按「本机 IP + 本机端口」分配的，本机端口一变外部端口就变。
+	// 想让外部端口稳定（这样才能用固定端口对外服务），就得固定本机端口。
+	// 端口被占用时 Run 会自动退回随机，不会因此失败。
+	PreferredLocalPort uint16
+
 	// Redirect 入口域名跟着外部端口走的配置
 	Redirect model.RedirectConfig
 	// MCEntry MC Java 版联机的 SRV 记录跟着外部端口走
@@ -44,6 +51,12 @@ type STUNState struct {
 	ExternalIP   string        // 外部 IP
 	ExternalPort uint16        // 外部端口
 	Log          string        // 日志
+
+	// LocalPort 本次打洞实际用的本机端口。
+	//
+	// 调度器记住它、下次重打时优先复用：本机端口不变，NAT 给的外部端口就不变，
+	// 面板上那个"外部端口"才不会一直跳——否则用户刚拿到的地址过一会儿就失效。
+	LocalPort uint16
 }
 
 type Runner interface {

@@ -21,6 +21,10 @@ type StunServiceAddViewRequest struct {
 	// UPnP 相关配置
 	UseUPnP bool `json:"useUpnp"` // 是否启用 UPnP 自动端口映射 (默认 true)
 
+	// 打洞用的本机端口；0 = 随机。
+	// 外部端口是 NAT 照着本机端口分配的，钉住它外部端口才稳定。
+	PunchLocalPort uint16 `json:"punchLocalPort"`
+
 	// 对外访问
 	Domain       string `json:"domain"`       // 对外域名，如 fw.example.com；留空回落公网 IP
 	TLSTerminate bool   `json:"tlsTerminate"` // 由 Catflap 在洞口终结 TLS（仅 TCP）
@@ -63,22 +67,23 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 	domain, tlsTerminate, certID := normalizeTLSFields(cr.Protocol, cr.Domain, cr.TLSTerminate, cr.CertID)
 	domain = fillDomainFromCert(domain, tlsTerminate, certID)
 	newService := model.Service{
-		ID:            maxID + 1,
-		Name:          cr.Name,
-		InternalPort:  cr.InternalPort,
-		Protocol:      cr.Protocol,
-		Https:         cr.Https,
-		UseUPnP:       cr.UseUPnP,
-		Domain:        domain,
-		TLSTerminate:  tlsTerminate,
-		CertID:        certID,
-		BackendHTTPS:  normalizeBackendHTTPS(cr.Protocol, cr.BackendHTTPS, tlsTerminate),
-		Enabled:       cr.Enabled,
-		Description:   cr.Description,
-		WebHookConfig: cr.WebHookConfig,
-		Redirect:      cr.Redirect,
-		MCEntry:       normalizeMCEntry(cr.Protocol, cr.MCEntry),
-		UpdatedAt:     time.Now(),
+		ID:             maxID + 1,
+		Name:           cr.Name,
+		InternalPort:   cr.InternalPort,
+		Protocol:       cr.Protocol,
+		Https:          cr.Https,
+		UseUPnP:        cr.UseUPnP,
+		PunchLocalPort: cr.PunchLocalPort,
+		Domain:         domain,
+		TLSTerminate:   tlsTerminate,
+		CertID:         certID,
+		BackendHTTPS:   normalizeBackendHTTPS(cr.Protocol, cr.BackendHTTPS, tlsTerminate),
+		Enabled:        cr.Enabled,
+		Description:    cr.Description,
+		WebHookConfig:  cr.WebHookConfig,
+		Redirect:       cr.Redirect,
+		MCEntry:        normalizeMCEntry(cr.Protocol, cr.MCEntry),
+		UpdatedAt:      time.Now(),
 	}
 
 	// 添加服务到设备

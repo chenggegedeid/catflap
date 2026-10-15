@@ -343,6 +343,13 @@ export interface StunServicePayload {
   certId: number
   /** 内网服务本身就说 TLS（自签也算），转发时用 tls.Dial */
   backendHttps: boolean
+  /**
+   * 打洞用的本机端口；0 = 每次随机。
+   *
+   * 外部端口是 NAT 照着本机端口分配的，本机端口随机外部端口就每次都变，
+   * 配好的「域名+端口」过一会儿就失效。钉住本机端口外部端口才稳。
+   */
+  punchLocalPort: number
   enabled: boolean
   description: string
   webhookconfig?: WebhookConfig
