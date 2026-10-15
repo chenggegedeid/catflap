@@ -92,6 +92,7 @@ export async function getConfig(): Promise<HomeConfig> {
   data.searchHistory = data.searchHistory ?? []
   data.categories = data.categories ?? []
   data.apps = data.apps ?? []
+  data.lockedCategoryIds = data.lockedCategoryIds ?? []
   return data
 }
 
@@ -130,8 +131,8 @@ export const clearSearchHistory = () =>
 
 // ============ 分类 ============
 export const addCategory = (name: string) => send<Category>('POST', '/home/category/add', { name })
-export const updateCategory = (id: string, name: string) =>
-  send<unknown>('PUT', '/home/category/update', { id, name })
+export const updateCategory = (id: string, name?: string, requireAuth?: boolean) =>
+  send<unknown>('PUT', '/home/category/update', { id, name, requireAuth })
 export const deleteCategory = (id: string) =>
   send<unknown>('DELETE', '/home/category/delete', { id })
 export const reorderCategories = (ids: string[]) =>

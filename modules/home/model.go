@@ -59,6 +59,16 @@ type Category struct {
 	Name  string `json:"name"`
 	Order int    `json:"order"`
 
+	// RequireAuth 这个分组要登录后才看得见。
+	//
+	// 导航主页是公开页面，谁打开都能看——于是内网服务名、端口、内网 IP
+	// 全都摆在明面上。把敏感的分组勾上这个，未登录访客拿到的配置里就不含
+	// 这个分组和它下面的应用（后端过滤，不是前端藏一下，访客翻源码也翻不到）。
+	//
+	// 勾了之后访客那侧会看到一个"登录查看"的占位分组，知道这儿有东西，
+	// 但看不到是什么。
+	RequireAuth bool `json:"requireAuth"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

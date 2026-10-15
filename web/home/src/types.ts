@@ -30,6 +30,8 @@ export interface Category {
   id: string
   name: string
   order: number
+  /** 要登录后才看得见；未登录访客拿到的配置里不含这个分组和它下面的应用 */
+  requireAuth?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -66,4 +68,8 @@ export interface HomeConfig {
   searchHistory: string[]
   categories: Category[]
   apps: AppView[]
+  /** 因为要登录而被后端藏起来的分组 ID（未登录时才有） */
+  lockedCategoryIds?: string[]
+  /** 这次请求有没有登录态；只用于展示，真正的过滤在服务端 */
+  authed?: boolean
 }
