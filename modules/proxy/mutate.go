@@ -91,6 +91,22 @@ func normalizeSite(in model.Site, base string) (model.Site, error) {
 	}
 	out.Hosts = NormalizeHosts(hosts)
 
+	// Scheme 白名单：只认三个值，其它一律拒。
+	//
+	// 不校验的话，配置文件里出现一个不认识的 scheme，绑定时会走 default
+	// 分支当 auto 处理 —— 看着"能用"，但用户以为自己设了某个协议，
+	// 实际行为完全不同。这种"悄悄降级"比直接报错难查得多。
+	switch out.Scheme {
+	case model.SchemeAuto, model.SchemeHTTP, model.SchemeHTTPS:
+		// ok
+	default:
+		return out, fmt.Errorf("协议只能是 http 或 https（留空表示自动），实际填的是 %q", out.Scheme)
+	}
+	// 选了 https 就一定要能 HTTPS，否则这条站点一个入口都挂不上
+	if out.Scheme == model.SchemeHTTPS {
+		out.HTTPS = true
+	}
+
 	out.Backend = strings.TrimSpace(out.Backend)
 	out.PathPrefix = normalizePrefix(out.PathPrefix)
 	out.Description = strings.TrimSpace(out.Description)
@@ -396,4 +412,114 @@ func hasLocalIP(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+// ===================== 端口转发 =====================
+
+// normalizeForward 校验并整理一条端口转发。
+//
+// 校验项里**最要紧的两条**和站点那边一致（v1.8 修的漏洞）：
+//   - 监听端口不能是后台端口：否则反代会把 Catflap 自己的监听顶掉
+//   - 目标不能指向后台端口：否则等于把管理后台挂到公网上，
+//     谁都能在上面爆破密码（/api/auth/login 是公开的）
+//
+// 端口转发是新增功能，这两条要是从一开始就漏了，等于给那个漏洞新开一条路。
+func normalizeForward(in model.Forward, entry model.ProxyConfig) (model.Forward, error) {
+	out := in
+	out.Target = strings.TrimSpace(out.Target)
+	out.Description = strings.TrimSpace(out.Description)
+	out.Protocol = strings.ToLower(strings.TrimSpace(out.Protocol))
+	if out.Protocol == "" {
+		out.Protocol = "tcp"
+	}
+
+	switch {
+	case out.ListenPort <= 0:
+		return out, errors.New("端口转发要填一个监听端口（它没有域名可分流，只能自己占一个）")
+	case out.ListenPort > 65535:
+		return out, errors.New("端口要填 1 到 65535 之间的数字")
+	case out.ListenPort == adminPort():
+		return out, fmt.Errorf("%d 是 Catflap 自己的后台端口，换一个", adminPort())
+	case containsInt(entry.HTTPPortList(), out.ListenPort):
+		return out, fmt.Errorf("端口 %d 已经是默认 HTTP 入口了，换一个——同一个端口不能 bind 两次", out.ListenPort)
+	case containsInt(entry.HTTPSPortList(), out.ListenPort):
+		return out, fmt.Errorf("端口 %d 已经是默认 HTTPS 入口了，换一个", out.ListenPort)
+	case out.Target == "":
+		return out, errors.New("目标地址必填，形如 192.168.1.20:80")
+	case strings.ContainsAny(out.Target, " \t"):
+		return out, errors.New("目标地址里有空格，请检查")
+	case strings.HasPrefix(out.Target, "/"):
+		return out, errors.New("目标地址要填主机和端口，形如 192.168.1.20:80")
+	case backendHitsAdminPort(out.Target, adminPort()):
+		return out, fmt.Errorf(
+			"目标不能是 Catflap 自己的后台端口 %d——那等于把管理后台挂到公网上，任何人都能来试密码",
+			adminPort())
+	case out.Protocol != "tcp" && out.Protocol != "udp":
+		return out, errors.New("协议只能填 tcp 或 udp")
+	}
+
+	// 两条转发不能占同一个端口
+	for _, f := range entry.Forwards {
+		if f.ID != out.ID && f.ListenPort == out.ListenPort {
+			return out, fmt.Errorf("端口 %d 已经被另一条转发占了", out.ListenPort)
+		}
+	}
+	return out, nil
+}
+
+// SaveForward 新增或修改一条端口转发（ID 为 0 表示新增）
+func SaveForward(in model.Forward) (model.Forward, error) {
+	var saved model.Forward
+	err := Runtime.Update(func(cfg *model.ProxyConfig) error {
+		f, err := normalizeForward(in, *cfg)
+		if err != nil {
+			return err
+		}
+		if f.ID == 0 {
+			var max uint
+			for _, x := range cfg.Forwards {
+				if x.ID > max {
+					max = x.ID
+				}
+			}
+			f.ID = max + 1
+			f.CreatedAt = time.Now()
+			cfg.Forwards = append(cfg.Forwards, f)
+		} else {
+			found := false
+			for i := range cfg.Forwards {
+				if cfg.Forwards[i].ID == f.ID {
+					f.CreatedAt = cfg.Forwards[i].CreatedAt
+					cfg.Forwards[i] = f
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.New("端口转发不存在")
+			}
+		}
+		f.UpdatedAt = time.Now()
+		saved = f
+		return nil
+	})
+	if err != nil {
+		return model.Forward{}, err
+	}
+	// Runtime.Update 落盘后会自动 Apply（重开监听），不用再手动调一次
+	return saved, nil
+}
+
+// DeleteForward 删一条端口转发
+func DeleteForward(id uint) error {
+	return Runtime.Update(func(cfg *model.ProxyConfig) error {
+		for i := range cfg.Forwards {
+			if cfg.Forwards[i].ID != id {
+				continue
+			}
+			cfg.Forwards = append(cfg.Forwards[:i], cfg.Forwards[i+1:]...)
+			return nil
+		}
+		return errors.New("端口转发不存在")
+	})
 }
