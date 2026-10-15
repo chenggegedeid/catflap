@@ -127,6 +127,8 @@ export interface StunService {
   enabled: boolean
   description: string
   webhookconfig?: WebhookConfig
+  /** 选用的全局通知渠道 ID（渠道在通知页配置） */
+  channelIds?: string[]
   redirect?: RedirectConfig
   mcEntry?: MCEntryConfig
 }

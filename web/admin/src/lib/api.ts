@@ -357,6 +357,9 @@ export interface StunServicePayload {
   punchLocalPort: number
   enabled: boolean
   description: string
+  /** 选用的全局通知渠道 ID */
+  channelIds: string[]
+  /** 旧的内联 webhook，已被通知中心取代（保留做回退，界面不再编辑） */
   webhookconfig?: WebhookConfig
   redirect?: RedirectConfig
   mcEntry?: MCEntryConfig

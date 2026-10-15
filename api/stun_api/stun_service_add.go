@@ -35,8 +35,12 @@ type StunServiceAddViewRequest struct {
 	Description string `json:"description"` // 服务描述信息 (可选)
 
 	WebHookConfig webhook.WebhookConfig `json:"webhookconfig"` // Webhook 配置文件
-	Redirect      model.RedirectConfig  `json:"redirect"`      // 入口域名跟着外部端口走
-	MCEntry       model.MCEntryConfig   `json:"mcEntry"`       // MC Java 版联机的 SRV 记录
+
+	// ChannelIDs 用哪些**全局通知渠道**。渠道在「通知」页里统一配置，
+	// 这里只存 ID —— 同一个群机器人地址不该在每个服务里各存一份。
+	ChannelIDs []string             `json:"channelIds"`
+	Redirect   model.RedirectConfig `json:"redirect"` // 入口域名跟着外部端口走
+	MCEntry    model.MCEntryConfig  `json:"mcEntry"`  // MC Java 版联机的 SRV 记录
 }
 
 func (StunApi) StunServiceAddView(c *gin.Context) {
@@ -96,6 +100,7 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 		Enabled:        cr.Enabled,
 		Description:    cr.Description,
 		WebHookConfig:  cr.WebHookConfig,
+		ChannelIDs:     cr.ChannelIDs,
 		Redirect:       cr.Redirect,
 		MCEntry:        normalizeMCEntry(cr.Protocol, cr.MCEntry),
 		UpdatedAt:      time.Now(),
