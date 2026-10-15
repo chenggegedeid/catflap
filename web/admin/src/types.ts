@@ -677,3 +677,50 @@ export interface NotifyConfigView {
   cooldownSeconds: number
   legacyWebhookFallback: boolean
 }
+
+// ===================== 流量统计 =====================
+
+/** 逐秒的一个采样点（实时速率曲线用） */
+export interface TrafficSecondPoint {
+  at: number
+  in: number
+  out: number
+  requests: number
+}
+
+export interface TrafficTotals {
+  totalIn: number
+  totalOut: number
+  totalRequests: number
+  /** 开始统计的时间（Unix 秒） */
+  since: number
+}
+
+export interface TrafficDailyTotals {
+  date: string
+  in: number
+  out: number
+  requests: number
+  errors: number
+}
+
+export interface TrafficSiteTraffic {
+  in: number
+  out: number
+  requests: number
+}
+
+/** 实时速率 + 累计值（2 秒一次） */
+export interface TrafficRealtime {
+  inPerSec: number
+  outPerSec: number
+  series: TrafficSecondPoint[]
+  totals: TrafficTotals
+  today: TrafficDailyTotals
+}
+
+export interface TrafficTrend {
+  days: TrafficDailyTotals[]
+  /** 键是站点 ID 的字符串形式 */
+  bySite: Record<string, TrafficSiteTraffic>
+}
