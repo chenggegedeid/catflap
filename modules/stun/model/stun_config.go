@@ -12,7 +12,21 @@ type Config struct {
 	CreatedAt time.Time `json:"createdAt"` // 配置创建时间
 	UpdatedAt time.Time `json:"updatedAt"` // 最后更新时间
 
-	Devices        []Device `json:"devices"`        // stun设备列表
+	// Devices 设备列表。
+	//
+	// **设备的"主人"现在是 modules/device**（config/devices.json）——
+	// 穿透、反代、端口转发共用那一份。这里只保留字段用于读老配置、
+	// 迁移完之后清空，不再写回。新代码请用 device.List()。
+	//
+	// 想拿"设备 + 它上面的穿透服务"用 stun 的 DevicesWithServices()。
+	Devices []Device `json:"devices,omitempty"`
+
+	// Services 穿透服务，**带 DeviceID 关联到设备**。
+	//
+	// 以前服务嵌在 Device.Services 里；设备搬走之后没地方放了，
+	// 拆成独立列表（这是拆分的全部原因）。
+	Services []Service `json:"services"`
+
 	StunServerList []string `json:"stunServerList"` // stun服务器列表
 
 	Network NetworkConfig `json:"network"` // 打洞走哪张网卡、STUN 域名找谁解析
@@ -37,19 +51,32 @@ const (
 	ModeCustom = "custom"
 )
 
+// Device 一台设备。
+//
+// **新代码请用 modules/device 里的 Device** —— 设备的唯一一份在那边
+// （穿透、反代、端口转发共用）。这个类型现在只用来读老配置文件。
 type Device struct {
-	DeviceID uint      `json:"id"`       // id
-	Name     string    `json:"name"`     // "本机" / "群晖NAS" / "树莓派"
-	IP       string    `json:"ip"`       // 设备ip
-	Services []Service `json:"services"` // 该设备上的服务
+	DeviceID uint   `json:"id"`   // id
+	Name     string `json:"name"` // "本机" / "群晖NAS" / "树莓派"
+	IP       string `json:"ip"`   // 设备ip
+
+	// Services 老配置里嵌在设备下的服务。
+	//
+	// **只用于迁移**：读老配置时把它搬到 Config.Services（见 stun 的迁移），
+	// 之后一律为空，不再写回文件。
+	Services []Service `json:"services,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Service 单个服务配置
+//
+// 服务不再嵌在设备里（设备归 modules/device 管），靠 DeviceID 关联过去。
 type Service struct {
-	ID             uint   `json:"id"` // 服务唯一标识符
+	// DeviceID 这个服务在哪台设备上。和设备表的 DeviceID 对应。
+	DeviceID       uint   `json:"deviceId"`
+	ID             uint   `json:"id"` // 服务唯一标识符（设备内唯一）
 	StartupSuccess bool   `json:"-"`
 	Name           string `json:"name"`         // 服务名称,如 "SSH" / "Web管理" / "照片库"
 	InternalPort   uint16 `json:"internalPort"` // 内网端口,如 22
