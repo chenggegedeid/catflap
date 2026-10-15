@@ -146,10 +146,10 @@ func checkPortProtocol(cfg *model.ProxyConfig, site model.Site) error {
 	if port == 0 || !site.Enabled {
 		return nil
 	}
-	if containsInt(cfg.HTTPPortList(), port) && site.HTTPS {
+	if containsInt(cfg.HTTPPortList(), port) && site.WantsHTTPS() {
 		return fmt.Errorf("端口 %d 是默认 HTTP 入口，想让这个站点走 HTTPS 就别单独指定端口，或者换一个端口", port)
 	}
-	if containsInt(cfg.HTTPSPortList(), port) && !site.HTTPS {
+	if containsInt(cfg.HTTPSPortList(), port) && !site.WantsHTTPS() {
 		return fmt.Errorf("端口 %d 是默认 HTTPS 入口，这个站点没开 HTTPS——换一个端口，或者把 HTTPS 打开", port)
 	}
 

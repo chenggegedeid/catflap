@@ -30,7 +30,9 @@ func ReadConfig() (model.ProxyConfig, error) {
 	// 必须在 migrateSinglePort **之后**：它可能刚把老的单端口塞进
 	// LegacyHTTPPort/HTTPSPort，这一行再搬到数组里
 	config.MigratePorts()
+	config.MigrateScheme()
 	migrateSiteHosts(&config)
+	migratePortForward(&config)
 	return config, nil
 }
 
@@ -99,4 +101,43 @@ func SaveConfig(config model.ProxyConfig) error {
 		return err
 	}
 	return nil
+}
+
+// migratePortForward 把老配置里"留空域名 + 独占端口"的站点拆成端口转发。
+//
+// 那种站点本质就是端口转发（没有域名可分流，只能自己占一个端口），
+// 以前是塞在站点表里的。现在端口转发独立了，把它们搬过去。
+//
+// **幂等**：只在 Forwards 为空且存在这种站点时执行。
+func migratePortForward(cfg *model.ProxyConfig) {
+	if cfg == nil || len(cfg.Forwards) > 0 {
+		return
+	}
+
+	var keep []model.Site
+	var moved []model.Forward
+	for _, s := range cfg.Sites {
+		isForward := len(NormalizeHosts(s.Hosts)) == 0 && s.ListenPort > 0
+		if !isForward {
+			keep = append(keep, s)
+			continue
+		}
+		moved = append(moved, model.Forward{
+			ID:          s.ID,
+			ListenPort:  s.ListenPort,
+			Target:      s.Backend,
+			Protocol:    "tcp",
+			Enabled:     s.Enabled,
+			Description: s.Description,
+			UpdatedAt:   s.UpdatedAt,
+		})
+	}
+
+	if len(moved) == 0 {
+		return
+	}
+
+	cfg.Sites = keep
+	cfg.Forwards = moved
+	logrus.Infof("[proxy] 已把 %d 条「端口转发」从站点表里拆出来", len(moved))
 }

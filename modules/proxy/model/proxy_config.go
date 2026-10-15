@@ -52,6 +52,11 @@ type ProxyConfig struct {
 
 	Sites []Site `json:"sites"`
 
+	// Forwards 端口转发。**和站点分开**：站点是"域名 → 服务"，
+	// 端口转发是"端口 → 端口"，不看域名。混在一起时站点这个概念要同时
+	// 表达两件事，界面也说不清楚（像 lucky / 爱快那样分开更清楚）。
+	Forwards []Forward `json:"forwards"`
+
 	// 下面两个是旧版的单端口字段，只用来读老配置。
 	// ReadConfig 迁移完就清空，之后不再写进文件。
 	LegacyPort int  `json:"listenPort,omitempty"`
@@ -87,7 +92,17 @@ type Site struct {
 
 	// ListenPort 这个站点单独占一个端口；0 = 挂在默认入口上
 	ListenPort int `json:"listenPort"`
-	// HTTPS 这个站点要不要 HTTPS。
+	// Scheme 这个站点走哪个入口：""（自动）/ "http" / "https"。
+	//
+	// 自动 = HTTP 入口一直有，勾了 HTTPS 再额外挂一份到 HTTPS 入口，
+	// 也就是升级前 HTTPS=true 的行为。
+	// 指定 http / https = **只**挂那一个入口 —— 用户要的是"选一个就行"。
+	//
+	// 用三态而不是 bool，是因为升级前 HTTPS 的语义是"额外挂"，
+	// 而用户想要的"选 https"是"只挂 https"，两者不一样。
+	Scheme string `json:"scheme"`
+
+	// HTTPS 这个站点要不要 HTTPS（**已由 Scheme 取代**）。
 	//
 	// 挂默认入口时：HTTP 入口一直有，勾上就额外挂到 HTTPS 入口。
 	// 自己占端口时：决定这个端口是 https 还是 http。
@@ -205,4 +220,82 @@ func cleanPorts(in []int) []int {
 	// 排序保证每次算出来的顺序稳定，日志和页面上不会来回跳
 	sort.Ints(out)
 	return out
+}
+
+// ===================== 站点协议 =====================
+
+const (
+	SchemeAuto  = ""
+	SchemeHTTP  = "http"
+	SchemeHTTPS = "https"
+)
+
+// MigrateScheme 把老的 HTTPS bool 迁成新的 Scheme 三态。
+//
+// 迁移规则：
+//   - 没设过 Scheme 的老配置：HTTPS=false → http，HTTPS=true → auto
+//     （true 对应"HTTP 和 HTTPS 都挂"，就是自动）
+//   - 已经有 Scheme 的：不动
+func (c *ProxyConfig) MigrateScheme() {
+	for i := range c.Sites {
+		s := &c.Sites[i]
+		if s.Scheme != "" {
+			continue
+		}
+		if s.HTTPS {
+			s.Scheme = SchemeAuto
+		} else {
+			s.Scheme = SchemeHTTP
+		}
+		// HTTPS 字段不再作为主要依据，但保留值以免别处还在读
+	}
+}
+
+// WantsHTTP 这个站点要不要挂在 HTTP 入口上
+func (s Site) WantsHTTP() bool {
+	switch s.Scheme {
+	case SchemeHTTPS:
+		return false // 只要 HTTPS
+	case SchemeHTTP:
+		return true
+	default:
+		// 自动：HTTP 入口一直有（内网敲 IP、还没配证书时不至于打不开）
+		return true
+	}
+}
+
+// WantsHTTPS 这个站点要不要挂在 HTTPS 入口上
+func (s Site) WantsHTTPS() bool {
+	switch s.Scheme {
+	case SchemeHTTP:
+		return false // 只要 HTTP
+	case SchemeHTTPS:
+		return true
+	default:
+		// 自动：看勾没勾 HTTPS
+		return s.HTTPS
+	}
+}
+
+// ===================== 端口转发 =====================
+
+// Forward 一条端口转发：监听一个端口，把流量原样转到内网某台机器的某个端口。
+//
+// 和站点的区别就一句话：**不看域名**。
+// 站点靠 hosts 分流，端口转发收到什么转什么。
+type Forward struct {
+	ID uint `json:"id"`
+	// ListenPort 本机监听端口，必填（没有域名可分流，只能自己占一个）
+	ListenPort int `json:"listenPort"`
+	// Target 目标地址，形如 192.168.1.20:80
+	Target string `json:"target"`
+	// Protocol tcp / udp
+	Protocol string `json:"protocol"`
+	// Enabled 停用只是不监听，配置留着
+	Enabled bool `json:"enabled"`
+	// Description 备注，给界面显示（"给外面的监控用"）
+	Description string `json:"description"`
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
