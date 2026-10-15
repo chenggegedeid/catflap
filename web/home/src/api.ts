@@ -102,7 +102,6 @@ export const logout = async () => {
 export async function getConfig(): Promise<HomeConfig> {
   const data = await get<HomeConfig>('/home/config')
   data.searchEngines = data.searchEngines ?? []
-  data.searchHistory = data.searchHistory ?? []
   data.categories = data.categories ?? []
   data.apps = data.apps ?? []
   data.lockedCategoryIds = data.lockedCategoryIds ?? []
@@ -135,12 +134,44 @@ export const reorderSearchEngines = (ids: string[]) =>
 export const setDefaultSearchEngine = (id: string) =>
   send<unknown>('PUT', '/home/search-engine/default', { id })
 
-// ============ 搜索历史 ============
-export const getSearchHistory = () => get<string[]>('/home/search-history')
-export const addSearchHistory = (keyword: string) =>
-  send<unknown>('POST', '/home/search-history/add', { keyword })
-export const clearSearchHistory = () =>
-  send<unknown>('DELETE', '/home/search-history/clear')
+// ============ 搜索历史（存在浏览器本地）============
+//
+// 以前存在服务端，但导航主页是公开的、那个接口也是公开的 —— 谁都能拉一份
+// 管理员搜过什么。而且搜索历史本来就不需要跨设备同步（"这台设备上我刚搜了啥"），
+// 放 localStorage 既私密又省事，服务器上也不再留痕。
+const SEARCH_HISTORY_KEY = 'catflap_search_history'
+const SEARCH_HISTORY_MAX = 24
+
+export function getSearchHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(SEARCH_HISTORY_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter((v) => typeof v === 'string') : []
+  } catch {
+    // 存储被禁用或内容坏了：当成没有历史，不影响搜索本身
+    return []
+  }
+}
+
+export function addSearchHistory(keyword: string): string[] {
+  const next = [keyword, ...getSearchHistory().filter((h) => h !== keyword)].slice(0, SEARCH_HISTORY_MAX)
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next))
+  } catch {
+    // 存不下就算了，历史不是关键路径
+  }
+  return next
+}
+
+export function clearSearchHistory(): string[] {
+  try {
+    localStorage.removeItem(SEARCH_HISTORY_KEY)
+  } catch {
+    // ignore
+  }
+  return []
+}
 
 // ============ 分类 ============
 export const addCategory = (name: string) => send<Category>('POST', '/home/category/add', { name })

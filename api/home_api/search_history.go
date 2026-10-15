@@ -1,65 +1,37 @@
 package home_api
 
 import (
-	"github.com/chenggegedeid/catflap/middleware"
-	"github.com/chenggegedeid/catflap/modules/home"
 	"github.com/chenggegedeid/catflap/utils/res"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-type SearchHistoryAddRequest struct {
-	Keyword string `json:"keyword"`
-}
+// 搜索历史改为**存在浏览器本地**（localStorage），服务端不再存也不再下发。
+//
+// 起因：导航主页是公开页面，而这个接口也是公开的 —— 任何人打开
+// `GET /api/home/search-history` 就能拿到管理员搜过什么。"搜过什么"是很私人的
+// 东西（可能包含内网主机名、业务关键词），而且它本来也不需要跨设备同步：
+// 搜索历史就是"这台设备上我刚才搜过啥"。
+//
+// 放在本地还有个额外好处：不再有人往服务器上写，也就没有"忘记清理"的问题。
+//
+// 这三个接口保留为**明确的废弃端点**而不是直接删掉：老版本前端（浏览器里
+// 缓存的 dist）还会调它们，直接 404 会在控制台刷错误。
+const searchHistoryDeprecatedMsg = "搜索历史已改为保存在浏览器本地，请刷新页面"
 
+// SearchHistoryGetView 已废弃：不再返回任何历史
 func (HomeApi) SearchHistoryGetView(c *gin.Context) {
-	list := []string{}
-	home.Runtime.Read(func(cfg *home.Config) {
-		list = append(list, cfg.SearchHistory...)
-	})
-	res.OkWithData(list, c)
+	// 返回空列表而不是报错：老前端拿到空列表会正常渲染"没有历史"，
+	// 比抛错让它弹个失败提示要好。
+	res.OkWithData([]string{}, c)
 }
 
+// SearchHistoryAddView 已废弃：不再在服务端记录
 func (HomeApi) SearchHistoryAddView(c *gin.Context) {
-	cr := middleware.GetBindRequest[SearchHistoryAddRequest](c)
-	keyword := strings.TrimSpace(cr.Keyword)
-	if keyword == "" {
-		res.FailWithMsg("keyword 不能为空", c)
-		return
-	}
-
-	err := home.Runtime.WithLock(func(cfg *home.Config) error {
-		// 去重：移除已存在的
-		out := make([]string, 0, len(cfg.SearchHistory)+1)
-		out = append(out, keyword)
-		for _, kw := range cfg.SearchHistory {
-			if kw == keyword {
-				continue
-			}
-			out = append(out, kw)
-		}
-		if len(out) > home.SearchHistoryMax {
-			out = out[:home.SearchHistoryMax]
-		}
-		cfg.SearchHistory = out
-		return nil
-	})
-	if err != nil {
-		res.FailWithMsg("保存配置失败", c)
-		return
-	}
-	res.OkWithMsg("已记录", c)
+	res.FailWithMsg(searchHistoryDeprecatedMsg, c)
 }
 
+// SearchHistoryClearView 已废弃
 func (HomeApi) SearchHistoryClearView(c *gin.Context) {
-	err := home.Runtime.WithLock(func(cfg *home.Config) error {
-		cfg.SearchHistory = []string{}
-		return nil
-	})
-	if err != nil {
-		res.FailWithMsg("保存配置失败", c)
-		return
-	}
-	res.OkWithMsg("已清空", c)
+	res.FailWithMsg(searchHistoryDeprecatedMsg, c)
 }

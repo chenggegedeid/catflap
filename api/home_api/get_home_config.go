@@ -19,7 +19,6 @@ type HomeConfigViewResponse struct {
 
 	DefaultSearchEngineID string              `json:"defaultSearchEngineId"`
 	SearchEngines         []home.SearchEngine `json:"searchEngines"`
-	SearchHistory         []string            `json:"searchHistory"`
 
 	Categories []home.Category `json:"categories"`
 	Apps       []home.AppView  `json:"apps"`
@@ -53,7 +52,6 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 			NetworkPrefer:         cfg.NetworkPrefer,
 			DefaultSearchEngineID: cfg.DefaultSearchEngineID,
 			SearchEngines:         append([]home.SearchEngine{}, cfg.SearchEngines...),
-			SearchHistory:         append([]string{}, cfg.SearchHistory...),
 			Categories:            append([]home.Category{}, cfg.Categories...),
 			Apps:                  home.HydrateApps(cfg.Apps),
 			Authed:                authed,

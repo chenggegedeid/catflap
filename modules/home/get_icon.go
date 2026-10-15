@@ -61,7 +61,14 @@ func FetchIconFromURL(rawURL string) (string, error) {
 		return "", fmt.Errorf("无效 URL")
 	}
 
-	client := &http.Client{Timeout: fetchHTTPTimeout}
+	// 拨号层挡内网地址：只看一遍 URL 挡不住 302 重定向和 DNS 指向内网的情况，
+	// 在真正建立连接的那一刻判断才作数。理由详见 icon_ssrf.go。
+	client := &http.Client{
+		Timeout: fetchHTTPTimeout,
+		Transport: &http.Transport{
+			DialContext: safeDialContext,
+		},
+	}
 
 	candidates := collectIconCandidates(client, u)
 	// fallback
