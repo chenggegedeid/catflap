@@ -256,6 +256,19 @@ function EntryModal({
         <span className="font-mono">listen 443 ssl</span> 的那个意思
       </div>
 
+      <div className="rounded-xl bg-blue-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 ring-1 ring-blue-200/70">
+        <div className="mb-1 font-semibold text-slate-700">想「只开一个端口」就填这儿</div>
+        把 HTTPS 端口填成一个固定的高位端口（比如 <span className="font-mono">8443</span>），
+        所有二级域名站点都不指定端口、挂上来按域名分发 —— 对外就只有这一个端口要放通。
+        <div className="mt-1.5">
+          本机有公网 IPv6 时（没有 IPv4 公网、只有 IPv6 的家宽很常见），
+          <span className="font-semibold">这个端口直接就能从外网访问，不需要打洞</span>：
+          在「DDNS 域名解析」里加一条 <span className="font-mono">AAAA</span> 记录、
+          IP 来源选「本地网卡」，再把域名的 IPv6 解析指向本机即可。
+          路由器上记得放行这个端口的 IPv6 入站。
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
           <div className={labelCls}>HTTP 端口</div>
