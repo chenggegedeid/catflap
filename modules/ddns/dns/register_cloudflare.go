@@ -34,8 +34,12 @@ func init() {
 				Required:    true,
 				Secret:      true,
 				Placeholder: "粘贴 Cloudflare API Token",
-				Help: "在 Cloudflare 后台 → My Profile → API Tokens 创建，权限需要 Zone → DNS → Edit；" +
-					"签证书与写重定向规则都走同一个 Token。",
+				Help: "在 Cloudflare 后台 → My Profile → API Tokens 创建。\n\n" +
+					"只做 DDNS 同步和签发证书：Zone → DNS → Edit 就够了。\n" +
+					"还要用重定向规则：另外勾 Zone → Rulesets → Edit —— 重定向走的是\n" +
+					"规则集接口（rulesets），不是 DNS 接口，只给 DNS 权限会在配重定向时报鉴权失败。\n\n" +
+					"可用范围建议只勾需要的那个域名（Include → Specific zone），别给整个账号。\n" +
+					"若报 Authentication error（code 10000），多半是权限或可用范围没覆盖到这个域名。",
 			},
 		},
 		Build: func(cred map[string]any) (any, error) {

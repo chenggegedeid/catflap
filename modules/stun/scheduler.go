@@ -108,8 +108,11 @@ type serviceEntry struct {
 	mu           sync.RWMutex
 	phase        ServicePhase // 当前阶段
 	externalPort uint16       // STUN 映射后的外部端口
-	lastWebhook  string       // 最近一次触发 webhook 的 publicIP:port
-	restartCount int          // 重启次数
+	// localPort 上一次打洞实际用的本机端口。重打时优先复用它：
+	// 本机端口不变，NAT 给的外部端口就不变，面板上的端口才不会一直跳。
+	localPort    uint16
+	lastWebhook  string // 最近一次触发 webhook 的 publicIP:port
+	restartCount int    // 重启次数
 	lastError    string
 	logMessages  []ServiceLog // 滚动日志
 	updatedAt    time.Time
@@ -151,6 +154,20 @@ func (e *serviceEntry) currentPhase() ServicePhase {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.phase
+}
+
+// getLocalPort 上一次打洞实际用的本机端口；还没打过是 0
+func (e *serviceEntry) getLocalPort() uint16 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.localPort
+}
+
+// setLocalPort 记下这次打洞用的本机端口，下一轮重打时优先复用
+func (e *serviceEntry) setLocalPort(port uint16) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.localPort = port
 }
 
 // applyState 唯一的状态变更入口，返回阶段是否真的改变了
@@ -503,6 +520,12 @@ func (s *Scheduler) runService(ctx context.Context, key string, entry *serviceEn
 	s.transition(entry, key, PhaseProbing, 0, "")
 
 	for {
+		// 重打之前先定本机端口：优先复用上次成功的那个，其次用用户配的固定端口，
+		// 都没有才随机。这一行决定了外部端口稳不稳——本机端口一变，NAT 就换一个
+		// 外部端口，用户刚拿到的地址立刻失效。
+		if remembered := entry.getLocalPort(); remembered > 0 {
+			req.PreferredLocalPort = remembered
+		}
 
 		//手动停止
 		if ctx.Err() != nil {
@@ -510,6 +533,10 @@ func (s *Scheduler) runService(ctx context.Context, key string, entry *serviceEn
 		}
 
 		err := s.runner.Run(ctx, req, func(state STUNState) {
+			// 记住这次用的本机端口，下一轮重打时复用它
+			if state.LocalPort > 0 {
+				entry.setLocalPort(state.LocalPort)
+			}
 			switch state.State {
 			case STUNMapped:
 				// 先标再 transition：transition 会把快照推给前端，
@@ -631,6 +658,10 @@ func buildSTUNRequest(device *model.Device, service *model.Service) STUNRequest 
 		WebhookConfig: service.WebHookConfig,
 		Redirect:      service.Redirect,
 		MCEntry:       service.MCEntry,
+
+		// 用户配的固定本机端口。0 = 自动；运行中调度器还会用上次成功的端口覆盖它，
+		// 见 runService 里那段说明。
+		PreferredLocalPort: service.PunchLocalPort,
 
 		// UDP 洞口不支持终结 TLS（那是 DTLS，另一回事）
 		TLSTerminate: service.TLSTerminate && !strings.EqualFold(service.Protocol, "udp"),

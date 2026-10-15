@@ -434,6 +434,8 @@ interface ServiceFormState {
   internalPort: string
   protocol: 'TCP' | 'UDP'
   useUpnp: boolean
+  /** 打洞用的本机端口，'' 表示随机（和 0 一个意思） */
+  punchLocalPort: string
   domain: string
   tlsTerminate: boolean
   /** 证书 ID，'0' 表示按域名自动匹配 */
@@ -503,6 +505,7 @@ const emptyService: ServiceFormState = {
   internalPort: '',
   protocol: 'TCP',
   useUpnp: true,
+  punchLocalPort: '',
   domain: '',
   tlsTerminate: false,
   certId: '0',
@@ -576,6 +579,7 @@ function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState 
     internalPort: String(svc.internalPort || ''),
     protocol: (svc.protocol as 'TCP' | 'UDP') || 'TCP',
     useUpnp: !!svc.useUpnp,
+    punchLocalPort: svc.punchLocalPort ? String(svc.punchLocalPort) : '',
     domain: svc.domain || '',
     tlsTerminate: !!svc.tlsTerminate,
     certId: String(svc.certId || 0),
@@ -602,6 +606,7 @@ function serviceToPayload(deviceId: number, svc: StunService): api.StunServicePa
     internalPort: svc.internalPort,
     protocol: svc.protocol || 'TCP',
     useUpnp: !!svc.useUpnp,
+    punchLocalPort: svc.punchLocalPort || 0,
     https: !!svc.https,
     domain: svc.domain || '',
     tlsTerminate: !!svc.tlsTerminate,
@@ -1084,6 +1089,29 @@ function ServiceModal({
                   />
                 </label>
               </div>
+
+              {/* 打洞本机端口：钉住它外部端口才稳。不填就随机（兼容老用法） */}
+              <label className="block">
+                <div className={fieldLabelCls}>
+                  穿透通道本机端口
+                  <span className="ml-1 font-normal text-slate-400">（可选，建议填）</span>
+                </div>
+                <input
+                  type="number"
+                  value={form.punchLocalPort}
+                  onChange={(e) => setForm((p) => ({ ...p, punchLocalPort: e.target.value }))}
+                  placeholder="留空 = 每次随机（外部端口会一直变）"
+                  min={1}
+                  max={65535}
+                  className={fieldInputCls}
+                />
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  外部端口是路由器照着这个本机端口分配的。不填的话本机端口每次随机，
+                  外部端口也跟着一直变，配好的「域名+端口」过一会儿就失效；
+                  填一个没被占用的端口（如 30000-60000），外部端口就稳定下来了，
+                  不开 UPnP 也能长期使用。
+                </p>
+              </label>
 
               {/* 协议决定了下面能配什么：证书、HTTPS、入口重定向都只有 TCP 才有 */}
               <div>
@@ -2505,6 +2533,7 @@ export function Stun() {
       internalPort: Number(form.internalPort),
       protocol: form.protocol,
       useUpnp: form.useUpnp,
+      punchLocalPort: Number(form.punchLocalPort) || 0,
       domain: form.domain.trim().toLowerCase(),
       ...formToPayloadTLS(form),
       enabled: form.enabled,

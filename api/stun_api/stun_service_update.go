@@ -22,6 +22,10 @@ type StunServiceUpdateViewRequest struct {
 	// UPnP 相关配置
 	UseUPnP bool `json:"useUpnp"`
 
+	// 打洞用的本机端口；0 = 随机。
+	// 外部端口是 NAT 照着本机端口分配的，钉住它外部端口才稳定。
+	PunchLocalPort uint16 `json:"punchLocalPort"`
+
 	// 对外访问
 	Domain       string `json:"domain"`       // 对外域名，如 fw.example.com；留空回落公网 IP
 	TLSTerminate bool   `json:"tlsTerminate"` // 由 Catflap 在洞口终结 TLS（仅 TCP）
@@ -72,6 +76,7 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	svc.Protocol = cr.Protocol
 	svc.Https = cr.Https
 	svc.UseUPnP = cr.UseUPnP
+	svc.PunchLocalPort = cr.PunchLocalPort
 	svc.UPnPMappedPort = 0 // 从来没人往里写真值，留着只会让首页显示一个错的端口（见 stun.LiveExternalPort）
 	svc.Domain, svc.TLSTerminate, svc.CertID = normalizeTLSFields(cr.Protocol, cr.Domain, cr.TLSTerminate, cr.CertID)
 	svc.Domain = fillDomainFromCert(svc.Domain, svc.TLSTerminate, svc.CertID)
