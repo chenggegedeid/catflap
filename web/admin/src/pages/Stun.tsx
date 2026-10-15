@@ -1987,7 +1987,6 @@ export function Stun() {
   const [loadErr, setLoadErr] = useState('')
   const [statusMap, setStatusMap] = useState<Record<string, StunStatusEvent>>({})
   const [homeSet, setHomeSet] = useState<Set<string>>(new Set())
-  const [selectedIndex, setSelectedIndex] = useState(0)
   const { toasts, show: toast } = useToast()
 
   const [deviceModal, setDeviceModal] = useState<{
@@ -1999,7 +1998,6 @@ export function Stun() {
     open: false,
     subnets: [],
   })
-  const [scanOpening, setScanOpening] = useState(false)
   // 正在切启停的服务，键是「设备ID-服务ID」
   const [toggling, setToggling] = useState<Record<string, boolean>>({})
   const [serviceModal, setServiceModal] = useState<{
@@ -2047,7 +2045,6 @@ export function Stun() {
     return () => es.close()
   }, [])
 
-  const device = config?.devices?.[selectedIndex]
 
   const submitDevice = async (form: DeviceFormState) => {
     if (deviceModal.initial) {
@@ -2068,13 +2065,10 @@ export function Stun() {
   // 网段列表先取好再开弹窗——这一步只读本机网卡，不发包，几毫秒的事，
   // 放进弹窗里反而要先闪一个空下拉框
   const openScan = async () => {
-    setScanOpening(true)
     try {
       setScanModal({ open: true, subnets: await api.listLanSubnets() })
     } catch (e) {
       toast('读不到本机网段: ' + (e instanceof Error ? e.message : ''))
-    } finally {
-      setScanOpening(false)
     }
   }
 
@@ -2665,12 +2659,22 @@ export function Stun() {
         <div className="text-[11px] leading-relaxed text-slate-400">
           穿透服务按设备分组。加服务时选好设备，它会归到那台设备下面。
         </div>
-        <button
-          onClick={() => setServiceModal({ open: true, deviceId: 0 })}
-          className="flex shrink-0 items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
-        >
-          <Plus className="h-3 w-3" /> 添加服务
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* 扫描放在前面：不用去路由器后台翻 IP，是更省事的那条路 */}
+          <button
+            onClick={openScan}
+            className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+            title="扫描局域网找机器"
+          >
+            <Radar className="h-3 w-3" /> 扫描
+          </button>
+          <button
+            onClick={() => setServiceModal({ open: true, deviceId: 0 })}
+            className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
+          >
+            <Plus className="h-3 w-3" /> 添加服务
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -2774,121 +2778,6 @@ export function Stun() {
         )}
       </div>
 
-      {/* 下面的旧布局保留原样，只是不再渲染（renderServiceCard 已抽出） */}
-      <div className="hidden">
-        <Card>
-          <CardHeader title="设备列表" className="mb-2" />
-          {/* 这一栏窄，两个按钮跟标题挤一行会把标题挤断，单独占一行 */}
-          <div className="mb-3 flex items-center gap-2">
-            {/* 扫描摆在前面：不用去路由器后台翻 IP，是更省事的那条路 */}
-            <button
-              onClick={openScan}
-              disabled={scanOpening}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-500 px-2 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600 disabled:opacity-50"
-            >
-              {scanOpening ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Radar className="h-3.5 w-3.5" />
-              )}
-              扫描
-            </button>
-            <button
-              onClick={() => setDeviceModal({ open: true })}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-            >
-              <Plus className="h-3.5 w-3.5" /> 添加
-            </button>
-          </div>
-          {!config.devices || config.devices.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">暂无设备接入</div>
-          ) : (
-            <ul className="space-y-1.5">
-              {config.devices.map((d, idx) => {
-                const active = idx === selectedIndex
-                return (
-                  <li
-                    key={getDeviceId(d)}
-                    onClick={() => setSelectedIndex(idx)}
-                    className={`group relative cursor-pointer rounded-xl border px-3 py-2 transition ${
-                      active
-                        ? 'border-blue-200 bg-blue-50 text-blue-700'
-                        : 'border-transparent hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Server
-                        className={`h-4 w-4 shrink-0 ${active ? 'text-blue-500' : 'text-slate-400'}`}
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                        {d.name || '未知设备'}
-                      </span>
-                    </div>
-                    <div className="ml-6 truncate font-mono text-xs text-slate-400">{d.ip || '--'}</div>
-                    {/* 浮在右上角，不占位：选中/悬停时出现，行高不会跟着跳，名字也不用让出宽度 */}
-                    <div
-                      className={`absolute right-2 top-2 flex gap-0.5 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200 backdrop-blur transition ${
-                        active ? 'opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
-                      }`}
-                    >
-                      {/*
-                        设备的增删改**只在「设备」页做** —— 设备是穿透/反代/转发
-                        共用的一份，在每个功能页都能改的话不知道该在哪改；
-                        而且删设备要检查上面还有没有服务（穿透服务靠 deviceId
-                        关联，一删就静默失效），那套检查只在设备页才完整。
-                        这里给个入口跳过去，不在这儿改。
-                      */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          window.location.hash = '#/devices'
-                        }}
-                        title="在「设备」页管理这台机器"
-                        className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </Card>
-
-        <div className="lg:col-span-9">
-          <Card>
-            <CardHeader
-              title={device ? `${device.name} 的服务` : '服务列表'}
-              action={
-                device && (
-                  <button
-                    onClick={() =>
-                      setServiceModal({ open: true, deviceId: getDeviceId(device) })
-                    }
-                    className="flex items-center gap-1 rounded-md bg-blue-500 px-3 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
-                  >
-                    <Plus className="h-3 w-3" /> 添加服务
-                  </button>
-                )
-              }
-            />
-            {!device ? (
-              <div className="py-12 text-center text-sm text-slate-400">请从左侧选择设备</div>
-            ) : !device.services || device.services.length === 0 ? (
-              <div className="py-12 text-center text-sm text-slate-400">
-                该设备暂无服务配置，点击右上角"添加服务"开始配置
-              </div>
-            ) : (
-              // 按卡片最小宽度排，不按断点排：以前窗口一过 1280 就硬切三列，
-              // 卡片反而被压到 250 上下，服务名和协议标签全挤成两行
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-3">
-  /**
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
 
       {/* 弹窗 */}
       {/* 扫描窗排在前面，添加窗才能盖在它上面 */}

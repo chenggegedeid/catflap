@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import PageBoundary from '../components/PageBoundary'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowLeftRight,
@@ -106,14 +107,14 @@ export const pages = {
     label: '仪表盘',
     icon: LayoutDashboard,
     subtitle: '一站式管理网络、域名、证书与服务，让一切安全、稳定、简单',
-    element: <Dashboard />,
+    element: <PageBoundary><Dashboard /></PageBoundary>,
   },
 
   devices: {
     label: '设备',
     icon: Server,
     subtitle: '内网里的机器，穿透 / 反代 / 端口转发共用这一份',
-    element: <Devices />,
+    element: <PageBoundary><Devices /></PageBoundary>,
   },
 
   forwards: {
@@ -121,7 +122,7 @@ export const pages = {
     icon: ArrowLeftRight,
     subtitle: '端口对端口的转发，不看域名，适合非 HTTP 服务',
     component: 'proxy',
-    element: <Forwards />,
+    element: <PageBoundary><Forwards /></PageBoundary>,
   },
 
   stun: {
@@ -130,26 +131,26 @@ export const pages = {
     subtitle: '基于 STUN 的内网穿透与连接质量检测',
     badge: 'NEW',
     component: 'stun',
-    element: <Stun />,
+    element: <PageBoundary><Stun /></PageBoundary>,
   },
   ddns: {
     label: 'DDNS 域名解析',
     icon: Globe,
     subtitle: '动态域名解析与多服务商同步',
     component: 'ddns',
-    element: <Ddns />,
+    element: <PageBoundary><Ddns /></PageBoundary>,
   },
   'reverse-proxy': {
     label: '反向代理',
     icon: Repeat,
     component: 'proxy',
-    element: <ReverseProxy />,
+    element: <PageBoundary><ReverseProxy /></PageBoundary>,
   },
   cert: {
     label: '证书管理',
     icon: ShieldCheck,
     component: 'cert',
-    element: <Cert />,
+    element: <PageBoundary><Cert /></PageBoundary>,
   },
   wol: {
     label: '网络唤醒',
@@ -157,7 +158,7 @@ export const pages = {
     subtitle: '发魔术包把局域网里的机器叫醒',
     badge: 'NEW',
     component: 'wol',
-    element: <Wol />,
+    element: <PageBoundary><Wol /></PageBoundary>,
   },
   task: {
     label: '计划任务',
@@ -165,7 +166,7 @@ export const pages = {
     subtitle: '定时同步 DDNS 解析记录或唤醒机器',
     badge: 'NEW',
     component: 'task',
-    element: <Task />,
+    element: <PageBoundary><Task /></PageBoundary>,
   },
 
   components: {
@@ -179,31 +180,31 @@ export const pages = {
   settings: {
     label: '系统设置',
     icon: SettingsIcon,
-    element: <Settings />,
+    element: <PageBoundary><Settings /></PageBoundary>,
   },
   // 这里读的是 logs/ 下的运行日志，不是「谁在什么时候改了什么」的审计流水，别叫审计
   logs: {
     label: '运行日志',
     icon: FileText,
-    element: <Logs />,
+    element: <PageBoundary><Logs /></PageBoundary>,
   },
   audit: {
     label: '访问审计',
     icon: ShieldAlert,
     subtitle: '谁在访问、谁在扫我',
-    element: <Audit />,
+    element: <PageBoundary><Audit /></PageBoundary>,
   },
   tunnel: {
     label: 'Tunnel',
     icon: Cloud,
     subtitle: 'CGNAT 下不带端口的最干净出口',
-    element: <Tunnel />,
+    element: <PageBoundary><Tunnel /></PageBoundary>,
   },
   notify: {
     label: '通知',
     icon: Bell,
     subtitle: '渠道全局配一次，各服务按名字选用',
-    element: <Notify />,
+    element: <PageBoundary><Notify /></PageBoundary>,
   },
 } satisfies Record<string, PageMeta>
 
