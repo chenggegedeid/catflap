@@ -5,6 +5,8 @@ import {
   Home as HomeIcon,
   Image as ImageIcon,
   LayoutGrid,
+  // 起别名：文件里已经有一个自己的 Lock（配置读写锁），重名会撞
+  Lock as LockIcon,
   Pencil,
   Plus,
   RotateCcw,
@@ -12,6 +14,7 @@ import {
   Settings,
   Tags,
   Trash2,
+  Unlock as UnlockIcon,
   Upload,
   X,
 } from 'lucide-react'
@@ -90,11 +93,36 @@ function openWithWhiteLoading(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+/**
+ * 要登录才可见的分组，在访客侧的占位。
+ *
+ * 只说「需要登录」，不显示分组名、不显示有几个应用 —— 那些本身就是信息泄露
+ * （"内网服务""NAS 管理"这种名字就够让人知道该打哪儿了）。内容由后端过滤，
+ * 这里拿到的只是一个 ID。
+ */
+function LockedCategorySection() {
+  return (
+    <section>
+      <h3 className="wp-section mb-4 px-2 text-sm font-semibold uppercase tracking-wider">🔒 需要登录</h3>
+      <div className="grid min-h-[5rem] grid-cols-4 content-start justify-items-center gap-x-3 gap-y-8 px-2 sm:grid-cols-6 lg:grid-cols-8">
+        <a
+          href="/catflap/"
+          className="flex w-full flex-col items-center gap-2 rounded-2xl border border-dashed px-2 py-3 text-center text-xs opacity-80 transition hover:opacity-100"
+          title="登录 Catflap 管理后台后即可看到这个分组"
+        >
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-200/60 text-lg">🔒</div>
+          <span className="leading-tight">登录查看</span>
+        </a>
+      </div>
+    </section>
+  )
+}
+
 function sortByPagedOrder(apps: AppView[]): AppView[] {
   return [...apps].sort((a, b) => a.pagedOrder - b.pagedOrder)
 }
 
-function groupByCategory(apps: AppView[], categories: Category[]) {
+function groupByCategory(apps: AppView[], categories: Category[], lockedCategoryIds: string[] = []) {
   const sorted = [...categories].sort((a, b) => a.order - b.order)
   const validIds = new Set(sorted.map((c) => c.id))
   const byCategoryScroll = (a: AppView, b: AppView) => a.scrollOrder - b.scrollOrder
@@ -105,7 +133,13 @@ function groupByCategory(apps: AppView[], categories: Category[]) {
   const uncategorized = apps
     .filter((a) => !a.categoryId || !validIds.has(a.categoryId))
     .sort(byCategoryScroll)
-  return { groups, uncategorized }
+
+  // 要登录才可见的分组：后端已经把名字和内容都摘掉了，只留下 ID。这里只渲染
+  // 一个不泄露任何信息的占位——让人知道有东西，但看不到是什么、有几个。
+  // 名字一律不显示，否则"内网服务"这种分组名本身就泄密。
+  const locked = lockedCategoryIds.map((id) => ({ id }))
+
+  return { groups, uncategorized, locked }
 }
 
 /* ============ 基础组件 ============ */
@@ -1030,7 +1064,10 @@ function App() {
   const pendingNavigatePageRef = useRef<number | null>(null)
 
   const grouped = useMemo(
-    () => (config ? groupByCategory(config.apps, config.categories) : { groups: [], uncategorized: [] }),
+    () =>
+      config
+        ? groupByCategory(config.apps, config.categories, config.lockedCategoryIds)
+        : { groups: [], uncategorized: [], locked: [] },
     [config],
   )
 
@@ -1407,6 +1444,15 @@ function App() {
   const renameCategory = async (id: string, name: string) => {
     const trimmed = name.trim() || '未命名'
     await api.updateCategory(id, trimmed)
+    await reload()
+  }
+
+  // 切换分组的「要登录才可见」。
+  //
+  // 不弹确认框：这是个可逆开关，而且关错了（把敏感分组设成公开）看一眼就能发现
+  // ——分组名前会挂个锁。反过来误锁自己也能马上解开。
+  const toggleCategoryAuth = async (id: string, current: boolean) => {
+    await api.updateCategory(id, undefined, !current)
     await reload()
   }
 
@@ -1898,6 +1944,9 @@ function App() {
         {isScrollMode && (
           <div className="mx-auto mt-10 w-full max-w-5xl px-6 pb-24">
             <div className="space-y-12 pt-6">
+              {grouped.locked.map(({ id }) => (
+                <LockedCategorySection key={id} />
+              ))}
               {grouped.groups.map(({ category, apps }) => (
                 <section
                   key={category.id}
@@ -1908,6 +1957,11 @@ function App() {
                 >
                   <h3 className="wp-section mb-4 px-2 text-sm font-semibold uppercase tracking-wider">
                     {category.name}
+                    {category.requireAuth && (
+                      <span className="ml-2 normal-case tracking-normal opacity-70" title="这个分组要登录后才看得见">
+                        🔒
+                      </span>
+                    )}
                   </h3>
                   <div className="grid min-h-[5rem] grid-cols-4 content-start justify-items-center gap-x-3 gap-y-8 px-2 sm:grid-cols-6 lg:grid-cols-8">
                     {apps.map((app) => (
@@ -2426,6 +2480,22 @@ function App() {
                                 <span className="text-xs text-slate-400">{apps.length}</span>
                               </div>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => toggleCategoryAuth(cat.id, cat.requireAuth ?? false)}
+                              className={`grid h-7 w-7 place-items-center rounded-lg transition ${
+                                cat.requireAuth
+                                  ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+                                  : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+                              }`}
+                              title={
+                                cat.requireAuth
+                                  ? '当前：要登录才可见（点一下改为公开）'
+                                  : '当前：所有人可见（点一下改为需要登录）'
+                              }
+                            >
+                              {cat.requireAuth ? <LockIcon className="h-3.5 w-3.5" /> : <UnlockIcon className="h-3.5 w-3.5" />}
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
