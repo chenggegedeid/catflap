@@ -1,6 +1,7 @@
 package stun_api
 
 import (
+	"fmt"
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/modules/stun/model"
@@ -45,6 +46,22 @@ type StunServiceAddViewRequest struct {
 
 func (StunApi) StunServiceAddView(c *gin.Context) {
 	cr := middleware.GetBindRequest[StunServiceAddViewRequest](c)
+
+	// 先做参数校验再查设备：这条校验和设备无关，放前面既能早点给反馈，
+	// 也不会因为"设备不存在"掩盖真正的问题
+	//
+	// 内网端口不能是 Catflap 自己的后台端口：那等于把管理后台穿透到公网，
+	// 任何人都能在洞口上试密码（猜中就完全接管）。
+	//
+	// 看着像"用户不会这么填"，实际是很容易犯的错 —— 想在外网访问管理页面时，
+	// 最顺手的做法就是加个穿透服务指向它，心想"反正还要登录"。
+	// 结果是把登录页和 /api/auth/login 一起暴露出去。
+	if admin := stun.AdminPort(); admin > 0 && cr.InternalPort == uint16(admin) {
+		res.FailWithMsg(fmt.Sprintf(
+			"内网端口不能是 Catflap 自己的后台端口 %d——那等于把管理后台穿透到公网，任何人都能来试密码",
+			admin), c)
+		return
+	}
 
 	// 查找目标设备
 	deviceIndex := -1

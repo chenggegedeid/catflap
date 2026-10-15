@@ -3,6 +3,8 @@ package proxy
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -104,6 +106,19 @@ func normalizeSite(in model.Site, base string) (model.Site, error) {
 		return out, errors.New("后端地址里有空格，请检查")
 	case strings.HasPrefix(out.Backend, "/"):
 		return out, errors.New("后端地址要填主机和端口，形如 192.168.1.20:8080")
+	case backendHitsAdminPort(out.Backend, adminPort()):
+		// 后端指向 Catflap 自己的后台端口 = 把管理后台挂到公网。
+		//
+		// 这一条看着像"用户不会这么填"，但反而是很容易犯的错：想在外网访问
+		// 管理页面时，最顺手的做法就是建个站点指向 127.0.0.1:<管理端口>，
+		// 心想"反正还要登录"。结果是把登录页和 /api/auth/login 一起挂到
+		// 公网，谁都能来爆破密码，猜中就完全接管。
+		//
+		// 要在外网管 Catflap，正确做法是让它监听的地址本身可达（或走
+		// 你自己的 VPN），而不是通过本程序的反代转发给自己。
+		return out, fmt.Errorf(
+			"后端不能填 Catflap 自己的后台端口 %d——那等于把管理后台挂到公网上，任何人都能来试密码",
+			adminPort())
 	}
 
 	if out.ListenPort != 0 {
@@ -291,4 +306,80 @@ func SetAccessLog(on bool) error {
 		cfg.AccessLog = on
 		return nil
 	})
+}
+
+// backendHitsAdminPort 后端地址是不是指向 Catflap 自己的后台端口。
+//
+// 为什么要专门判：后端填 127.0.0.1:<管理端口> 会把管理后台转发到公网，
+// 任何人都能在上面爆破密码（详见 normalizeSite 里那条错误的说明）。
+//
+// 判据是"主机名解析后是本机的任一地址 **且** 端口等于管理端口"：
+//   - 只判字符串等于 "127.0.0.1:3791" 挡不住 localhost、::1、本机内网 IP
+//   - 只判"是本机地址"会误伤正常场景（服务确实跑在本机，比如 127.0.0.1:8080）
+//
+// 所以两个条件都要满足才拦。
+func backendHitsAdminPort(backend string, admin int) bool {
+	if admin <= 0 {
+		return false
+	}
+
+	host, portStr, err := net.SplitHostPort(strings.TrimSpace(backend))
+	if err != nil {
+		return false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port != admin {
+		return false
+	}
+
+	return isLocalHost(host)
+}
+
+// isLocalHost 这个主机名是不是指向本机。
+// 覆盖 127.0.0.0/8、::1、localhost、以及本机所有网卡上的地址。
+func isLocalHost(host string) bool {
+	host = strings.Trim(host, "[]") // IPv6 字面量可能带方括号
+	if host == "" {
+		return false
+	}
+
+	// 字面量直接判，不用走解析
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() {
+			return true
+		}
+		// 本机网卡上的地址（含内网 IP），也算"指向这台机器"
+		return hasLocalIP(ip)
+	}
+
+	// 主机名（如 localhost）：解析后判。查不到就当不是 ——
+	// 挡不住就挡不住，不能因为解析失败就误判放行或误拒正常配置
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || hasLocalIP(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLocalIP 这个地址是不是本机某个网卡上的地址
+func hasLocalIP(ip net.IP) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ipnet.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
