@@ -17,6 +17,7 @@ import {
 import { Card, CardHeader } from '../components/Card'
 import { modalBackdrop } from '../components/modal'
 import * as api from '../lib/api'
+import { TunnelPanel } from './TunnelPanel'
 import type { Certificate, ProxyConfig, ProxyEntry, ProxyListener, ProxySite } from '../types'
 
 // ===================== 小工具 =====================
@@ -820,6 +821,7 @@ export function ReverseProxy() {
   const entry = cfg?.entry
   const listeners = useMemo(() => cfg?.listeners ?? [], [cfg])
   const sites = useMemo(() => cfg?.sites ?? [], [cfg])
+  const tunnel = cfg?.tunnel
   const certName = useCallback(
     (id: number) => (id === 0 ? '按域名自动匹配' : (certs.find((c) => c.id === id)?.name ?? `#${id}`)),
     [certs],
@@ -1027,6 +1029,9 @@ export function ReverseProxy() {
           </div>
         )}
       </Card>
+
+      {/* Cloudflare Tunnel：CGNAT 下 URL 不带端口的最干净方案 */}
+      {tunnel && <TunnelPanel tunnel={tunnel} onChanged={refresh} />}
 
       {/* 站点表 */}
       <Card className="!p-0">
