@@ -357,7 +357,8 @@ export interface StunStatusEvent {
  * 后端加一家就变成「前端也要改一行」——而 A3 要消掉的正是这件事。
  */
 export type DnsProviderType = string
-export type DnsRecordType = 'A' | 'AAAA'
+// 'A+AAAA' = 双栈：一条记录同时同步 A 和 AAAA，不必建两条
+export type DnsRecordType = 'A' | 'AAAA' | 'A+AAAA'
 export type DdnsRecordStatus = 'pending' | 'success' | 'failed' | 'skipped'
 export type IpSourceType = 'stun' | 'web' | 'dns' | 'interface' | 'custom'
 

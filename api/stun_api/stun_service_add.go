@@ -66,6 +66,21 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 	// 构建新服务
 	domain, tlsTerminate, certID := normalizeTLSFields(cr.Protocol, cr.Domain, cr.TLSTerminate, cr.CertID)
 	domain = fillDomainFromCert(domain, tlsTerminate, certID)
+
+	// 没指定本机端口就自动挑一个（并试绑确认没人占着）。
+	//
+	// 外部端口是 NAT 照着本机端口发的，本机端口每次随机，外部端口就每次都变，
+	// 配好的「域名+端口」很快失效。所以这里钉死一个：用户不填我们就挑，
+	// 挑中写进配置，这个服务之后一直用它。服务删掉时配置里没这条了，
+	// 端口自然回到可分配状态，不需要额外的「释放」动作。
+	punchPort := cr.PunchLocalPort
+	if punchPort == 0 {
+		punchPort = stun.PickPunchLocalPort(
+			stun.UsedPunchLocalPorts(stun.Runtime.Config.Devices),
+			cr.Protocol,
+		)
+	}
+
 	newService := model.Service{
 		ID:             maxID + 1,
 		Name:           cr.Name,
@@ -73,7 +88,7 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 		Protocol:       cr.Protocol,
 		Https:          cr.Https,
 		UseUPnP:        cr.UseUPnP,
-		PunchLocalPort: cr.PunchLocalPort,
+		PunchLocalPort: punchPort,
 		Domain:         domain,
 		TLSTerminate:   tlsTerminate,
 		CertID:         certID,

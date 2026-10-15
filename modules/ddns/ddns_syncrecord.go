@@ -99,48 +99,62 @@ func SyncRecord(client dns.DNSProvider, r *model.DDNSRecord) {
 	// 失败不会因此干等一整个间隔：调度器对失败的记录另有一套快重试，见 retryAfter。
 	r.LastCheckAt = time.Now()
 
-	// 1. 解析IP来源
-	ip, err := resolveIP(r)
-	if err != nil {
-		// 临时性失败（取 IP 失败）：不动 LastIP，下个周期自动重试
-		r.LastStatus = model.DDNSRecordStatusFailed
-		r.LastMessage = "获取 IP 失败: " + err.Error()
-		logrus.Warnf("[ddns] %s 获取 IP 失败: %v", r.Name, err)
-		return
-	}
-
-	// // 2. IP 没变，跳过
-	// if ip == r.LastIP {
-	// 	r.LastStatus = model.DDNSRecordStatusSkipped
-	// 	return
-	// }
-
-	// 3. 调用服务器API
 	ttl := r.TTL
 	if ttl <= 0 {
 		ttl = 1 // Cloudflare 1 = auto
 	}
-	err = client.SetRecord(r.Domain, r.SubDomain, r.RecordType, ip, ttl, r.Proxied)
-	if err != nil {
+
+	// 双栈会展开成 A + AAAA 两次写入。有一个失败就算这条记录失败，
+	// 但另一个已经写成功的不会被撤掉——解析该有的那一半还是要有的。
+	families := r.RecordType.Families()
+	got := make([]string, 0, len(families))
+	var firstErr error
+
+	for _, rt := range families {
+		// 1. 按各自的协议族取 IP
+		ip, err := resolveIPFor(r, rt)
+		if err != nil {
+			// 临时性失败（取 IP 失败）：不动 LastIP，下个周期自动重试
+			if firstErr == nil {
+				firstErr = fmt.Errorf("获取 %s 失败: %w", rt, err)
+			}
+			logrus.Warnf("[ddns] %s 获取 %s 失败: %v", r.Name, rt, err)
+			continue
+		}
+
+		// 2. 调用服务器API
+		if err := client.SetRecord(r.Domain, r.SubDomain, rt, ip, ttl, r.Proxied); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", rt, err)
+			}
+			logrus.Warnf("[ddns] %s 同步 %s 失败: %v", r.Name, rt, err)
+			continue
+		}
+
+		got = append(got, ip)
+		logrus.Infof("[ddns] %s 同步成功: %s -> %s", r.Name, rt, ip)
+	}
+
+	if firstErr != nil {
 		r.LastStatus = model.DDNSRecordStatusFailed
-		r.LastMessage = err.Error()
-		logrus.Warnf("[ddns] %s 同步失败: %v", r.Name, err)
+		r.LastMessage = firstErr.Error()
 		return
 	}
 
-	// 4. 成功，回写
-	r.LastIP = ip
+	// 3. 成功，回写。双栈时把两个地址都记下来，界面上看得见同步到了什么
+	r.LastIP = strings.Join(got, " / ")
 	r.LastStatus = model.DDNSRecordStatusSuccess
 	r.LastMessage = ""
 	r.LastSyncAt = time.Now()
-	logrus.Infof("[ddns] %s 同步成功: %s -> %s", r.Name, r.RecordType, ip)
-
 }
 
 //==============================================================================
 
 // resolveIP解析ip来源
-func resolveIP(r *model.DDNSRecord) (ip string, err error) {
+//
+// want 是要解析哪一个协议族（A 或 AAAA）。双栈记录会对两个族各调一次，
+// 所以这里不能读 r.RecordType 来判断——那时它是 A+AAAA，两个族都得走。
+func resolveIPFor(r *model.DDNSRecord, want model.DNSRecordType) (ip string, err error) {
 	switch r.IPSourceType {
 	case model.IPSourceSTUN:
 		// 直接读 STUN 模块已探测好的 IP
@@ -150,12 +164,17 @@ func resolveIP(r *model.DDNSRecord) (ip string, err error) {
 			// 拿到的那一刻 STUN 会回头触发一次同步，不用等到下个周期。
 			return "", fmt.Errorf("STUN 还没拿到公网 IP，拿到后会自动补上")
 		}
+		if want == model.DNSRecordTypeAAAA {
+			// STUN 探到的是 IPv4，双栈里 AAAA 那一半它给不了。
+			// 说清楚而不是拿 v4 去填 v6 的记录——那会写出一条错记录。
+			return "", fmt.Errorf("STUN 只探得到 IPv4，AAAA 请改用「本地网卡」或「网页」来源")
+		}
 		return ip, nil
 	case model.IPSourceWeb:
 		// HTTP GET 某网站，返回体即 IP
 		if r.IPSourceArg != "" {
 			// 用户自己配了 URL，直接用，不重试
-			switch r.RecordType {
+			switch want {
 			case model.DNSRecordTypeA:
 				return fetchIPFromWeb(r.IPSourceArg, 4)
 			case model.DNSRecordTypeAAAA:
@@ -163,24 +182,29 @@ func resolveIP(r *model.DDNSRecord) (ip string, err error) {
 			}
 		}
 		// 用户留空，走内置列表重试
-		switch r.RecordType {
+		switch want {
 		case model.DNSRecordTypeA:
 			return fetchIPFromWebList(defaultIPv4Sources, 4)
 		case model.DNSRecordTypeAAAA:
 			return fetchIPFromWebList(defaultIPv6Sources, 6)
 		}
 	case model.IPSourceCustom:
-		return parseFixedIP(r.IPSourceArg, r.RecordType)
+		return parseFixedIP(r.IPSourceArg, want)
 	case model.IPSourceDNS:
-		return resolveFromDNS(r.IPSourceArg, r.RecordType)
+		return resolveFromDNS(r.IPSourceArg, want)
 	case model.IPSourceInterface:
-		return resolveFromInterface(r.IPSourceArg, r.RecordType)
+		return resolveFromInterface(r.IPSourceArg, want)
 	default:
 		return "", fmt.Errorf("暂不支持的 IP 来源: %s", r.IPSourceType)
 
 	}
 
 	return ip, err
+}
+
+// resolveIP 按记录自身声明的类型解析；双栈请用 resolveIPFor 分族调用
+func resolveIP(r *model.DDNSRecord) (ip string, err error) {
+	return resolveIPFor(r, r.RecordType)
 }
 
 // parseFixedIP 自定义来源：用户填的那个 IP，一个字都不改。

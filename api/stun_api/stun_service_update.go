@@ -76,7 +76,16 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	svc.Protocol = cr.Protocol
 	svc.Https = cr.Https
 	svc.UseUPnP = cr.UseUPnP
-	svc.PunchLocalPort = cr.PunchLocalPort
+	// 老服务（建的时候还没有这个字段）在这里补一个端口：同样是自动挑、
+	// 避开其它服务正在用的。用户没填才会触发，填了就尊重他填的。
+	if cr.PunchLocalPort > 0 {
+		svc.PunchLocalPort = cr.PunchLocalPort
+	} else if svc.PunchLocalPort == 0 {
+		// 先把自己的旧值排除掉再挑，否则"没变"会被判成"已占用"
+		used := stun.UsedPunchLocalPorts(stun.Runtime.Config.Devices)
+		delete(used, svc.PunchLocalPort)
+		svc.PunchLocalPort = stun.PickPunchLocalPort(used, cr.Protocol)
+	}
 	svc.UPnPMappedPort = 0 // 从来没人往里写真值，留着只会让首页显示一个错的端口（见 stun.LiveExternalPort）
 	svc.Domain, svc.TLSTerminate, svc.CertID = normalizeTLSFields(cr.Protocol, cr.Domain, cr.TLSTerminate, cr.CertID)
 	svc.Domain = fillDomainFromCert(svc.Domain, svc.TLSTerminate, svc.CertID)

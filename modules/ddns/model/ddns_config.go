@@ -34,7 +34,25 @@ type DNSRecordType string
 const (
 	DNSRecordTypeA    DNSRecordType = "A"
 	DNSRecordTypeAAAA DNSRecordType = "AAAA"
+
+	// DNSRecordTypeDual 一条记录同时管 A 和 AAAA（双栈）。
+	//
+	// 没有 IPv4 公网、只有 IPv6 的环境里，往往还需要保留 IPv4 那条
+	// （给没有 IPv6 的访问者用），于是同一个名字要两条记录。以前只能建两条
+	// DDNS 记录，名字、来源、TTL 都得重复填一遍，还容易改了一处忘了另一处。
+	// 双栈类型让一条记录同时同步两者，同步时分别按各自的协议族取 IP。
+	DNSRecordTypeDual DNSRecordType = "A+AAAA"
 )
+
+// Families 这条记录实际要写哪些记录类型。
+//
+// 双栈展开成 A 和 AAAA 两条，其余就是自己。
+func (t DNSRecordType) Families() []DNSRecordType {
+	if t == DNSRecordTypeDual {
+		return []DNSRecordType{DNSRecordTypeA, DNSRecordTypeAAAA}
+	}
+	return []DNSRecordType{t}
+}
 
 // 定义DDNS 记录状态
 type DDNSRecordStatus string
