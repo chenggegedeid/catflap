@@ -53,7 +53,6 @@ const networkPreferLabel: Record<NetworkPrefer, string> = {
 const pageCols = 8
 const pageRows = 5
 const pageSize = pageCols * pageRows
-const searchHistoryMax = 24
 
 // 默认背景的出厂样式。配置里 wallpaper.css 为空时用的就是 App.css 里那条同名规则，
 // 这份拷贝只用来给编辑框打底和「恢复默认」。
@@ -1129,6 +1128,10 @@ function App() {
   const [config, setConfig] = useState<HomeConfig | null>(null)
   const [loadErr, setLoadErr] = useState('')
 
+  // 搜索历史存在浏览器本地，不属于服务端配置 —— 服务端那份公开接口谁都能读，
+  // 而"搜过什么"很私人（可能带内网主机名）。首屏直接读本地，不等接口。
+  const [history, setHistory] = useState<string[]>(() => api.getSearchHistory())
+
   // UI 状态
   const [query, setQuery] = useState('')
   const [appPage, setAppPage] = useState(0)
@@ -1517,25 +1520,12 @@ function App() {
     openWithWhiteLoading(`${engine.url}${encodeURIComponent(keyword)}`)
     setShowHistory(false)
 
-    // 历史后台异步写入,失败不影响搜索
-    api.addSearchHistory(keyword).catch(() => undefined)
-    setConfig((prev) =>
-      prev
-        ? {
-          ...prev,
-          searchHistory: [keyword, ...prev.searchHistory.filter((h) => h !== keyword)].slice(0, searchHistoryMax),
-        }
-        : prev,
-    )
+    // 历史记在浏览器本地（服务端不存了，见 api.ts 的说明）
+    setHistory(api.addSearchHistory(keyword))
   }
 
-  const clearHistory = async () => {
-    try {
-      await api.clearSearchHistory()
-    } catch {
-      // ignore
-    }
-    setConfig((prev) => (prev ? { ...prev, searchHistory: [] } : prev))
+  const clearHistory = () => {
+    setHistory(api.clearSearchHistory())
   }
 
   const setWallpaperMode = async (mode: WallpaperMode) => {
@@ -2128,7 +2118,7 @@ function App() {
             </div>
           )}
 
-          {showHistory && config.searchHistory.length > 0 && (
+          {showHistory && history.length > 0 && (
             <div className="absolute left-4 right-4 top-[4.75rem] z-30 overflow-hidden rounded-2xl bg-white p-2 shadow-xl ring-1 ring-slate-200 sm:left-8 sm:right-8 sm:top-24">
               <div className="flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 <span>历史搜索</span>
@@ -2141,7 +2131,7 @@ function App() {
                   清空
                 </button>
               </div>
-              {config.searchHistory.map((item) => (
+              {history.map((item) => (
                 <button
                   key={item}
                   type="button"
@@ -2895,12 +2885,12 @@ function App() {
                   <div>
                     <div className="mb-2 flex items-center justify-between text-sm font-semibold text-slate-600">
                       <span>搜索历史</span>
-                      <span className="text-xs font-normal text-slate-400">已保存 {config.searchHistory.length} 条</span>
+                      <span className="text-xs font-normal text-slate-400">已保存 {history.length} 条</span>
                     </div>
                     <button
                       type="button"
                       onClick={clearHistory}
-                      disabled={config.searchHistory.length === 0}
+                      disabled={history.length === 0}
                       className="rounded-2xl bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-rose-100 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-slate-100 disabled:hover:text-slate-600"
                     >
                       清空搜索历史

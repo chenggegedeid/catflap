@@ -65,7 +65,6 @@ export interface HomeConfig {
   networkPrefer: NetworkPrefer
   defaultSearchEngineId: string
   searchEngines: SearchEngine[]
-  searchHistory: string[]
   categories: Category[]
   apps: AppView[]
   /** 因为要登录而被后端藏起来的分组 ID（未登录时才有） */
