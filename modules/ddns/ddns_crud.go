@@ -348,8 +348,10 @@ func validateRecord(name, domain string, recordType model.DNSRecordType, ipSourc
 	if domain == "" {
 		return "主域名不能为空"
 	}
-	if recordType != model.DNSRecordTypeA && recordType != model.DNSRecordTypeAAAA {
-		return "记录类型仅支持 A / AAAA"
+	switch recordType {
+	case model.DNSRecordTypeA, model.DNSRecordTypeAAAA, model.DNSRecordTypeDual:
+	default:
+		return "记录类型仅支持 A / AAAA / A+AAAA（双栈）"
 	}
 	switch ipSource {
 	case model.IPSourceSTUN, model.IPSourceWeb, model.IPSourceDNS, model.IPSourceInterface, model.IPSourceCustom:

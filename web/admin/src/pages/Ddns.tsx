@@ -31,6 +31,7 @@ import type {
   DdnsProviderTypeSpec,
   DdnsRecord,
   DdnsRecordStatus,
+  DnsRecordType,
   NetInterface,
 } from '../types'
 
@@ -62,15 +63,21 @@ const ipSourceArgMeta: Record<string, { label: string; placeholder: string; requ
 
 // ifaceOptionText 下拉里一块网卡显示成什么样：名字 + 当前记录类型用得上的地址。
 // 光有名字认不出哪块是连外网那块，Windows 上一堆 vEthernet 尤其分不清。
-function ifaceOptionText(n: NetInterface, recordType: 'A' | 'AAAA') {
-  const addrs = recordType === 'AAAA' ? n.ipv6 : n.ipv4
-  if (addrs.length === 0) return `${n.name}（没有 ${recordType === 'AAAA' ? 'IPv6' : 'IPv4'} 地址）`
+function ifaceOptionText(n: NetInterface, recordType: DnsRecordType) {
+  // 双栈两个都要，于是两边地址都列出来
+  const addrs = recordType === 'A' ? n.ipv4 : recordType === 'AAAA' ? n.ipv6 : [...n.ipv4, ...n.ipv6]
+  if (addrs.length === 0) {
+    return `${n.name}（没有${recordType === 'A' ? ' IPv4' : recordType === 'AAAA' ? ' IPv6' : '可用'}地址）`
+  }
   const shown = addrs.slice(0, 2).join('、')
   return `${n.name} — ${shown}${addrs.length > 2 ? ' 等' : ''}${n.hasPublic ? '' : '（内网地址）'}`
 }
 
-function ifaceHasType(n: NetInterface, recordType: 'A' | 'AAAA') {
-  return (recordType === 'AAAA' ? n.ipv6 : n.ipv4).length > 0
+function ifaceHasType(n: NetInterface, recordType: DnsRecordType) {
+  if (recordType === 'A') return n.ipv4.length > 0
+  if (recordType === 'AAAA') return n.ipv6.length > 0
+  // 双栈：两种地址都得有才谈得上"同时同步"
+  return n.ipv4.length > 0 && n.ipv6.length > 0
 }
 
 // ===================== 服务商字段表 =====================
@@ -273,7 +280,7 @@ interface RecordFormState {
   name: string
   domain: string
   subDomain: string
-  recordType: 'A' | 'AAAA'
+  recordType: DnsRecordType
   ipSource: 'stun' | 'web' | 'dns' | 'interface' | 'custom'
   ipSourceArg: string
   ttl: string
@@ -452,19 +459,32 @@ function RecordModal({
               placeholder="如 home"
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
+            <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+              填 <span className="font-mono">*</span> 建一条通配记录，一次覆盖所有二级域名 ——
+              之后加服务不用再来建解析
+            </div>
           </label>
           <label className="col-span-2 block sm:col-span-1">
             <div className="mb-1 text-xs font-semibold text-slate-500">记录类型</div>
             <select
               value={form.recordType}
-              onChange={(e) => setForm((p) => ({ ...p, recordType: e.target.value as 'A' | 'AAAA' }))}
+              onChange={(e) => setForm((p) => ({ ...p, recordType: e.target.value as DnsRecordType }))}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
             >
               <option value="A">A (IPv4)</option>
               <option value="AAAA" disabled={ipv4Only}>
                 AAAA (IPv6){ipv4Only ? '（该服务商不支持）' : ''}
               </option>
+              <option value="A+AAAA" disabled={ipv4Only}>
+                A + AAAA（双栈）{ipv4Only ? '（该服务商不支持）' : ''}
+              </option>
             </select>
+            {form.recordType === 'A+AAAA' && (
+              <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                一条记录同时同步 A 和 AAAA 两条，不必建两次。
+                IP 来源选「本地网卡」最省事——双栈会分别取网卡上的 IPv4 与 IPv6。
+              </div>
+            )}
           </label>
           <label className="col-span-2 block sm:col-span-1">
             <div className="mb-1 text-xs font-semibold text-slate-500">TTL（1 = 自动）</div>
