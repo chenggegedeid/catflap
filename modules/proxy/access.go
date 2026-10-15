@@ -64,6 +64,7 @@ func accessAllowed(site model.Site, r *http.Request) bool {
 // 那正是访问控制要藏的东西。
 func writeAccessDenied(w http.ResponseWriter, site model.Site, r *http.Request) {
 	logrus.Infof("[proxy] %s 拒绝访问：来源 %s 不在允许范围内", site.Label(), clientIP(r))
+	markDenied(w)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte("403 没有访问权限"))
