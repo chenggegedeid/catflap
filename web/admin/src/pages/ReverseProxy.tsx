@@ -24,6 +24,7 @@ import { modalBackdrop } from '../components/modal'
 import * as api from '../lib/api'
 import type {
   Certificate,
+  Device,
   LanHost,
   ProxyDomainOption,
   ProxySiteOptions,
@@ -122,15 +123,17 @@ function BlockedPortWarn({ label, port }: { label: string; port: number }) {
  * 挂默认入口且勾了 HTTPS 时，HTTP 入口上其实也有一份——
  * 但用户真正会用的是 HTTPS 那个，这里就显示它。
  */
-export function siteAddr(entry: ProxyEntry, site: ProxySite): { https: boolean; port: number } | null {
+export function siteAddr(entry: ProxyEntry | undefined, site: ProxySite): { https: boolean; port: number } | null {
   if (site.listenPort > 0) return { https: site.https, port: site.listenPort }
+  // 入口信息还没加载出来时（首帧）拿不到端口，返回空比报错好
+  if (!entry) return null
   if (site.https && entry.httpsPort > 0) return { https: true, port: entry.httpsPort }
   if (entry.httpPort > 0) return { https: false, port: entry.httpPort }
   return null
 }
 
 /** 可点的访问链接，用第一个域名。通配域名拼不出具体地址，返回空 */
-export function siteURL(entry: ProxyEntry, site: ProxySite): string {
+export function siteURL(entry: ProxyEntry | undefined, site: ProxySite): string {
   const addr = siteAddr(entry, site)
   const host = site.hosts?.[0] ?? ''
   if (!addr || !host || host.startsWith('*')) return ''
@@ -968,6 +971,51 @@ export function ReverseProxy() {
   const entry = cfg?.entry
   const listeners = useMemo(() => cfg?.listeners ?? [], [cfg])
   const sites = useMemo(() => cfg?.sites ?? [], [cfg])
+
+  // 设备是公共的一份（穿透/反代/端口转发共用），站点按后端 IP 归属到设备
+  const [devices, setDevices] = useState<Device[]>([])
+  useEffect(() => {
+    let alive = true
+    api
+      .getDevices()
+      .then((l) => alive && setDevices(l))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [cfg])
+
+  /**
+   * 站点按设备分组。
+   *
+   * 归属是**按后端地址的 IP 推导**的，不是存了个 deviceId ——
+   * 这样改了 backend 的 IP 就自动换设备，不会出现两边不一致。
+   */
+  const groups = useMemo(() => {
+    type Group = { device?: Device; sites: typeof sites }
+    const byIP = new Map<string, Group>()
+    const rest: Group = { sites: [] }
+
+    for (const s of sites) {
+      const ip = String(s.backend ?? '').split(':')[0]
+      const d = devices.find((x) => x.ip === ip)
+      if (!d) {
+        rest.sites.push(s)
+        continue
+      }
+      let g = byIP.get(d.ip)
+      if (!g) {
+        g = { device: d, sites: [] }
+        byIP.set(d.ip, g)
+      }
+      g.sites.push(s)
+    }
+
+    const out = [...byIP.values()]
+    // 没归到设备的放在最后，并且只在真有的时候才显示
+    if (rest.sites.length > 0) out.push(rest)
+    return out
+  }, [sites, devices])
   const certName = useCallback(
     (id: number) => (id === 0 ? '按域名自动匹配' : (certs.find((c) => c.id === id)?.name ?? `#${id}`)),
     [certs],
@@ -1208,7 +1256,8 @@ export function ReverseProxy() {
         )}
       </Card>
 
-      {/* 站点列表：卡片式，和穿透页的「设备列表」同一套布局 */}
+      {/* 站点列表：**按设备分组** —— 和穿透页的「设备列表」同一套布局。
+          站点靠后端地址的 IP 自动归属到设备，不用手动挂。 */}
       <Card className="!p-0">
         <div className="px-5 pt-4">
           <CardHeader
@@ -1281,181 +1330,48 @@ export function ReverseProxy() {
            * 用户在一个页面学会的操作，到另一个页面就该能直接用。
            * 表格在小屏上还会把中文压成一列一个字，卡片不会。
            */
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-3 px-5 py-4">
-            {sites.map((s) => {
-                  const url = siteURL(entry, s)
-                  const addr = siteAddr(entry, s)
-                  // 停用的站点本来就不该跑，别拿红色状态去吓人
-                  const off = s.enabled === false
-                  return (
-                    <div
+          <div className="space-y-3 px-5 py-4">
+            {groups.map((g, gi) => (
+              <div
+                key={g.device?.id ?? `rest-${gi}`}
+                className="rounded-xl border border-slate-200/70 bg-white"
+              >
+                {/* 设备头：和穿透页的设备卡片同一套样式 */}
+                <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-500">
+                    <HardDrive className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-bold text-slate-800">
+                      {g.device?.name ?? '未归到设备'}
+                    </p>
+                    <p className="font-mono text-[10px] text-slate-400">
+                      {g.device?.ip ?? '这台机器还没加进设备列表'}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[11px] text-slate-400">
+                    {g.sites.length} 个服务
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2.5 p-2.5">
+                  {g.sites.map((s) => (
+                    <SiteCard
                       key={s.id}
-                      className={`flex flex-col rounded-xl border p-3 transition hover:border-blue-200 hover:shadow-md ${
-                        off ? 'border-slate-200/80 bg-slate-50/60' : 'border-slate-200/80'
-                      }`}
-                    >
-                      {/* 头部：状态点 + 域名 + 操作按钮组（顺序与穿透页一致） */}
-                      <div className="mb-2 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            off ? 'bg-slate-300' : 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
-                          }`}
-                        />
-                        <span className={`mr-0.5 flex-1 truncate text-sm font-bold ${
-                          off ? 'text-slate-400' : 'text-slate-800'
-                        }`}>
-                          {url ? (
-                            <a
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 font-mono text-[13px] font-semibold text-slate-800 hover:text-blue-600"
-                            >
-                              {s.hosts?.[0]}
-                              {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
-                              {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
-                              <ExternalLink className="h-3 w-3 text-slate-300" />
-                            </a>
-                          ) : (
-                            <span className="font-mono text-[13px] font-semibold">
-                              {s.hosts?.[0] ?? <span className="text-slate-400">任意域名</span>}
-                              {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
-                              {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
-                            </span>
-                          )}
-                        </span>
-                        {/* 按钮组：顺序与穿透页的服务卡片一致
-                            （启停 / 主页 / 编辑 / 复制 / 删除） */}
-                        <button
-                          onClick={() => toggleSiteFlag(s, 'enabled')}
-                          disabled={flagBusy === s.id}
-                          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
-                            off
-                              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-                              : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-                          }`}
-                          title={off ? '点一下启用' : '点一下停用'}
-                        >
-                          <Power className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => toggleSiteFlag(s, 'showOnHome')}
-                          disabled={flagBusy === s.id}
-                          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
-                            s.showOnHome
-                              ? 'bg-blue-100 text-blue-600'
-                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                          }`}
-                          title={s.showOnHome ? '从主页移除' : '添加到主页'}
-                        >
-                          <HomeIcon className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => setSiteModal({ open: true, initial: s })}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                          title="编辑"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        {/* 复制：照着这条再开一个。多域名站点常常只差域名和后端，
-                            手填一遍容易漏（尤其是证书、门禁这些折叠起来的项） */}
-                        <button
-                          onClick={() => duplicateSite(s)}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                          title="照着这个再开一个"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => removeSite(s)}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
-                          title="删除"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-
-                      {/* 状态徽章 */}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                          {(s.hosts?.length ?? 0) === 0 && (
-                            <span
-                              title="没填域名，这个端口上来的请求全收"
-                              className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-500"
-                            >
-                              端口转发
-                            </span>
-                          )}
-                          {(s.hosts?.length ?? 0) > 1 && (
-                            <span
-                              title={s.hosts.slice(1).join('\n')}
-                              className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-500"
-                            >
-                              +{s.hosts.length - 1} 个域名
-                            </span>
-                          )}
-                          {s.https && (
-                            <span className="inline-flex items-center gap-0.5 rounded bg-violet-50 px-1 py-0.5 text-[10px] font-bold text-violet-600">
-                              <ShieldCheck className="h-2.5 w-2.5" /> HTTPS
-                            </span>
-                          )}
-                          {s.listenPort > 0 && (
-                            <span className="rounded bg-blue-50 px-1 py-0.5 text-[10px] font-bold text-blue-600">
-                              独占端口
-                            </span>
-                          )}
-                          {addr && portBlocked(addr.port) && (
-                            <span
-                              title="Chrome / Firefox 拒连这个端口，报 ERR_UNSAFE_PORT。反代本身是通的，curl 也能访问，只有浏览器进不来"
-                              className="rounded bg-red-50 px-1 py-0.5 text-[10px] font-bold text-red-600"
-                            >
-                              浏览器拒连
-                            </span>
-                          )}
-                          {s.https && (s.hosts?.length ?? 0) === 0 && s.certId === 0 && autoCertNeedsSNI(certs) && (
-                            <span
-                              title="证书这格选的是「按域名自动匹配」，可这条站点没有域名，挑不出证书就一张都不出示，浏览器报 ERR_SSL_PROTOCOL_ERROR。进去指定一张证书就好了"
-                              className="rounded bg-red-50 px-1 py-0.5 text-[10px] font-bold text-red-600"
-                            >
-                              HTTPS 连不上
-                            </span>
-                          )}
-                          {!s.enabled && (
-                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
-                              已停用
-                            </span>
-                          )}
-                          {s.stripPrefix && (
-                            <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-bold text-amber-600">
-                              剥前缀
-                            </span>
-                          )}
-                      </div>
-                      {s.description && (
-                        <div className="mt-1 text-[11px] text-slate-400">{s.description}</div>
-                      )}
-
-                      {/* 后端：这条站点把请求转到哪去。
-                          旁边放「测试后端」—— 它属于后端，不该混在头部按钮组里 */}
-                      <div className="mt-auto flex items-center gap-1 pt-1 font-mono text-xs text-slate-600">
-                        <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
-                        <span className="min-w-0 flex-1 truncate">{s.backend}</span>
-                        {s.backendHttps && (
-                          <span className="rounded bg-emerald-50 px-1 py-0.5 font-sans text-[10px] font-bold text-emerald-600">
-                            TLS
-                          </span>
-                        )}
-                        <button
-                          onClick={() => testSite(s)}
-                          disabled={testingId === s.id}
-                          className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
-                          title="测试后端能不能连上"
-                        >
-                          <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
+                      site={s}
+                      entry={entry}
+                      testingId={testingId ?? 0}
+                      flagBusy={flagBusy}
+                      onTest={() => testSite(s)}
+                      onToggleFlag={(flag) => toggleSiteFlag(s, flag)}
+                      onEdit={() => setSiteModal({ open: true, initial: s })}
+                      onDuplicate={() => duplicateSite(s)}
+                      onRemove={() => removeSite(s)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Card>
@@ -1479,6 +1395,177 @@ export function ReverseProxy() {
             {t.text}
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 一张站点卡片（服务卡片）。
+ *
+ * 抽成组件是因为外面要按设备分组包一层 —— 卡片本身不变。
+ * 字段上与穿透的服务卡片对齐：状态点 + 名字 + 按钮组 + 徽章 + 后端。
+ */
+function SiteCard({
+  site: s,
+  entry,
+  testingId,
+  flagBusy,
+  onTest,
+  onToggleFlag,
+  onEdit,
+  onDuplicate,
+  onRemove,
+}: {
+  site: ProxySite
+  entry?: ProxyEntry
+  testingId: number
+  flagBusy: number
+  onTest: () => void
+  onToggleFlag: (flag: 'enabled' | 'showOnHome') => void
+  onEdit: () => void
+  onDuplicate: () => void
+  onRemove: () => void
+}) {
+  const url = siteURL(entry, s)
+  const addr = siteAddr(entry, s)
+  // 停用的站点本来就不该跑，别拿红色状态去吓人
+  const off = s.enabled === false
+
+  return (
+    <div
+      className={`flex flex-col rounded-xl border p-3 transition hover:border-blue-200 hover:shadow-md ${
+        off ? 'border-slate-200/80 bg-slate-50/60' : 'border-slate-200/80'
+      }`}
+    >
+      {/* 头部：状态点 + 域名 + 按钮组（顺序与穿透页一致） */}
+      <div className="mb-2 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${
+            off ? 'bg-slate-300' : 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
+          }`}
+        />
+        <span
+          className={`mr-0.5 min-w-0 flex-1 truncate text-sm font-bold ${
+            off ? 'text-slate-400' : 'text-slate-800'
+          }`}
+        >
+          {url ? (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-mono text-[13px] font-semibold text-slate-800 hover:text-blue-600"
+            >
+              {s.hosts?.[0]}
+              {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
+              {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
+              <ExternalLink className="h-3 w-3 text-slate-300" />
+            </a>
+          ) : (
+            <span className="font-mono text-[13px] font-semibold">
+              {s.hosts?.[0] ?? <span className="text-slate-400">任意域名</span>}
+              {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
+              {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
+            </span>
+          )}
+        </span>
+
+        {/* 按钮组：启停 / 主页 / 编辑 / 复制 / 删除 */}
+        <button
+          onClick={() => onToggleFlag('enabled')}
+          disabled={flagBusy === s.id}
+          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
+            off
+              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+              : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+          }`}
+          title={off ? '点一下启用' : '点一下停用'}
+        >
+          <Power className="h-3 w-3" />
+        </button>
+        <button
+          onClick={() => onToggleFlag('showOnHome')}
+          disabled={flagBusy === s.id}
+          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
+            s.showOnHome
+              ? 'bg-blue-100 text-blue-600'
+              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+          }`}
+          title={s.showOnHome ? '从主页移除' : '添加到主页'}
+        >
+          <HomeIcon className="h-3 w-3" />
+        </button>
+        <button
+          onClick={onEdit}
+          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+          title="编辑"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+        <button
+          onClick={onDuplicate}
+          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+          title="照着这个再开一个"
+        >
+          <Copy className="h-3 w-3" />
+        </button>
+        <button
+          onClick={onRemove}
+          className="grid h-6 w-6 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
+          title="删除"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
+
+      {/* 状态徽章 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {s.https && (
+          <span className="inline-flex items-center gap-0.5 rounded bg-violet-50 px-1 py-0.5 text-[10px] font-bold text-violet-600">
+            <ShieldCheck className="h-2.5 w-2.5" /> HTTPS
+          </span>
+        )}
+        {!s.enabled && (
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+            已停用
+          </span>
+        )}
+        {(s.hosts?.length ?? 0) > 1 && (
+          <span
+            title={s.hosts.slice(1).join('\n')}
+            className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-500"
+          >
+            +{s.hosts.length - 1} 个域名
+          </span>
+        )}
+        {s.stripPrefix && (
+          <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-bold text-amber-600">
+            剥前缀
+          </span>
+        )}
+      </div>
+      {s.description && <div className="mt-1 text-[11px] text-slate-400">{s.description}</div>}
+
+      {/* 后端：只显示端口（IP 已经在设备头上了，不用重复） */}
+      <div className="mt-auto flex items-center gap-1 pt-1 font-mono text-xs text-slate-600">
+        <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
+        <span className="min-w-0 flex-1 truncate">
+          :{String(s.backend ?? '').split(':')[1] ?? s.backend}
+        </span>
+        {s.backendHttps && (
+          <span className="rounded bg-emerald-50 px-1 py-0.5 font-sans text-[10px] font-bold text-emerald-600">
+            TLS
+          </span>
+        )}
+        <button
+          onClick={onTest}
+          disabled={testingId === s.id}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+          title="测试后端能不能连上"
+        >
+          <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
+        </button>
       </div>
     </div>
   )

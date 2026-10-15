@@ -727,6 +727,8 @@ export interface TrafficTrend {
   bySite: Record<string, TrafficSiteTraffic>
   /** 穿透服务的流量，键是 "s<设备ID>-<服务ID>" */
   byTunnel: Record<string, TrafficSiteTraffic>
+  /** 服务名映射（后端解析好的「设备名 · 服务名」），键与上面两个一致 */
+  names?: Record<string, string>
 }
 
 // ===================== 访问审计与 IP 管理 =====================
@@ -826,4 +828,25 @@ export interface LoginSummary {
   succeeded: number
   ips: string[]
   usernames: string[]
+}
+
+// ===================== 设备（穿透/反代/端口转发共用） =====================
+
+export interface Device {
+  /** 沿用穿透那边的字段名 */
+  id: number
+  name: string
+  ip: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** 端口转发：端口 → 端口，不看域名。和站点分开。 */
+export interface ProxyForward {
+  id: number
+  listenPort: number
+  target: string
+  protocol: string
+  enabled: boolean
+  description: string
 }

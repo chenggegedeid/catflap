@@ -29,11 +29,38 @@ func ReadConfig() (model.ProxyConfig, error) {
 	migrateSinglePort(&config)
 	// 必须在 migrateSinglePort **之后**：它可能刚把老的单端口塞进
 	// LegacyHTTPPort/HTTPSPort，这一行再搬到数组里
+	// 迁移后要**落盘一次**：否则文件里一直是老格式（httpPort 单端口、
+	// 没有 scheme、端口转发还塞在站点表里），下次启动再迁一遍虽然没错，
+	// 但用户打开配置文件看到的是没迁的样子，而且手工改的话容易和
+	// 内存里的新格式打架。
+	//
+	// 和 stun 那边踩过的坑不同：这里没有 hydrate/dehydrate 那层转换，
+	// 迁移只动端口、scheme、forwards 三个字段，不会覆盖站点数据。
+	migrated := config.MigratePorts() || config.MigrateScheme() ||
+		config.LegacyPort > 0 || portForwardPending(&config)
 	config.MigratePorts()
 	config.MigrateScheme()
 	migrateSiteHosts(&config)
 	migratePortForward(&config)
+	if migrated {
+		if err := SaveConfig(config); err != nil {
+			logrus.Errorf("[proxy] 迁移后落盘失败（不影响运行，下次启动会重试）：%v", err)
+		}
+	}
 	return config, nil
+}
+
+// portForwardPending 有没有待拆的端口转发（老配置里塞在站点表中的）
+func portForwardPending(cfg *model.ProxyConfig) bool {
+	if cfg == nil || len(cfg.Forwards) > 0 {
+		return false
+	}
+	for _, s := range cfg.Sites {
+		if len(NormalizeHosts(s.Hosts)) == 0 && s.ListenPort > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // migrateSiteHosts 把旧版站点的单个 host 搬进 hosts 数组

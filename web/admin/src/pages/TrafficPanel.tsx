@@ -303,18 +303,19 @@ function DailyBars({ days }: { days: TrafficDailyTotals[] }) {
  * 流量数字才是这一块的重点，名字用 `站点 #3` / `穿透 #1-2` 够认就行。
  */
 function TopList({ trend }: { trend: TrafficTrend | null }) {
+  // 名字由后端解析好（「设备名 · 服务名」），拿不到就回落成编号
+  const names = trend?.names ?? {}
   const rows = [
     ...Object.entries(trend?.bySite ?? {}).map(([id, t]) => ({
       key: `site-${id}`,
-      label: id === '0' ? '未匹配站点' : `站点 #${id}`,
+      label: names[id] ?? (id === '0' ? '未匹配站点' : `站点 #${id}`),
       total: t.in + t.out,
       requests: t.requests,
       tunnel: false,
     })),
     ...Object.entries(trend?.byTunnel ?? {}).map(([key, t]) => ({
       key: `tun-${key}`,
-      // "s1-2" → "穿透 #1-2"（设备 1、服务 2）
-      label: `穿透 #${key.replace(/^s/, '')}`,
+      label: names[key] ?? `穿透 #${key.replace(/^s/, '')}`,
       total: t.in + t.out,
       requests: t.requests,
       tunnel: true,

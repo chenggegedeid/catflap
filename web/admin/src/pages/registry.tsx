@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  ArrowLeftRight,
   Cloud,
   Bell,
   Blocks,
@@ -11,6 +12,7 @@ import {
   LayoutDashboard,
   Power,
   Repeat,
+  Server,
   Settings as SettingsIcon,
   ShieldCheck,
   Waves,
@@ -23,6 +25,8 @@ import { Dashboard } from './Dashboard'
 import { Ddns } from './Ddns'
 import { Logs } from './Logs'
 import { Notify } from './Notify'
+import { Devices } from './Devices'
+import { Forwards } from './Forwards'
 import { ReverseProxy } from './ReverseProxy'
 import { Settings } from './Settings'
 import { Stun } from './Stun'
@@ -103,6 +107,21 @@ export const pages = {
     icon: LayoutDashboard,
     subtitle: '一站式管理网络、域名、证书与服务，让一切安全、稳定、简单',
     element: <Dashboard />,
+  },
+
+  devices: {
+    label: '设备',
+    icon: Server,
+    subtitle: '内网里的机器，穿透 / 反代 / 端口转发共用这一份',
+    element: <Devices />,
+  },
+
+  forwards: {
+    label: '端口转发',
+    icon: ArrowLeftRight,
+    subtitle: '端口对端口的转发，不看域名，适合非 HTTP 服务',
+    component: 'proxy',
+    element: <Forwards />,
   },
 
   stun: {
@@ -206,7 +225,7 @@ export interface NavGroupDef {
  */
 export const pageGroups = [
   { keys: ['dashboard'] },
-  { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'tunnel', 'cert', 'wol'] },
+  { title: '网络与连接', keys: ['devices', 'forwards', 'stun', 'ddns', 'reverse-proxy', 'tunnel', 'cert', 'wol'] },
   { title: '自动化', keys: ['task'] },
   { title: '系统与管理', keys: ['components', 'settings', 'logs', 'audit', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]
