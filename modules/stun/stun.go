@@ -255,7 +255,7 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 					}
 					return
 				}
-				go ForwardTCP(clientConn, targetAddr, protocol, opt) //转发到对应的内网服务
+				go ForwardTCP(clientConn, targetAddr, protocol, opt, req.DeviceID, req.ServiceID) //转发到对应的内网服务
 			}
 		} else {
 			buf := make([]byte, 65535)
@@ -271,7 +271,7 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 				}
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				go ForwardUDP(udpListener, remoteAddr, data, targetAddr)
+				go ForwardUDP(udpListener, remoteAddr, data, targetAddr, req.DeviceID, req.ServiceID)
 			}
 		}
 

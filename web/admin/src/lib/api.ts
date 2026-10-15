@@ -14,6 +14,8 @@ import type {
   LanSubnet,
   LogEntry,
   LogSummary,
+  LoginEvent,
+  LoginSummary,
   NatTypeInfo,
   NetInterface,
   NotifyChannelType,
@@ -914,3 +916,14 @@ export const setProxySiteFlag = (id: number, flag: 'enabled' | 'showOnHome', val
     method: 'POST',
     body: JSON.stringify({ id, flag, value }),
   })
+
+/** 登录尝试（谁在试着进后台） */
+export const getAuditLogins = (params: { day?: string; ip?: string; limit?: number } = {}) => {
+  const q = new URLSearchParams()
+  if (params.day) q.set('day', params.day)
+  if (params.ip) q.set('ip', params.ip)
+  if (params.limit) q.set('limit', String(params.limit))
+  return request<{ list: LoginEvent[]; day: string; summary: LoginSummary }>(
+    `/api/audit/logins?${q.toString()}`,
+  )
+}

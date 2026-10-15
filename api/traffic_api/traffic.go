@@ -44,8 +44,10 @@ func (TrafficApi) TrafficRealtimeView(c *gin.Context) {
 // TrendView 趋势：按天汇总
 type TrendView struct {
 	Days []traffic.DailyTotals `json:"days"`
-	// BySite 站点流量，键是站点 ID 的字符串形式
+	// BySite 反代站点流量，键是站点 ID 的字符串形式
 	BySite map[string]traffic.SiteTraffic `json:"bySite"`
+	// ByTunnel 穿透服务流量，键是 "s<设备ID>-<服务ID>"
+	ByTunnel map[string]traffic.SiteTraffic `json:"byTunnel"`
 }
 
 // TrafficTrendView 近 N 天趋势（默认 7 天，最多 90）
@@ -67,7 +69,8 @@ func (TrafficApi) TrafficTrendView(c *gin.Context) {
 	}
 
 	res.OkWithData(TrendView{
-		Days:   traffic.AggregateByDay(recs),
-		BySite: traffic.AggregateBySite(recs),
+		Days:     traffic.AggregateByDay(recs),
+		BySite:   traffic.AggregateBySite(recs),
+		ByTunnel: traffic.AggregateByTunnel(recs),
 	}, c)
 }

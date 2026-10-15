@@ -19,6 +19,8 @@ func AuditRouters(g *gin.RouterGroup) {
 	g.GET("audit/config", app.AuditConfigView)
 	g.GET("audit/ips", app.AuditIPsView)
 	g.GET("audit/records", app.AuditRecordsView)
+	// 登录尝试（谁在试着进后台）
+	g.GET("audit/logins", app.AuditLoginsView)
 
 	g.POST("audit/block",
 		middleware.BindJsonMiddleware[audit_api.BlockRequest], app.AuditBlockView)

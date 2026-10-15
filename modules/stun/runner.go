@@ -15,6 +15,14 @@ type STUNRequest struct {
 	UseUPnP       bool
 	WebhookConfig webhook.WebhookConfig
 
+	// DeviceID / ServiceID 这条洞属于哪个设备的哪个服务。
+	//
+	// 只用于**流量统计按服务分组**（穿透的流量要算到具体服务头上，
+	// 不然流量大屏里只知道总量、不知道是哪个服务在用）。
+	// 转发逻辑本身不关心它们，填 0 也能正常跑（只是统计归到"未分组"）。
+	DeviceID  uint
+	ServiceID uint
+
 	// PreferredLocalPort 打洞希望使用的本机端口；0 表示随机分配。
 	//
 	// 外部端口是 NAT 按「本机 IP + 本机端口」分配的，本机端口一变外部端口就变。

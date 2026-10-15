@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chenggegedeid/catflap/modules/plainhttp"
+	"github.com/chenggegedeid/catflap/modules/traffic"
 
 	"github.com/sirupsen/logrus"
 )
@@ -39,7 +40,10 @@ type ForwardOptions struct {
 }
 
 // ForwardTCP 把洞上的连接转发到内网服务
-func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOptions) {
+//
+// deviceID / serviceID 只用于流量统计归组，填 0 也能正常转发
+// （统计会归到"未分组"，转发行为完全不受影响）。
+func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOptions, deviceID, serviceID uint) {
 	defer src.Close()
 
 	// 先完成握手再拨后端：握手失败就不该白拨一次内网
@@ -90,14 +94,44 @@ func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOpt
 	}
 	defer dst.Close()
 
+	// 流量统计：这条连接转了多字节。
+	//
+	// 方向定义与反向代理一致：
+	//   - 入站 = 外部 → 内网（写进 dst 的）
+	//   - 出站 = 内网 → 外部（写回 src 的）
+	// 两边统一，仪表盘上"入站/出站"才对得上。
+	inCount := &countingWriter{w: dst}
+	outCount := &countingWriter{w: src}
+
 	go func() {
-		_, _ = io.Copy(dst, src)
+		_, _ = io.Copy(inCount, src)
 		dst.Close()
 	}()
 
-	_, _ = io.Copy(src, dst)
+	_, _ = io.Copy(outCount, dst)
 	src.Close()
+
+	// 连接结束才上报：转发是长连接，中途报要额外加锁还拿不到最终值。
+	// 这里的代价是"正在传的大文件要等传完才计入"，对统计趋势没有影响。
+	traffic.RecordStun(deviceID, serviceID, inCount.total(), outCount.total())
 }
+
+// countingWriter 边转发边数字节。
+//
+// 不做成 net.Conn 包装是因为我们只需要 Write 这一个方向 ——
+// 转发用的是 io.Copy，包一层 io.Writer 就够了，改动面最小。
+type countingWriter struct {
+	w     io.Writer
+	bytes int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.bytes += int64(n)
+	return n, err
+}
+
+func (c *countingWriter) total() int64 { return c.bytes }
 
 // describeDialError 把拨号错误翻译成能直接照着改配置的话。
 //
@@ -117,8 +151,12 @@ const udpSessionTimeout = 30 * time.Second
 var udpSessions sync.Map // remoteAddr.String() → net.Conn
 
 // ForwardUDP 维护 session 表，同一客户端复用同一内部连接，持续转发回包。
-func ForwardUDP(localConn *net.UDPConn, remoteAddr *net.UDPAddr, data []byte, targetAddr string) {
+func ForwardUDP(localConn *net.UDPConn, remoteAddr *net.UDPAddr, data []byte, targetAddr string, deviceID, serviceID uint) {
 	key := remoteAddr.String()
+
+	// UDP 只统计入站（收到多少字节）。回包走另一条路径且通常是广播式，
+	// 逐个包记账成本高而价值低——UDP 场景看"有没有流量、多少"就够了。
+	traffic.RecordStun(deviceID, serviceID, int64(len(data)), 0)
 
 	if v, ok := udpSessions.Load(key); ok {
 		v.(net.Conn).Write(data)

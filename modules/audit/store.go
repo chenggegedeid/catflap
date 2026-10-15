@@ -485,3 +485,114 @@ func matchAny(nets []*net.IPNet, ipStr string) bool {
 	}
 	return false
 }
+
+// ===================== 登录事件 =====================
+//
+// 存哪里：data/access/login-<日期>.jsonl，和访问明细分开两个文件。
+// 分开是因为它们的字段不同、用途不同（一个是"谁访问了服务"，
+// 一个是"谁在试着进后台"），混在一个文件里读起来要判断类型。
+
+const loginFilePrefix = "login-"
+
+// RecordLogin 记一次登录尝试
+func RecordLogin(ev LoginEvent) {
+	if !Runtime.isEnabled() {
+		return
+	}
+	if ev.Time.IsZero() {
+		ev.Time = time.Now()
+	}
+
+	name := filepath.Join(auditDir, loginFilePrefix+ev.Time.Format("2006-01-02")+".jsonl")
+
+	if err := utilsFile.EnsurePrivateDir(auditDir); err != nil {
+		logrus.Warnf("[audit] 创建目录失败：%v", err)
+		return
+	}
+	f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, utilsFile.PrivateFileMode)
+	if err != nil {
+		logrus.Warnf("[audit] 打开 %s 失败：%v", name, err)
+		return
+	}
+	defer f.Close()
+
+	line, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(line, '\n'))
+}
+
+// ReadLoginEvents 读某天的登录事件，新的在前。ip 留空表示不限。
+func ReadLoginEvents(day string, ip string, limit int) ([]LoginEvent, error) {
+	name := filepath.Join(auditDir, loginFilePrefix+day+".jsonl")
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var out []LoginEvent
+	dec := json.NewDecoder(f)
+	for {
+		var e LoginEvent
+		if err := dec.Decode(&e); err != nil {
+			break
+		}
+		if ip != "" && e.IP != ip {
+			continue
+		}
+		out = append(out, e)
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// LoginSummary 某天登录事件的汇总，给界面上"今天有人试了几次"用
+type LoginSummary struct {
+	Total     int      `json:"total"`
+	Failed    int      `json:"failed"`
+	Succeeded int      `json:"succeeded"`
+	IPs       []string `json:"ips"`
+	// Usernames 被试过的用户名（去重）。看到一堆 admin/root 就知道在字典攻击
+	Usernames []string `json:"usernames"`
+}
+
+// SummarizeLogins 汇总某天的登录事件
+func SummarizeLogins(day string) LoginSummary {
+	events, err := ReadLoginEvents(day, "", 0)
+	if err != nil {
+		return LoginSummary{}
+	}
+
+	ipSet := map[string]bool{}
+	nameSet := map[string]bool{}
+	var s LoginSummary
+	for _, e := range events {
+		s.Total++
+		if e.Success {
+			s.Succeeded++
+		} else {
+			s.Failed++
+		}
+		if e.IP != "" {
+			ipSet[e.IP] = true
+		}
+		if e.Username != "" {
+			nameSet[e.Username] = true
+		}
+	}
+	for ip := range ipSet {
+		s.IPs = append(s.IPs, ip)
+	}
+	for n := range nameSet {
+		s.Usernames = append(s.Usernames, n)
+	}
+	sort.Strings(s.IPs)
+	sort.Strings(s.Usernames)
+	return s
+}
