@@ -27,6 +27,9 @@ func ReadConfig() (model.ProxyConfig, error) {
 		return config, err
 	}
 	migrateSinglePort(&config)
+	// 必须在 migrateSinglePort **之后**：它可能刚把老的单端口塞进
+	// LegacyHTTPPort/HTTPSPort，这一行再搬到数组里
+	config.MigratePorts()
 	migrateSiteHosts(&config)
 	return config, nil
 }
@@ -48,18 +51,18 @@ func migrateSiteHosts(cfg *model.ProxyConfig) {
 // 搬过来就是：https 的话放进 HTTPSPort，并且把已有站点都勾上 HTTPS——
 // 否则升级完这些站点会从 443 上消失，用户只会看到「升级把我的反代搞坏了」。
 func migrateSinglePort(cfg *model.ProxyConfig) {
-	if cfg.LegacyPort <= 0 || cfg.HTTPPort > 0 || cfg.HTTPSPort > 0 {
+	if cfg.LegacyPort <= 0 || len(cfg.HTTPPorts) > 0 || len(cfg.HTTPSPorts) > 0 {
 		cfg.LegacyPort, cfg.LegacyTLS = 0, false
 		return
 	}
 
 	if cfg.LegacyTLS {
-		cfg.HTTPSPort = cfg.LegacyPort
+		cfg.HTTPSPorts = []int{cfg.LegacyPort}
 		for i := range cfg.Sites {
 			cfg.Sites[i].HTTPS = true
 		}
 	} else {
-		cfg.HTTPPort = cfg.LegacyPort
+		cfg.HTTPPorts = []int{cfg.LegacyPort}
 	}
 
 	logrus.Infof("[proxy] 已把旧的单端口配置（%d）迁移到新的双入口模型", cfg.LegacyPort)
@@ -71,8 +74,8 @@ func createConfig() (model.ProxyConfig, error) {
 	config.CreatedAt = time.Now()
 	config.UpdatedAt = time.Now()
 	// 预填端口但不启用：用户在页面上点「开启」之前，不该有任何端口被占上
-	config.HTTPPort = model.DefaultHTTPPort
-	config.HTTPSPort = model.DefaultHTTPSPort
+	config.HTTPPorts = []int{model.DefaultHTTPPort}
+	config.HTTPSPorts = []int{model.DefaultHTTPSPort}
 	config.Sites = []model.Site{}
 
 	if err := utilsFile.EnsurePrivateDir(path.Dir(ConfigPath)); err != nil {

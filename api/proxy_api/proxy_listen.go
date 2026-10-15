@@ -10,7 +10,12 @@ import (
 
 // EntrySaveRequest 默认入口设置，对应 nginx 的 listen 80 / listen 443 ssl
 type EntrySaveRequest struct {
-	Enabled   bool `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// HTTPPorts / HTTPSPorts 入口端口，**可以多个**（新前端传这两个）
+	HTTPPorts  []int `json:"httpPorts"`
+	HTTPSPorts []int `json:"httpsPorts"`
+	// HTTPPort / HTTPSPort 单个端口，老前端兼容用。
+	// 新前端传了数组时以数组为准，见 ProxyEntrySaveView。
 	HTTPPort  int  `json:"httpPort"`  // 0 = 不开 HTTP 入口
 	HTTPSPort int  `json:"httpsPort"` // 0 = 不开 HTTPS 入口
 	CertID    uint `json:"certId"`    // 0 表示按 SNI 自动匹配
@@ -22,10 +27,20 @@ type EntrySaveRequest struct {
 func (ProxyApi) ProxyEntrySaveView(c *gin.Context) {
 	cr := middleware.GetBindRequest[EntrySaveRequest](c)
 
+	// 端口用数组；老前端只传单个 httpPort/httpsPort 时也能工作
+	httpPorts := cr.HTTPPorts
+	if len(httpPorts) == 0 && cr.HTTPPort > 0 {
+		httpPorts = []int{cr.HTTPPort}
+	}
+	httpsPorts := cr.HTTPSPorts
+	if len(httpsPorts) == 0 && cr.HTTPSPort > 0 {
+		httpsPorts = []int{cr.HTTPSPort}
+	}
+
 	err := proxy.SetEntry(proxy.EntrySettings{
 		Enabled:    cr.Enabled,
-		HTTPPort:   cr.HTTPPort,
-		HTTPSPort:  cr.HTTPSPort,
+		HTTPPorts:  httpPorts,
+		HTTPSPorts: httpsPorts,
 		CertID:     cr.CertID,
 		BaseDomain: cr.BaseDomain,
 	})
