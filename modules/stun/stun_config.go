@@ -5,6 +5,7 @@ import (
 	"github.com/chenggegedeid/catflap/modules/stun/model"
 	"github.com/chenggegedeid/catflap/utils/utilsFile"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -213,11 +214,20 @@ func hydrateDevices(config *model.Config) {
 
 	out := make([]model.Device, 0, len(devs))
 	for _, d := range devs {
+		svcs := byID[d.DeviceID]
+		// 按界面顺序排（SortOrder 小的在前），没排过的按 ID ——
+		// 拖动排序存在服务上，hydrate 时得按它排，否则拖完刷新又回去了
+		sort.SliceStable(svcs, func(i, j int) bool {
+			if svcs[i].SortOrder != svcs[j].SortOrder {
+				return svcs[i].SortOrder < svcs[j].SortOrder
+			}
+			return svcs[i].ID < svcs[j].ID
+		})
 		out = append(out, model.Device{
 			DeviceID:  d.DeviceID,
 			Name:      d.Name,
 			IP:        d.IP,
-			Services:  byID[d.DeviceID],
+			Services:  svcs,
 			CreatedAt: d.CreatedAt,
 			UpdatedAt: d.UpdatedAt,
 		})
@@ -266,4 +276,67 @@ func deviceList() []deviceModel {
 		_ = recover()
 	}()
 	return device.List()
+}
+
+// ReorderServices 拖动排序后保存**某台设备下**的服务顺序。
+//
+// 只动这一台设备的服务，别的设备不受影响 —— 界面上就是"这台机器上的
+// 服务换个顺序"。
+//
+// **必须改 Runtime.Config.Devices（设备树），不能只改 Services 列表** ——
+// 这两份是同一份数据的两种形态（树是内存视图，列表是落盘形态），
+// 服务的新增/修改走的是树那条路，排序也走树才一致。
+// 只改列表的话，下一步 hydrate 会拿列表重建树，把树里（真正新加的）
+// 服务冲掉 —— 实测踩到过：拖一下排序，服务少了一个。
+func ReorderServices(deviceID uint, svcIDs []uint) error {
+	for i := range Runtime.Config.Devices {
+		if Runtime.Config.Devices[i].DeviceID != deviceID {
+			continue
+		}
+		svcs := Runtime.Config.Devices[i].Services
+		byID := map[uint]int{}
+		for j := range svcs {
+			byID[svcs[j].ID] = j
+		}
+		next := 1
+		for _, id := range svcIDs {
+			j, ok := byID[id]
+			if !ok {
+				continue
+			}
+			svcs[j].SortOrder = next
+			next++
+			delete(byID, id)
+		}
+		// 没在列表里的排后面，保持相对顺序
+		for j := range svcs {
+			if _, ok := byID[svcs[j].ID]; !ok {
+				continue
+			}
+			svcs[j].SortOrder = next
+			next++
+		}
+		// 改完 SortOrder 还要**真的把 slice 排一遍** ——
+		// 界面读的是这个 slice 的顺序，光改字段不动顺序等于没排
+		sort.SliceStable(svcs, func(a, b int) bool {
+			if svcs[a].SortOrder != svcs[b].SortOrder {
+				return svcs[a].SortOrder < svcs[b].SortOrder
+			}
+			return svcs[a].ID < svcs[b].ID
+		})
+		break
+	}
+
+	return UpdateConfig(Runtime.Config)
+}
+
+// RefreshDevices 重新按公共设备表组装设备树。
+//
+// **什么时候需要**：设备的"主人"是 modules/device，在设备页增删改之后，
+// stun 的 Runtime.Config.Devices（内存视图）还是旧的 —— 表现是
+// "刚加的设备，穿透页看不到，加服务说设备不存在"，要重启才好。
+//
+// 所以设备页改完设备后，api 层要调一次这个。
+func RefreshDevices() {
+	hydrateDevices(&Runtime.Config)
 }

@@ -52,6 +52,14 @@ func StunRouters(g *gin.RouterGroup) {
 	)
 
 	// STUN 服务器列表：查看 + 保存（保存后立即重测选优）
+	// 拖动排序：某台设备下的服务换个顺序
+	g.POST(
+		"stun/services/reorder",
+		middleware.BindJsonMiddleware[stun_api.ReorderServicesRequest],
+		app.StunServicesReorderView,
+	)
+
+	// STUN 服务器列表：查看 + 保存（保存后立即重测选优）
 	g.GET(
 		"stun/servers",
 		app.GetStunServersView,

@@ -1047,6 +1047,45 @@ export function ReverseProxy() {
     }
   }, [cfg])
 
+  // 拖动排序：设备之间、设备内的服务之间都能拖
+  const [dragDev, setDragDev] = useState(0)
+  const [overDev, setOverDev] = useState(0)
+  const [dragSite, setDragSite] = useState(0)
+  const [overSite, setOverSite] = useState(0)
+
+  /** 设备之间换顺序 */
+  const commitDeviceOrder = async (from: number, to: number) => {
+    const ids = devices.map((d) => d.id)
+    const i = ids.indexOf(from)
+    const j = ids.indexOf(to)
+    if (i < 0 || j < 0 || i === j) return
+    const [moved] = ids.splice(i, 1)
+    ids.splice(j, 0, moved)
+    setDevices(devices.slice().sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)))
+    try {
+      await api.reorderDevices(ids)
+    } catch (e) {
+      toast('排序保存失败: ' + errText(e))
+      void refresh()
+    }
+  }
+
+  /** 站点（服务）之间换顺序 */
+  const commitSiteOrder = async (from: number, to: number) => {
+    const ids = sites.map((s2) => s2.id)
+    const i = ids.indexOf(from)
+    const j = ids.indexOf(to)
+    if (i < 0 || j < 0 || i === j) return
+    const [moved] = ids.splice(i, 1)
+    ids.splice(j, 0, moved)
+    try {
+      await api.reorderSites(ids)
+      await refresh()
+    } catch (e) {
+      toast('排序保存失败: ' + errText(e))
+    }
+  }
+
   /**
    * 站点按设备分组。
    *
@@ -1396,7 +1435,25 @@ export function ReverseProxy() {
             {groups.map((g, gi) => (
               <div
                 key={g.device?.id ?? `rest-${gi}`}
-                className="rounded-xl border border-slate-200/70 bg-white"
+                draggable={!!g.device}
+                onDragStart={() => g.device && setDragDev(g.device.id)}
+                onDragEnd={() => {
+                  setDragDev(0)
+                  setOverDev(0)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (g.device && g.device.id !== overDev) setOverDev(g.device.id)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  if (dragDev && g.device) void commitDeviceOrder(dragDev, g.device.id)
+                }}
+                className={`rounded-xl border border-slate-200/70 bg-white transition ${
+                  g.device && overDev === g.device.id && dragDev !== g.device.id
+                    ? 'ring-2 ring-blue-300'
+                    : ''
+                } ${g.device && dragDev === g.device.id ? 'opacity-40' : ''}`}
               >
                 {/* 设备头：和穿透页的设备卡片同一套样式 */}
                 <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
@@ -1418,6 +1475,26 @@ export function ReverseProxy() {
 
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2.5 p-2.5">
                   {g.sites.map((s) => (
+                    <div
+                      key={s.id}
+                      draggable
+                      onDragStart={() => setDragSite(s.id)}
+                      onDragEnd={() => {
+                        setDragSite(0)
+                        setOverSite(0)
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        if (s.id !== overSite) setOverSite(s.id)
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        if (dragSite) void commitSiteOrder(dragSite, s.id)
+                      }}
+                      className={`cursor-grab transition ${
+                        overSite === s.id && dragSite !== s.id ? 'ring-2 ring-blue-300' : ''
+                      } ${dragSite === s.id ? 'opacity-40' : ''}`}
+                    >
                     <SiteCard
                       key={s.id}
                       site={s}
@@ -1430,6 +1507,7 @@ export function ReverseProxy() {
                       onDuplicate={() => duplicateSite(s)}
                       onRemove={() => removeSite(s)}
                     />
+                    </div>
                   ))}
                 </div>
               </div>

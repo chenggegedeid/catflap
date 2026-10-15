@@ -75,7 +75,11 @@ type Device struct {
 // 服务不再嵌在设备里（设备归 modules/device 管），靠 DeviceID 关联过去。
 type Service struct {
 	// DeviceID 这个服务在哪台设备上。和设备表的 DeviceID 对应。
-	DeviceID       uint   `json:"deviceId"`
+	DeviceID uint `json:"deviceId"`
+
+	// SortOrder 界面上的排列顺序，小的在前。只影响显示，不影响转发。
+	// 0 表示没排过，按 (SortOrder, ID) 排 —— 老配置升级后顺序不变。
+	SortOrder      int    `json:"sortOrder,omitempty"`
 	ID             uint   `json:"id"` // 服务唯一标识符（设备内唯一）
 	StartupSuccess bool   `json:"-"`
 	Name           string `json:"name"`         // 服务名称,如 "SSH" / "Web管理" / "照片库"

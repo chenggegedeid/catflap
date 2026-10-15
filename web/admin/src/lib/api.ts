@@ -963,3 +963,10 @@ export const scanHostPorts = (ip: string) =>
 /** 拖动排序后保存站点（服务）顺序 */
 export const reorderSites = (ids: number[]) =>
   request<unknown>('/api/proxy/sites/reorder', { method: 'POST', body: JSON.stringify({ ids }) })
+
+/** 拖动排序：某台设备下的穿透服务换个顺序 */
+export const reorderStunServices = (deviceId: number, ids: number[]) =>
+  request<unknown>('/api/stun/services/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ deviceId, ids }),
+  })

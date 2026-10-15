@@ -51,6 +51,9 @@ func (DeviceApi) DeviceSaveView(c *gin.Context) {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
+	// 设备表变了，穿透那边的设备树（内存视图）要跟着刷新 ——
+	// 不然刚加的设备在穿透页看不到，加服务会说"设备不存在"
+	stun.RefreshDevices()
 	res.OkWithData(d, c)
 }
 
@@ -79,6 +82,7 @@ func (DeviceApi) DeviceDeleteView(c *gin.Context) {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
+	stun.RefreshDevices()
 	res.OkWithMsg("已删除", c)
 }
 
