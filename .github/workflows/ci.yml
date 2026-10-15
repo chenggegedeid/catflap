@@ -74,6 +74,12 @@ jobs:
       - name: 校验 systemd 单元
         run: python3 scripts/verify_systemd_unit.py
 
+      # 挪/删仓库文件时容易漏改脚本里的路径，那种错误只在打包步骤才炸，
+      # 而打包一炸后面「发布 Release」就被跳过（表现为 tag 打了但没资产）。
+      # 在这里提前拦住。
+      - name: 校验脚本里的路径引用
+        run: python3 scripts/check_path_refs.py
+
       # 已知漏洞扫描。需要访问 vuln.go.dev，外部服务偶发抽风不该拦住合并，
       # 所以这里不阻断；正式的周期性报告在 security.yml 里出。
       - name: govulncheck（非阻断）
