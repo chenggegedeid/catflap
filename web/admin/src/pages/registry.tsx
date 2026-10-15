@@ -4,6 +4,7 @@ import {
   Cloud,
   Bell,
   Blocks,
+  ShieldAlert,
   CalendarClock,
   FileText,
   Globe,
@@ -15,6 +16,7 @@ import {
   Waves,
 } from 'lucide-react'
 
+import { Audit } from './Audit'
 import { Cert } from './Cert'
 import { ComponentManager } from './Components'
 import { Dashboard } from './Dashboard'
@@ -166,6 +168,12 @@ export const pages = {
     icon: FileText,
     element: <Logs />,
   },
+  audit: {
+    label: '访问审计',
+    icon: ShieldAlert,
+    subtitle: '谁在访问、谁在扫我',
+    element: <Audit />,
+  },
   tunnel: {
     label: 'Tunnel',
     icon: Cloud,
@@ -200,7 +208,7 @@ export const pageGroups = [
   { keys: ['dashboard'] },
   { title: '网络与连接', keys: ['stun', 'ddns', 'reverse-proxy', 'tunnel', 'cert', 'wol'] },
   { title: '自动化', keys: ['task'] },
-  { title: '系统与管理', keys: ['components', 'settings', 'logs', 'notify'] },
+  { title: '系统与管理', keys: ['components', 'settings', 'logs', 'audit', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]
 
 /**

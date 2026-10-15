@@ -1,6 +1,9 @@
 import type {
   AcmeProvider,
   Certificate,
+  AuditConfigView,
+  AuditIPStat,
+  AuditRecord,
   CertSource,
   ComponentsView,
   DdnsConfig,
@@ -837,3 +840,46 @@ export const getTrafficRealtime = () => request<TrafficRealtime>('/api/traffic/r
 
 /** 近 N 天趋势（默认 7 天） */
 export const getTrafficTrend = (days = 7) => request<TrafficTrend>(`/api/traffic/trend?days=${days}`)
+
+// ===================== 访问审计与 IP 管理 =====================
+
+export const getAuditConfig = () => request<AuditConfigView>('/api/audit/config')
+
+export const getAuditIPs = (params: { sort?: string; suspicious?: boolean; limit?: number } = {}) => {
+  const q = new URLSearchParams()
+  if (params.sort) q.set('sort', params.sort)
+  if (params.suspicious) q.set('suspicious', '1')
+  if (params.limit) q.set('limit', String(params.limit))
+  return request<{ list: AuditIPStat[] }>(`/api/audit/ips?${q.toString()}`)
+}
+
+export const getAuditRecords = (params: { day?: string; ip?: string; limit?: number } = {}) => {
+  const q = new URLSearchParams()
+  if (params.day) q.set('day', params.day)
+  if (params.ip) q.set('ip', params.ip)
+  if (params.limit) q.set('limit', String(params.limit))
+  return request<{ list: AuditRecord[]; day?: string }>(`/api/audit/records?${q.toString()}`)
+}
+
+export const blockIP = (body: { ip: string; reason: string; minutes: number }) =>
+  requestWithMsg<unknown>('/api/audit/block', { method: 'POST', body: JSON.stringify(body) })
+
+export const unblockIP = (ip: string) =>
+  requestWithMsg<unknown>('/api/audit/unblock', { method: 'POST', body: JSON.stringify({ ip }) })
+
+export const blockIPBatch = (body: { ips: string[]; reason: string; minutes: number }) =>
+  request<{ ok: number; failed: Record<string, string>; total: number }>('/api/audit/block/batch', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const saveAuditSettings = (body: {
+  enabled: boolean
+  keepDays: number
+  maxFileMB: number
+  autoBlock: boolean
+  autoBlockThreshold: number
+  autoBlockMinutes: number
+  whitelist: string[]
+  trustedProxies: string[]
+}) => requestWithMsg<unknown>('/api/audit/settings', { method: 'POST', body: JSON.stringify(body) })
