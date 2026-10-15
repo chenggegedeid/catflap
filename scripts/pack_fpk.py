@@ -50,6 +50,7 @@ import tarfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FNOS = ROOT / "deploy" / "fnos"
+BRANDING = ROOT / "branding"
 OUT_DIR = ROOT / "dist"
 
 # manifest 里跟端口相关的字段，必须与 ui/config、cmd 保持一致
@@ -133,8 +134,11 @@ def main() -> int:
         version = m.group(1)
     print(f"打包 Catflap {version}（linux/{args.arch}）")
 
-    icon_256 = ROOT / "icon_256.png"
-    icon_64 = ROOT / "icon_64.png"
+    # 图标从品牌资产目录取。以前是根目录的 icon_256.png / icon_64.png，
+    # 品牌资产搬进 branding/ 之后根目录那两份就删了——这里必须跟着改，
+    # 否则打包会在"缺少图标"处炸掉，而 CI 上表现为整个 Release 被跳过。
+    icon_256 = BRANDING / "icon" / "icon-256.png"
+    icon_64 = BRANDING / "icon" / "tray-64.png"
     for p in (icon_256, icon_64):
         if not p.is_file():
             raise SystemExit(f"缺少图标：{p}")
