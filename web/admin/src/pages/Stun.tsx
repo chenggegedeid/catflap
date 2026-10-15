@@ -35,6 +35,7 @@ import { ProviderCap } from '../types'
 import type {
   NotifyChannel,
   Certificate,
+  Device,
   DdnsProvider,
   DdnsProviderTypeSpec,
   LanHost,
@@ -413,6 +414,7 @@ function getWebhookStatus(status?: StunStatusEvent) {
 
 function ServiceModal({
   deviceId,
+  onDeviceChange,
   initial,
   prefill,
   initialShowOnHome,
@@ -422,6 +424,8 @@ function ServiceModal({
   onToast,
 }: {
   deviceId: number
+  /** 换设备：服务会挪到另一台机器上，由父组件改 deviceId */
+  onDeviceChange: (id: number) => void
   initial?: StunService
   /** 新建时的初值：扫描里点端口、或者复制现有服务带过来的。改的时候以 initial 为准 */
   prefill?: Partial<ServiceFormState>
@@ -437,6 +441,20 @@ function ServiceModal({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [activeTab, setActiveTab] = useState<ServiceModalTab>('basic')
+
+  // 设备列表：服务要挂在某台设备上，和反代的服务表单同一套做法 ——
+  // 选设备而不是先去加设备。deviceId 为 0 时用户必须选一台。
+  const [devices, setDevices] = useState<Device[]>([])
+  useEffect(() => {
+    let alive = true
+    api
+      .getDevices()
+      .then((l) => alive && setDevices(l))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
   const [certs, setCerts] = useState<Certificate[]>([])
   // 通知渠道列表：给「通知渠道」那个页签做多选。拉不到不该拦住表单。
   const [channels, setChannels] = useState<NotifyChannel[]>([])
@@ -746,6 +764,30 @@ function ServiceModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {activeTab === 'basic' && (
             <div className="space-y-4">
+              {/*
+                设备：先选跑在哪台机器上，再填服务本身 ——
+                和反代的服务表单同一套顺序。**不是**先去加设备再来加服务：
+                设备列表是共用的，选一个就行。
+              */}
+              <label className="block">
+                <div className={fieldLabelCls}>设备</div>
+                <select
+                  value={deviceId || ''}
+                  onChange={(e) => onDeviceChange(Number(e.target.value) || 0)}
+                  className={fieldInputCls}
+                >
+                  <option value="">选择设备…</option>
+                  {devices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}（{d.ip}）
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-1 text-[11px] text-slate-400">
+                  服务会加在这台设备下。机器没在列表里就去「设备」页加一台。
+                </div>
+              </label>
+
               <div className="grid grid-cols-2 gap-3">
                 <label className="col-span-2 block sm:col-span-1">
                   <div className={fieldLabelCls}>服务名称</div>
@@ -2266,198 +2308,56 @@ export function Stun() {
     return <Card><div className="py-12 text-center text-sm text-slate-400">正在加载...</div></Card>
   }
 
-  return (
-    <div className="space-y-4">
-      {/* 网络拓扑 */}
-      <Card>
-        <CardHeader
-          title="基础网络与路由拓扑"
-          className="flex-wrap gap-2"
-          action={
-            <div className="flex max-w-full flex-wrap items-center justify-end gap-2 text-xs">
-              <span className="text-slate-400">最优 STUN:</span>
-              <span className="max-w-[220px] break-all text-right font-mono font-semibold text-blue-500 sm:max-w-none">
-                {config.bestStun || '--'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setStunServersOpen(true)}
-                title="编辑 STUN 服务器列表"
-                className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-              >
-                <Server className="h-3.5 w-3.5" /> 服务器
-              </button>
-              <button
-                type="button"
-                onClick={() => setNatTypeOpen(true)}
-                title="查看 NAT 类型详情"
-                className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-              >
-                <Info className="h-3.5 w-3.5" /> NAT 类型
-              </button>
-              <button
-                onClick={refresh}
-                className="ml-2 flex items-center gap-1 rounded-md text-slate-500 transition hover:text-blue-500"
-              >
-                <RotateCw className="h-3.5 w-3.5" /> 刷新
-              </button>
-            </div>
-          }
-        />
-        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-4">
-          <div className="flex min-w-[140px] flex-col items-center gap-1 rounded-xl bg-sky-50 px-4 py-3 ring-1 ring-sky-200">
-            <div className="flex items-center gap-1.5">
-              <Computer className="h-4 w-4 text-sky-500" />
-              <span className="text-xs font-semibold text-sky-600">本机 IP</span>
-            </div>
-            <span className="font-mono text-xs text-slate-600">{config.localIP || '--'}</span>
-          </div>
-          {[...(config.natRouterList || [])]
-            .sort((a, b) => a.natLevel - b.natLevel)
-            .map((r) => (
-              <div key={r.natLevel} className="flex items-center gap-2">
-                <ChevronRight className="h-4 w-4 text-slate-300" />
-                <div
-                  className={`flex min-w-[140px] flex-col items-center gap-1 rounded-xl px-4 py-3 ring-1 ${
-                    r.ipType === 'cgn' ? 'bg-violet-50 ring-violet-200' : 'bg-amber-50 ring-amber-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Wifi className={`h-4 w-4 ${r.ipType === 'cgn' ? 'text-violet-500' : 'text-amber-500'}`} />
-                    <span
-                      className={`text-xs font-semibold ${
-                        r.ipType === 'cgn' ? 'text-violet-600' : 'text-amber-600'
-                      }`}
-                    >
-                      {r.ipType === 'cgn' ? 'CGN 网关' : `路由 NAT ${r.natLevel}`}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs text-slate-600">{r.lanIP}</span>
-                </div>
-              </div>
-            ))}
-          <ChevronRight className="h-4 w-4 text-slate-300" />
-          <div className="flex min-w-[140px] flex-col items-center gap-1 rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200">
-            <div className="flex items-center gap-1.5">
-              <Globe className="h-4 w-4 text-emerald-500" />
-              <span className="text-xs font-semibold text-emerald-600">公网 IP</span>
-            </div>
-            <span className="font-mono text-xs text-slate-600">{config.publicIP || '--'}</span>
-          </div>
-        </div>
-      </Card>
+  // 拖动排序：设备和设备内的服务都能拖
+  const [dragDev, setDragDev] = useState(0)
+  const [overDev, setOverDev] = useState(0)
+  const [dragSvc, setDragSvc] = useState('')
+  const [overSvc, setOverSvc] = useState('')
 
-      {/* 设备 + 服务 */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-3">
-          <CardHeader title="设备列表" className="mb-2" />
-          {/* 这一栏窄，两个按钮跟标题挤一行会把标题挤断，单独占一行 */}
-          <div className="mb-3 flex items-center gap-2">
-            {/* 扫描摆在前面：不用去路由器后台翻 IP，是更省事的那条路 */}
-            <button
-              onClick={openScan}
-              disabled={scanOpening}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-500 px-2 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600 disabled:opacity-50"
-            >
-              {scanOpening ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Radar className="h-3.5 w-3.5" />
-              )}
-              扫描
-            </button>
-            <button
-              onClick={() => setDeviceModal({ open: true })}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-            >
-              <Plus className="h-3.5 w-3.5" /> 添加
-            </button>
-          </div>
-          {!config.devices || config.devices.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">暂无设备接入</div>
-          ) : (
-            <ul className="space-y-1.5">
-              {config.devices.map((d, idx) => {
-                const active = idx === selectedIndex
-                return (
-                  <li
-                    key={getDeviceId(d)}
-                    onClick={() => setSelectedIndex(idx)}
-                    className={`group relative cursor-pointer rounded-xl border px-3 py-2 transition ${
-                      active
-                        ? 'border-blue-200 bg-blue-50 text-blue-700'
-                        : 'border-transparent hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Server
-                        className={`h-4 w-4 shrink-0 ${active ? 'text-blue-500' : 'text-slate-400'}`}
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                        {d.name || '未知设备'}
-                      </span>
-                    </div>
-                    <div className="ml-6 truncate font-mono text-xs text-slate-400">{d.ip || '--'}</div>
-                    {/* 浮在右上角，不占位：选中/悬停时出现，行高不会跟着跳，名字也不用让出宽度 */}
-                    <div
-                      className={`absolute right-2 top-2 flex gap-0.5 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200 backdrop-blur transition ${
-                        active ? 'opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
-                      }`}
-                    >
-                      {/*
-                        设备的增删改**只在「设备」页做** —— 设备是穿透/反代/转发
-                        共用的一份，在每个功能页都能改的话不知道该在哪改；
-                        而且删设备要检查上面还有没有服务（穿透服务靠 deviceId
-                        关联，一删就静默失效），那套检查只在设备页才完整。
-                        这里给个入口跳过去，不在这儿改。
-                      */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          window.location.hash = '#/devices'
-                        }}
-                        title="在「设备」页管理这台机器"
-                        className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </Card>
+  /** 设备之间换顺序：把 from 挪到 to 的位置再提交 */
+  const commitDeviceOrder = async (from: number, to: number) => {
+    const list = config?.devices ?? []
+    const ids = list.map((d) => getDeviceId(d))
+    const i = ids.indexOf(from)
+    const j = ids.indexOf(to)
+    if (i < 0 || j < 0 || i === j) return
+    const [moved] = ids.splice(i, 1)
+    ids.splice(j, 0, moved)
+    try {
+      await api.reorderDevices(ids)
+      await refresh()
+    } catch (e) {
+      toast('排序保存失败: ' + (e instanceof Error ? e.message : ''))
+    }
+  }
 
-        <div className="lg:col-span-9">
-          <Card>
-            <CardHeader
-              title={device ? `${device.name} 的服务` : '服务列表'}
-              action={
-                device && (
-                  <button
-                    onClick={() =>
-                      setServiceModal({ open: true, deviceId: getDeviceId(device) })
-                    }
-                    className="flex items-center gap-1 rounded-md bg-blue-500 px-3 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
-                  >
-                    <Plus className="h-3 w-3" /> 添加服务
-                  </button>
-                )
-              }
-            />
-            {!device ? (
-              <div className="py-12 text-center text-sm text-slate-400">请从左侧选择设备</div>
-            ) : !device.services || device.services.length === 0 ? (
-              <div className="py-12 text-center text-sm text-slate-400">
-                该设备暂无服务配置，点击右上角"添加服务"开始配置
-              </div>
-            ) : (
-              // 按卡片最小宽度排，不按断点排：以前窗口一过 1280 就硬切三列，
-              // 卡片反而被压到 250 上下，服务名和协议标签全挤成两行
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-3">
-                {device.services.map((svc) => {
-                  const key = `${getDeviceId(device)}-${svc.id}`
+  /** 某台设备下的服务换顺序（只动这一台设备的） */
+  const commitServiceOrder = async (deviceId: number, from: number, to: number) => {
+    const dev = (config?.devices ?? []).find((d) => getDeviceId(d) === deviceId)
+    if (!dev?.services) return
+    const ids = dev.services.map((s2) => s2.id)
+    const i = ids.indexOf(from)
+    const j = ids.indexOf(to)
+    if (i < 0 || j < 0 || i === j) return
+    const [moved] = ids.splice(i, 1)
+    ids.splice(j, 0, moved)
+    try {
+      await api.reorderStunServices(deviceId, ids)
+      await refresh()
+    } catch (e) {
+      toast('排序保存失败: ' + (e instanceof Error ? e.message : ''))
+    }
+  }
+
+
+  /**
+   * 一张穿透服务卡片。
+   *
+   * 抽成函数是因为设备改成分组排版后，每个设备下都要渲染自己的服务 ——
+   * 和反代页的 SiteCard 是同一个套路：卡片逻辑不变，外层换容器。
+   */
+  const renderServiceCard = (dev: StunDevice, svc: StunService) => {
+                  const key = `${getDeviceId(dev)}-${svc.id}`
                   const status = statusMap[key]
                   const phase = status?.phaseStr || 'STOPPED'
                   const running = phase === 'RUNNING'
@@ -2472,7 +2372,7 @@ export function Stun() {
                   const webhookStatus = webhookEnabled ? getWebhookStatus(status) : null
                   // 停用的服务本来就不该跑，别拿「❌ 已停止」去吓人
                   const off = svc.enabled === false
-                  const busy = !!toggling[`${getDeviceId(device)}-${svc.id}`]
+                  const busy = !!toggling[`${getDeviceId(dev)}-${svc.id}`]
                   return (
                     <div
                       key={svc.id}
@@ -2498,7 +2398,7 @@ export function Stun() {
                           {svc.name || '未命名服务'}
                         </span>
                         <button
-                          onClick={() => toggleServiceEnabled(getDeviceId(device), svc)}
+                          onClick={() => toggleServiceEnabled(getDeviceId(dev), svc)}
                           disabled={busy}
                           title={busy ? '正在切换，打洞要几秒' : off ? '点一下启用' : '点一下停用'}
                           className={`grid h-6 w-6 place-items-center rounded-md transition disabled:cursor-wait ${
@@ -2514,7 +2414,7 @@ export function Stun() {
                           )}
                         </button>
                         <button
-                          onClick={() => toggleHome(getDeviceId(device), svc.id)}
+                          onClick={() => toggleHome(getDeviceId(dev), svc.id)}
                           title={inHome ? '从主页移除' : '添加到主页'}
                           className={`grid h-6 w-6 place-items-center rounded-md transition ${
                             inHome ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -2523,21 +2423,21 @@ export function Stun() {
                           <HomeIcon className="h-3 w-3" />
                         </button>
                         <button
-                          onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(device), initial: svc })}
+                          onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev), initial: svc })}
                           className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
                           title="编辑"
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
-                          onClick={() => copyService(getDeviceId(device), svc)}
+                          onClick={() => copyService(getDeviceId(dev), svc)}
                           className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
                           title="照着这个再开一个"
                         >
                           <Copy className="h-3 w-3" />
                         </button>
                         <button
-                          onClick={() => removeService(getDeviceId(device), svc)}
+                          onClick={() => removeService(getDeviceId(dev), svc)}
                           className="grid h-6 w-6 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
                           title="删除"
                         >
@@ -2671,7 +2571,319 @@ export function Stun() {
                       </button>
                     </div>
                   )
-                })}
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* 网络拓扑 */}
+      <Card>
+        <CardHeader
+          title="基础网络与路由拓扑"
+          className="flex-wrap gap-2"
+          action={
+            <div className="flex max-w-full flex-wrap items-center justify-end gap-2 text-xs">
+              <span className="text-slate-400">最优 STUN:</span>
+              <span className="max-w-[220px] break-all text-right font-mono font-semibold text-blue-500 sm:max-w-none">
+                {config.bestStun || '--'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setStunServersOpen(true)}
+                title="编辑 STUN 服务器列表"
+                className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+              >
+                <Server className="h-3.5 w-3.5" /> 服务器
+              </button>
+              <button
+                type="button"
+                onClick={() => setNatTypeOpen(true)}
+                title="查看 NAT 类型详情"
+                className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+              >
+                <Info className="h-3.5 w-3.5" /> NAT 类型
+              </button>
+              <button
+                onClick={refresh}
+                className="ml-2 flex items-center gap-1 rounded-md text-slate-500 transition hover:text-blue-500"
+              >
+                <RotateCw className="h-3.5 w-3.5" /> 刷新
+              </button>
+            </div>
+          }
+        />
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-4">
+          <div className="flex min-w-[140px] flex-col items-center gap-1 rounded-xl bg-sky-50 px-4 py-3 ring-1 ring-sky-200">
+            <div className="flex items-center gap-1.5">
+              <Computer className="h-4 w-4 text-sky-500" />
+              <span className="text-xs font-semibold text-sky-600">本机 IP</span>
+            </div>
+            <span className="font-mono text-xs text-slate-600">{config.localIP || '--'}</span>
+          </div>
+          {[...(config.natRouterList || [])]
+            .sort((a, b) => a.natLevel - b.natLevel)
+            .map((r) => (
+              <div key={r.natLevel} className="flex items-center gap-2">
+                <ChevronRight className="h-4 w-4 text-slate-300" />
+                <div
+                  className={`flex min-w-[140px] flex-col items-center gap-1 rounded-xl px-4 py-3 ring-1 ${
+                    r.ipType === 'cgn' ? 'bg-violet-50 ring-violet-200' : 'bg-amber-50 ring-amber-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Wifi className={`h-4 w-4 ${r.ipType === 'cgn' ? 'text-violet-500' : 'text-amber-500'}`} />
+                    <span
+                      className={`text-xs font-semibold ${
+                        r.ipType === 'cgn' ? 'text-violet-600' : 'text-amber-600'
+                      }`}
+                    >
+                      {r.ipType === 'cgn' ? 'CGN 网关' : `路由 NAT ${r.natLevel}`}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs text-slate-600">{r.lanIP}</span>
+                </div>
+              </div>
+            ))}
+          <ChevronRight className="h-4 w-4 text-slate-300" />
+          <div className="flex min-w-[140px] flex-col items-center gap-1 rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200">
+            <div className="flex items-center gap-1.5">
+              <Globe className="h-4 w-4 text-emerald-500" />
+              <span className="text-xs font-semibold text-emerald-600">公网 IP</span>
+            </div>
+            <span className="font-mono text-xs text-slate-600">{config.publicIP || '--'}</span>
+          </div>
+        </div>
+      </Card>
+
+      {/*
+        设备 + 服务：**和反代页同一套排版** —— 设备卡片下面挂它的服务卡片。
+        以前是左边一列设备、右边显示选中设备的服务，两个页面长得不一样。
+        统一管理成设备分组后，穿透和反代的操作方式是一致的。
+      */}
+      {/* 统一的「添加服务」入口：弹出表单里选设备 —— 和反代同一套做法，
+          不是先加设备再加服务。设备列表是共用的，选一台就行。 */}
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] leading-relaxed text-slate-400">
+          穿透服务按设备分组。加服务时选好设备，它会归到那台设备下面。
+        </div>
+        <button
+          onClick={() => setServiceModal({ open: true, deviceId: 0 })}
+          className="flex shrink-0 items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
+        >
+          <Plus className="h-3 w-3" /> 添加服务
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {(config?.devices ?? []).length === 0 ? (
+          <Card className="!p-0">
+            <div className="px-5 py-10 text-center">
+              <Server className="mx-auto h-8 w-8 text-slate-300" />
+              <p className="mt-2 text-sm text-slate-500">还没有设备</p>
+              <p className="mt-1 text-[11px] text-slate-400">
+                设备是穿透 / 反代 / 端口转发共用的一份，去「设备」页添加
+              </p>
+            </div>
+          </Card>
+        ) : (
+          (config?.devices ?? []).map((dev: StunDevice) => (
+            // 设备卡本身可拖（拖着换设备顺序）；里面的服务也能拖，
+            // 两者靠 dragDev / dragSvc 分开，互不干扰
+            <Card
+              key={getDeviceId(dev)}
+              className={`!p-0 ${overDev === getDeviceId(dev) && dragDev !== getDeviceId(dev) ? 'ring-2 ring-blue-300' : ''} ${dragDev === getDeviceId(dev) ? 'opacity-40' : ''}`}
+              draggable
+              onDragStart={() => setDragDev(getDeviceId(dev))}
+              onDragEnd={() => {
+                setDragDev(0)
+                setOverDev(0)
+              }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                if (getDeviceId(dev) !== overDev) setOverDev(getDeviceId(dev))
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (dragDev) void commitDeviceOrder(dragDev, getDeviceId(dev))
+              }}
+            >
+              {/* 设备头：和「设备」页、反代页同一套样式 */}
+              <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
+                  <Server className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-bold text-slate-800">{dev.name}</p>
+                  <p className="font-mono text-[10px] text-slate-400">{dev.ip}</p>
+                </div>
+                <span className="shrink-0 text-[11px] text-slate-400">
+                  {dev.services?.length ?? 0} 个服务
+                </span>
+                {/* 添加服务统一走页面顶部的按钮 —— 表单里选设备，
+                    和反代一样。这里不再按设备各放一个按钮。 */}
+                <button
+                  onClick={() =>
+                    setServiceModal({ open: true, deviceId: getDeviceId(dev) })
+                  }
+                  className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  title="给这台设备添加服务"
+                >
+                  <Plus className="h-3 w-3" /> 加服务
+                </button>
+              </div>
+
+              {!dev.services || dev.services.length === 0 ? (
+                <div className="px-3 py-6 text-center text-[11px] text-slate-400">
+                  这台机器上还没有穿透服务
+                </div>
+              ) : (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2.5 p-2.5">
+                  {(dev.services ?? []).map((svc) => (
+                    <div
+                      key={svc.id}
+                      draggable
+                      onDragStart={() => setDragSvc(`${getDeviceId(dev)}-${svc.id}`)}
+                      onDragEnd={() => {
+                        setDragSvc('')
+                        setOverSvc('')
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        const k = `${getDeviceId(dev)}-${svc.id}`
+                        if (k !== overSvc) setOverSvc(k)
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        if (dragSvc.startsWith(`${getDeviceId(dev)}-`)) {
+                          const from = Number(dragSvc.split('-').pop())
+                          void commitServiceOrder(getDeviceId(dev), from, svc.id)
+                        }
+                      }}
+                      className={`cursor-grab transition ${
+                        overSvc === `${getDeviceId(dev)}-${svc.id}` && dragSvc !== `${getDeviceId(dev)}-${svc.id}`
+                          ? 'ring-2 ring-blue-300'
+                          : ''
+                      } ${dragSvc === `${getDeviceId(dev)}-${svc.id}` ? 'opacity-40' : ''}`}
+                    >
+                      {renderServiceCard(dev, svc)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* 下面的旧布局保留原样，只是不再渲染（renderServiceCard 已抽出） */}
+      <div className="hidden">
+        <Card>
+          <CardHeader title="设备列表" className="mb-2" />
+          {/* 这一栏窄，两个按钮跟标题挤一行会把标题挤断，单独占一行 */}
+          <div className="mb-3 flex items-center gap-2">
+            {/* 扫描摆在前面：不用去路由器后台翻 IP，是更省事的那条路 */}
+            <button
+              onClick={openScan}
+              disabled={scanOpening}
+              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-500 px-2 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600 disabled:opacity-50"
+            >
+              {scanOpening ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Radar className="h-3.5 w-3.5" />
+              )}
+              扫描
+            </button>
+            <button
+              onClick={() => setDeviceModal({ open: true })}
+              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+            >
+              <Plus className="h-3.5 w-3.5" /> 添加
+            </button>
+          </div>
+          {!config.devices || config.devices.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400">暂无设备接入</div>
+          ) : (
+            <ul className="space-y-1.5">
+              {config.devices.map((d, idx) => {
+                const active = idx === selectedIndex
+                return (
+                  <li
+                    key={getDeviceId(d)}
+                    onClick={() => setSelectedIndex(idx)}
+                    className={`group relative cursor-pointer rounded-xl border px-3 py-2 transition ${
+                      active
+                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                        : 'border-transparent hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Server
+                        className={`h-4 w-4 shrink-0 ${active ? 'text-blue-500' : 'text-slate-400'}`}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                        {d.name || '未知设备'}
+                      </span>
+                    </div>
+                    <div className="ml-6 truncate font-mono text-xs text-slate-400">{d.ip || '--'}</div>
+                    {/* 浮在右上角，不占位：选中/悬停时出现，行高不会跟着跳，名字也不用让出宽度 */}
+                    <div
+                      className={`absolute right-2 top-2 flex gap-0.5 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200 backdrop-blur transition ${
+                        active ? 'opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+                      }`}
+                    >
+                      {/*
+                        设备的增删改**只在「设备」页做** —— 设备是穿透/反代/转发
+                        共用的一份，在每个功能页都能改的话不知道该在哪改；
+                        而且删设备要检查上面还有没有服务（穿透服务靠 deviceId
+                        关联，一删就静默失效），那套检查只在设备页才完整。
+                        这里给个入口跳过去，不在这儿改。
+                      */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.location.hash = '#/devices'
+                        }}
+                        title="在「设备」页管理这台机器"
+                        className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Card>
+
+        <div className="lg:col-span-9">
+          <Card>
+            <CardHeader
+              title={device ? `${device.name} 的服务` : '服务列表'}
+              action={
+                device && (
+                  <button
+                    onClick={() =>
+                      setServiceModal({ open: true, deviceId: getDeviceId(device) })
+                    }
+                    className="flex items-center gap-1 rounded-md bg-blue-500 px-3 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
+                  >
+                    <Plus className="h-3 w-3" /> 添加服务
+                  </button>
+                )
+              }
+            />
+            {!device ? (
+              <div className="py-12 text-center text-sm text-slate-400">请从左侧选择设备</div>
+            ) : !device.services || device.services.length === 0 ? (
+              <div className="py-12 text-center text-sm text-slate-400">
+                该设备暂无服务配置，点击右上角"添加服务"开始配置
+              </div>
+            ) : (
+              // 按卡片最小宽度排，不按断点排：以前窗口一过 1280 就硬切三列，
+              // 卡片反而被压到 250 上下，服务名和协议标签全挤成两行
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-3">
+  /**
               </div>
             )}
           </Card>
@@ -2703,6 +2915,9 @@ export function Stun() {
       {serviceModal.open && (
         <ServiceModal
           deviceId={serviceModal.deviceId}
+          onDeviceChange={(id) =>
+            setServiceModal((p) => ({ ...p, deviceId: id }))
+          }
           initial={serviceModal.initial}
           prefill={serviceModal.prefill}
           initialShowOnHome={
