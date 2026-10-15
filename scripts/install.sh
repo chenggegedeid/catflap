@@ -55,6 +55,14 @@ ACTION="install"
 # 时才进交互菜单。
 ARGS_GIVEN=0
 
+# 重跑自己时该写什么命令。直接写 $0 在 `curl ... | sudo bash` 这种管道执行下会
+# 变成尴尬的 "bash bash"（管道里 $0 就是 bash，前面再加一个 bash 就成了两个）。
+# 管道执行时没法照着原样重放，那就给最稳的写法。
+case "${0##*/}" in
+  bash|sh|-bash|dash) SELF="bash ${APP}-install.sh" ;;
+  *)                  SELF="bash $0" ;;
+esac
+
 # ── 小工具 ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
@@ -182,7 +190,7 @@ fi
 
 # ── 卸载 ────────────────────────────────────────────────────────────────────
 if [ "$ACTION" = "uninstall" ] || [ "$ACTION" = "purge" ]; then
-  [ "$(id -u)" -eq 0 ] || die "卸载需要 root：sudo bash $0 --uninstall"
+  [ "$(id -u)" -eq 0 ] || die "卸载需要 root：sudo ${SELF} --uninstall"
   log "停止并禁用服务"
   run systemctl stop "$APP" 2>/dev/null || true
   run systemctl disable "$APP" 2>/dev/null || true
@@ -239,9 +247,23 @@ log "架构：${ARCH} → 资产 ${ASSET}"
 # ── 版本号 ──────────────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then
   log "查询最新版本"
-  latest="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  # api.github.com 和 github.com（下载）是两个域名，被墙 / 被代理规则挡住的情况
+  # 经常只中一个。所以查询失败不必让用户去猜：直接告诉他怎么跳过这一步。
+  # 也能 -f 到 curl 的 stderr（比如代理返回 403）照原样打出来 —— 那是最有用的线索。
+  api_err="$(mktemp)"
+  latest="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>"$api_err" \
             | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -n1)"
-  [ -n "$latest" ] || die "查不到最新版本（网络不通，或仓库还没有 Release）。可以指定版本：--version v1.0.0"
+  if [ -z "$latest" ]; then
+    sed 's/^/    /' "$api_err" >&2
+    rm -f "$api_err"
+    die "查不到最新版本。
+  可以直接指定版本号跳过这一步（版本号见 https://github.com/${REPO}/releases）：
+    ${SELF} --version v1.0.0
+  若是网络问题，加代理或镜像前缀：
+    sudo env http_proxy=http://<代理>:<端口> ${SELF} --version v1.0.0
+    sudo ${SELF} --version v1.0.0 --mirror https://ghfast.top"
+  fi
+  rm -f "$api_err"
   # 拿到什么就信什么是危险的：API 偶尔返回空串、带换行或者别的东西，
   # 拼进 URL 之后 curl 只会说 "Malformed input to a URL function"，
   # 看不出真正原因。这里先把关，不合格就说清楚。
@@ -291,7 +313,10 @@ trap 'rm -rf "$tmpdir"' EXIT
 log "下载 ${ASSET}"
 curl -fsSL --retry 2 --max-time 300 -o "${tmpdir}/${ASSET}" "$BIN_URL" \
   || die "下载失败：${BIN_URL}
-  国内网络可以试试：CATFLAP_MIRROR=https://ghfast.top bash $0"
+  国内网络可以试试：
+    ${SELF} --version ${TAG} --mirror https://ghfast.top
+  或走代理：
+    sudo env http_proxy=http://<代理>:<端口> ${SELF} --version ${TAG}"
 
 # sha256 校验：SHA256SUMS 是给人看的（程序内部的更新校验用的是 GitHub API 的
 # digest），但安装时它是唯一能挡住「下到一半 / 被换成别的东西」的手段。
@@ -385,20 +410,31 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
+# 尽力取一个内网 IP 出来，省得用户自己去 ip a 里翻。
+# 用 ip route get：它走的是内核路由表，比解析 hostname -I 稳（后者多网卡 /
+# IPv6 优先时可能给出一个访问不到的地址）。取不到就退回占位符。
+lan_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)"
+[ -n "$lan_ip" ] || lan_ip="<这台机器的内网IP>"
+
 cat <<EOF
 
   Catflap ${TAG} 装好了。
 
-  本机初始化（首次必须在本机操作，程序会拒绝来自其它 IP 的初始化请求）：
-      http://127.0.0.1:${PORT_SHOWN}/catflap/
+  ⚠️ 请立刻打开下面的地址设置管理员密码。
 
-  之后从局域网其它设备访问：
-      http://<这台机器的内网IP>:${PORT_SHOWN}/catflap/
+      http://${lan_ip}:${PORT_SHOWN}/catflap/
+
+  这台机器上没浏览器也没关系：首次初始化**不限制来源**，局域网里任何设备的
+  浏览器都能打开。这是有意的取舍，理由见
+  docs/decisions/0005-初始化接口放开来源限制.md。
+
+  代价要知道：**在设置好密码之前，能访问到这个地址的人都可以抢先设置密码**，
+  而改密码需要旧密码 —— 也就是机器会被接管。所以别把它晾在那儿。
 
   常用命令：
       systemctl status catflap
       journalctl -u catflap -f
-      sudo bash $0 --uninstall
+      sudo ${SELF} --uninstall
 
 EOF
 
