@@ -10,12 +10,21 @@
 #   sudo bash install.sh --purge        # 卸载并删除配置与数据
 #   sudo bash install.sh --version v1.2.0
 #   sudo bash install.sh --dry-run      # 只打印将要做什么，不动手
+#   sudo bash install.sh --run-as-root  # 让服务进程用 root 跑（需要绑 80/443 时）
 #
 # 可选环境变量：
 #   CATFLAP_VERSION=1.0.0   装指定版本（不带 v 前缀也行）
 #   CATFLAP_MIRROR=<前缀>   下载慢时用它当前缀，例如
 #                           https://ghfast.top/https://github.com/...
 #   CATFLAP_PORT=8081       改监听端口（写进服务单元的 Environment）
+#   CATFLAP_RUN_AS=root     同上，让服务进程用 root 跑
+#
+# 关于「服务用什么账号跑」：
+#   默认建专用用户 catflap，不用 root —— 这个程序握着 DNS 服务商 Token、
+#   能把内网服务暴露到公网，用 root 跑的话任何一个漏洞都等于整机 root。
+#   **但这是默认值不是限制**：要绑 80/443、要动 iptables，就加 --run-as-root
+#   （那时候你清楚自己在放弃什么）。真正需要特权端口但不想给 root 的话，
+#   还有第三条路：保持非 root，在服务单元里放开 CAP_NET_BIND_SERVICE。
 #
 # 设计上刻意遵守的几条：
 #   - **不用 root 跑服务**：建专用用户 catflap，程序目录只读。面板能读写配置、
@@ -34,6 +43,8 @@ BIN="${INSTALL_DIR}/catflap"
 VERSION=""
 MIRROR="${CATFLAP_MIRROR:-}"
 PORT="${CATFLAP_PORT:-}"
+# 服务进程的运行账号。默认专用用户 catflap；给 root 则用 root 跑（见 --help 的说明）。
+RUN_AS="${CATFLAP_RUN_AS:-catflap}"
 DRY_RUN=0
 ACTION="install"
 
@@ -63,6 +74,7 @@ while [ $# -gt 0 ]; do
     --dry-run)   DRY_RUN=1; shift ;;
     --uninstall) ACTION="uninstall"; shift ;;
     --purge)     ACTION="purge"; shift ;;
+    --run-as-root) RUN_AS="root"; shift ;;
     -h|--help)
       # 只打印文件开头那段连续的注释，并且去掉行首的 "# "。
       # 之前写的是 sed -n '3,30p'，注释块结束之后就把代码也打出来了（REPO=… 之类），
@@ -179,14 +191,18 @@ else
 fi
 
 # ── 用户与目录 ──────────────────────────────────────────────────────────────
-if ! id -u "$APP" >/dev/null 2>&1; then
-  log "创建系统用户 ${APP}"
-  useradd --system --home-dir "$INSTALL_DIR" --shell /usr/sbin/nologin "$APP"
+if [ "$RUN_AS" = "root" ]; then
+  log "按你的选择：服务进程用 root 跑（跳过建专用用户）"
+else
+  if ! id -u "$APP" >/dev/null 2>&1; then
+    log "创建系统用户 ${APP}"
+    useradd --system --home-dir "$INSTALL_DIR" --shell /usr/sbin/nologin "$APP"
+  fi
 fi
 mkdir -p "$INSTALL_DIR"
 # 配置目录里有 DNS 服务商 Token 等明文凭据，必须 0700
 chmod 0700 "$INSTALL_DIR"
-chown -R "$APP":"$APP" "$INSTALL_DIR"
+chown -R "$RUN_AS":"$RUN_AS" "$INSTALL_DIR" 2>/dev/null || true
 
 # ── 换二进制 ────────────────────────────────────────────────────────────────
 if systemctl is-active --quiet "$APP" 2>/dev/null; then
@@ -207,10 +223,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# 专用用户 + 只读程序目录：面板能读写凭据、能把内网服务暴露到公网，
-# 用 root 跑是把风险放大一级。
-User=catflap
-Group=catflap
+# 运行账号由 --run-as-root / CATFLAP_RUN_AS 决定（默认专用用户 catflap）。
+# 用 root 时下面几条加固仍然生效，只是进程本身有完整权限 —— 这是你有意的取舍，
+# 不是默认值。
+UNIT
+  # User/Group 不能用 heredoc 直接写：那段是 <<'UNIT'（不展开变量），
+  # 写进去就变成字面量 ${RUN_AS}。和下面的 Environment 一样用 printf 输出。
+  printf 'User=%s\nGroup=%s\n' "$RUN_AS" "$RUN_AS"
+  cat <<'UNIT'
 WorkingDirectory=/opt/catflap
 ExecStart=/opt/catflap/catflap
 Restart=on-failure
