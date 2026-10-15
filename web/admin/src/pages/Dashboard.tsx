@@ -15,6 +15,7 @@ import {
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
 import { portText, siteAddr, siteURL } from './ReverseProxy'
+import { TrafficPanel } from './TrafficPanel'
 import type {
   Certificate,
   DdnsConfig,
@@ -236,6 +237,9 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4">
+      {/* 流量大屏：放在最前面 —— 进管理页第一眼想看的就是"现在流量怎么样" */}
+      <TrafficPanel />
+
       {/* 概览 + 快捷操作 */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <Card className="lg:col-span-7">

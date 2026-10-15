@@ -29,6 +29,8 @@ import type {
   StunConfig,
   StunNetwork,
   StunNetworkConfig,
+  TrafficRealtime,
+  TrafficTrend,
   UpdateConfig,
   UpdateStatus,
   WebhookConfig,
@@ -823,3 +825,15 @@ export const saveNotifyRule = (body: NotifyRuleSavePayload) =>
 
 export const deleteNotifyRule = (id: string) =>
   request<unknown>('/api/notify/rule/delete', { method: 'POST', body: JSON.stringify({ id }) })
+
+// ===================== 流量统计 =====================
+
+/**
+ * 实时速率 + 累计值。会被仪表盘每 2 秒调一次。
+ *
+ * 后端只读内存里的滚动窗口，不碰磁盘 —— 所以调这么频没问题。
+ */
+export const getTrafficRealtime = () => request<TrafficRealtime>('/api/traffic/realtime')
+
+/** 近 N 天趋势（默认 7 天） */
+export const getTrafficTrend = (days = 7) => request<TrafficTrend>(`/api/traffic/trend?days=${days}`)

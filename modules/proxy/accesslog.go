@@ -28,6 +28,10 @@ func withAccessLog(next http.Handler) http.Handler {
 			return
 		}
 
+		// 站点 ID 的容器要在这里创建：站点是里面 serve() 匹配出来的，
+		// 而我们要在它返回之后才统计 —— 得有个两边都能摸到的东西。
+		r = traffic.NewSiteRef(r)
+
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 

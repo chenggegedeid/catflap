@@ -27,22 +27,39 @@ func SetEnabled(on bool) { enabled.Store(on) }
 
 // ===================== 站点 ID 的传递 =====================
 //
-// 流量要按「服务」分组，但 withAccessLog 那层还不认识站点 —— 站点是
-// serve() 里 Match 出来的。用 context 把它带上来，比给每层都加参数干净。
+// 流量要按「服务」分组，但采集层（withAccessLog）**在 serve 外面** ——
+// 它是外层包装，站点是里面 Match 出来的。
 //
-// 用 context 也顺手让它天然跟着请求生命周期走，不会串。
+// 一开始我用 context 传，结果永远拿到 0：内层 `r = r.WithContext(...)`
+// 只改了它那个局部变量，外面的 r 根本没变（context 是不可变的）。
+// 所以这里改成**两边共享一个容器**：外层创建、内层填、外层读。
 
-type siteIDKey struct{}
-
-// WithSiteID 把站点 ID 塞进请求的 context（反代匹配到站点后调）
-func WithSiteID(r *http.Request, id uint) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), siteIDKey{}, id))
+// SiteRef 一次请求里，站点 ID 的共享容器。
+//
+// 不用 atomic：同一个请求只会被一个 goroutine 处理，写入发生在读取之前
+// （都在同一个同步调用链里）。多加同步是没必要的开销。
+type SiteRef struct {
+	ID uint
 }
 
-// SiteIDFromRequest 取站点 ID，没有就是 0（未匹配到站点的请求）
+type siteRefKey struct{}
+
+// NewSiteRef 在外层包装里创建容器并挂进 context，返回新的请求。
+func NewSiteRef(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), siteRefKey{}, &SiteRef{}))
+}
+
+// SetSiteID 内层匹配到站点后填进去。
+func SetSiteID(r *http.Request, id uint) {
+	if ref, ok := r.Context().Value(siteRefKey{}).(*SiteRef); ok {
+		ref.ID = id
+	}
+}
+
+// SiteIDFromRequest 外层读取。没挂容器或没匹配到站点就是 0。
 func SiteIDFromRequest(r *http.Request) uint {
-	if v, ok := r.Context().Value(siteIDKey{}).(uint); ok {
-		return v
+	if ref, ok := r.Context().Value(siteRefKey{}).(*SiteRef); ok {
+		return ref.ID
 	}
 	return 0
 }
