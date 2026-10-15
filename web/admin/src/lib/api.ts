@@ -42,6 +42,8 @@ import type {
   UpdateStatus,
   WebhookConfig,
   WebhookTemplate,
+  Device,
+  ProxyForward,
 } from '../types'
 
 interface ApiResponse<T> {
@@ -927,3 +929,24 @@ export const getAuditLogins = (params: { day?: string; ip?: string; limit?: numb
     `/api/audit/logins?${q.toString()}`,
   )
 }
+
+// ===================== 设备（三个功能共用一份） =====================
+
+export const getDevices = () => request<Device[]>('/api/device/list')
+
+export const saveDevice = (id: number, name: string, ip: string) =>
+  request<Device>('/api/device', { method: id ? 'PUT' : 'POST', body: JSON.stringify({ id, name, ip }) })
+
+export const deleteDevice = (id: number) =>
+  request<unknown>('/api/device', { method: 'DELETE', body: JSON.stringify({ id }) })
+
+// ===================== 端口转发 =====================
+
+export const saveForward = (f: Partial<ProxyForward>) =>
+  request<ProxyForward>('/api/proxy/forward', {
+    method: f.id ? 'PUT' : 'POST',
+    body: JSON.stringify(f),
+  })
+
+export const deleteForward = (id: number) =>
+  request<unknown>('/api/proxy/forward', { method: 'DELETE', body: JSON.stringify({ id }) })

@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"github.com/chenggegedeid/catflap/api/device_api"
 	"github.com/chenggegedeid/catflap/api/proxy_api"
 	"github.com/chenggegedeid/catflap/core/component"
 	"github.com/chenggegedeid/catflap/middleware"
@@ -11,6 +12,20 @@ import (
 
 func ProxyRouters(g *gin.RouterGroup) {
 	var app = proxy_api.ProxyApi{}
+	var dev = device_api.DeviceApi{}
+
+	// ---- 设备 ----
+	//
+	// 设备是公共概念（穿透 / 反代 / 端口转发共用一份），接口放在这里而不是
+	// stun_api —— 它不属于任何一个功能。挂在 proxy 路由文件里只是因为
+	// 一个组件只能贡献一次路由，而设备表主要是给反代和端口转发用的。
+	g.GET("device/list", dev.DeviceListView)
+	g.POST("device",
+		middleware.BindJsonMiddleware[device_api.DeviceSaveRequest], dev.DeviceSaveView)
+	g.PUT("device",
+		middleware.BindJsonMiddleware[device_api.DeviceSaveRequest], dev.DeviceSaveView)
+	g.DELETE("device",
+		middleware.BindJsonMiddleware[device_api.DeviceDeleteRequest], dev.DeviceDeleteView)
 
 	// 入口设置 + 监听状态 + 站点表，一次给全
 	g.GET(
@@ -59,6 +74,20 @@ func ProxyRouters(g *gin.RouterGroup) {
 	// 站点表单的可选项（域名、网段、本机地址）。在 api 层聚合，
 	// 不让 proxy 依赖 ddns —— 见 proxy_site_options.go 的说明。
 	g.GET("proxy/site-options", app.ProxySiteOptionsView)
+
+	// 端口转发（和站点分开：不看域名，纯端口映射）
+	g.POST(
+		"proxy/forward",
+		middleware.BindJsonMiddleware[proxy_api.ForwardSaveRequest],
+		app.ProxyForwardSaveView)
+	g.PUT(
+		"proxy/forward",
+		middleware.BindJsonMiddleware[proxy_api.ForwardSaveRequest],
+		app.ProxyForwardSaveView)
+	g.DELETE(
+		"proxy/forward",
+		middleware.BindJsonMiddleware[proxy_api.ForwardDeleteRequest],
+		app.ProxyForwardDeleteView)
 
 	// 站点的一键开关（启用 / 显示在主页），和穿透服务卡片的操作对齐
 	g.POST("proxy/site/flag",

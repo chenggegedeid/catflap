@@ -180,16 +180,20 @@ func (s Site) Label() string {
 // MigratePorts 把老配置的单端口字段迁到数组里。
 //
 // **幂等**：只在数组为空且老字段有值时搬，搬完把老字段清零。
-func (c *ProxyConfig) MigratePorts() {
+func (c *ProxyConfig) MigratePorts() bool {
+	changed := false
 	if len(c.HTTPPorts) == 0 && c.LegacyHTTPPort > 0 {
 		c.HTTPPorts = []int{c.LegacyHTTPPort}
+		changed = true
 	}
 	if len(c.HTTPSPorts) == 0 && c.LegacyHTTPSPort > 0 {
 		c.HTTPSPorts = []int{c.LegacyHTTPSPort}
+		changed = true
 	}
 	// 老字段不再写回
 	c.LegacyHTTPPort = 0
 	c.LegacyHTTPSPort = 0
+	return changed
 }
 
 // HTTPPortList 默认 HTTP 入口的端口列表（已去重、排序、剔掉非法值）。
@@ -236,7 +240,8 @@ const (
 //   - 没设过 Scheme 的老配置：HTTPS=false → http，HTTPS=true → auto
 //     （true 对应"HTTP 和 HTTPS 都挂"，就是自动）
 //   - 已经有 Scheme 的：不动
-func (c *ProxyConfig) MigrateScheme() {
+func (c *ProxyConfig) MigrateScheme() bool {
+	changed := false
 	for i := range c.Sites {
 		s := &c.Sites[i]
 		if s.Scheme != "" {
@@ -248,7 +253,9 @@ func (c *ProxyConfig) MigrateScheme() {
 			s.Scheme = SchemeHTTP
 		}
 		// HTTPS 字段不再作为主要依据，但保留值以免别处还在读
+		changed = true
 	}
+	return changed
 }
 
 // WantsHTTP 这个站点要不要挂在 HTTP 入口上

@@ -163,3 +163,46 @@ func (ProxyApi) ProxySiteFlagView(c *gin.Context) {
 	}
 	res.OkWithData(saved, c)
 }
+
+// ===================== 端口转发 =====================
+
+type ForwardSaveRequest struct {
+	ID          uint   `json:"id"` // 0 = 新增
+	ListenPort  int    `json:"listenPort"`
+	Target      string `json:"target"`
+	Protocol    string `json:"protocol"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description"`
+}
+
+type ForwardDeleteRequest struct {
+	ID uint `json:"id"`
+}
+
+// ProxyForwardSaveView 新增或修改一条端口转发
+func (ProxyApi) ProxyForwardSaveView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ForwardSaveRequest](c)
+	saved, err := proxy.SaveForward(proxymodel.Forward{
+		ID:          cr.ID,
+		ListenPort:  cr.ListenPort,
+		Target:      cr.Target,
+		Protocol:    cr.Protocol,
+		Enabled:     cr.Enabled,
+		Description: cr.Description,
+	})
+	if err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithData(saved, c)
+}
+
+// ProxyForwardDeleteView 删一条端口转发
+func (ProxyApi) ProxyForwardDeleteView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ForwardDeleteRequest](c)
+	if err := proxy.DeleteForward(cr.ID); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithMsg("已删除", c)
+}
