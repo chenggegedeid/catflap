@@ -13,7 +13,7 @@ import (
 // 用户配好的「域名+端口」很快失效。修复就是把用户配的固定本机端口带进
 // STUNRequest，让 Run 优先绑定它。
 func TestBuildSTUNRequestCarriesPunchLocalPort(t *testing.T) {
-	device := &model.Device{DeviceID: 1, IP: "192.168.9.5"}
+	device := &model.Device{DeviceID: 1, IP: "192.168.1.10"}
 	service := &model.Service{
 		ID:             1,
 		Name:           "nas",
