@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
-  BookmarkPlus,
   ChevronRight,
   ClipboardCopy,
   Computer,
@@ -13,7 +12,6 @@ import {
   Globe,
   Home as HomeIcon,
   Info,
-  LayoutTemplate,
   LoaderCircle,
   Pencil,
   Plus,
@@ -34,6 +32,7 @@ import * as api from '../lib/api'
 import { hasCapability, loadProviderTypes } from '../lib/providerTypes'
 import { ProviderCap } from '../types'
 import type {
+  NotifyChannel,
   Certificate,
   DdnsProvider,
   DdnsProviderTypeSpec,
@@ -50,7 +49,6 @@ import type {
   StunService,
   StunStatusEvent,
   WebhookConfig,
-  WebhookTemplate,
 } from '../types'
 
 const phaseLabel: Record<string, string> = {
@@ -450,6 +448,8 @@ interface ServiceFormState {
   showOnHome: boolean
   description: string
   webhookconfig: WebhookConfig
+  /** 选用的全局通知渠道 ID（渠道本身在通知页配置） */
+  channelIds: string[]
   redirect: RedirectConfig
   mcEntry: MCEntryConfig
 }
@@ -498,7 +498,6 @@ const emptyWebhook: WebhookConfig = {
   proxy: '',
 }
 
-const webhookMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 
 const emptyService: ServiceFormState = {
   name: '',
@@ -514,6 +513,7 @@ const emptyService: ServiceFormState = {
   showOnHome: false,
   description: '',
   webhookconfig: emptyWebhook,
+  channelIds: [],
   redirect: emptyRedirect,
   mcEntry: emptyMCEntry,
 }
@@ -588,6 +588,7 @@ function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState 
     showOnHome,
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
+    channelIds: [...(svc.channelIds ?? [])],
     redirect: { ...emptyRedirect, ...(svc.redirect ?? {}) },
     mcEntry: { ...emptyMCEntry, ...(svc.mcEntry ?? {}) },
   }
@@ -615,6 +616,7 @@ function serviceToPayload(deviceId: number, svc: StunService): api.StunServicePa
     enabled: svc.enabled !== false,
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
+    channelIds: [...(svc.channelIds ?? [])],
     redirect: { ...emptyRedirect, ...(svc.redirect ?? {}) },
     mcEntry: { ...emptyMCEntry, ...(svc.mcEntry ?? {}) },
   }
@@ -660,13 +662,10 @@ function ServiceModal({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [activeTab, setActiveTab] = useState<ServiceModalTab>('basic')
-  const [selectedTemplateId, setSelectedTemplateId] = useState('')
-  const [templates, setTemplates] = useState<WebhookTemplate[]>([])
-  const [templatesLoading, setTemplatesLoading] = useState(false)
-  const [templateBusy, setTemplateBusy] = useState(false)
-  const [templateName, setTemplateName] = useState('')
-  const [templateDescription, setTemplateDescription] = useState('')
   const [certs, setCerts] = useState<Certificate[]>([])
+  // 通知渠道列表：给「通知渠道」那个页签做多选。拉不到不该拦住表单。
+  const [channels, setChannels] = useState<NotifyChannel[]>([])
+  const [channelsLoading, setChannelsLoading] = useState(false)
   const [redirectProviders, setRedirectProviders] = useState<DdnsProvider[]>([])
   const [providerTypes, setProviderTypes] = useState<DdnsProviderTypeSpec[]>([])
   const [ddnsHosts, setDdnsHosts] = useState<string[]>([])
@@ -674,6 +673,24 @@ function ServiceModal({
   const [inspect, setInspect] = useState<RedirectInspection | null>(null)
   const [inspecting, setInspecting] = useState(false)
   const [inspectErr, setInspectErr] = useState('')
+
+  // 通知渠道同理：拉不到就显示"还没有渠道"，用户去通知页建一个
+  useEffect(() => {
+    let alive = true
+    setChannelsLoading(true)
+    api
+      .getNotifyConfig()
+      .then((cfg) => {
+        if (alive) setChannels(cfg.channels ?? [])
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (alive) setChannelsLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // 证书列表拿不到不该拦住整个服务表单，失败就当没有证书
   useEffect(() => {
@@ -853,121 +870,10 @@ function ServiceModal({
   const domainRequired = tlsOn && Number(form.certId) !== 0 && certDomains.length > 0
   const domainCovered = certDomains.some((d) => matchCertDomain(d, domainValue))
 
-  const refreshWebhookTemplates = useCallback(async () => {
-    setTemplatesLoading(true)
-    try {
-      const list = await api.getWebhookTemplates()
-      setTemplates(
-        list.map((item) => ({
-          ...item,
-          config: normalizeWebhook(item.config),
-        })),
-      )
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '读取模板失败')
-    } finally {
-      setTemplatesLoading(false)
-    }
-  }, [])
 
-  useEffect(() => {
-    refreshWebhookTemplates()
-  }, [refreshWebhookTemplates])
 
-  const updateWebhook = (patch: Partial<WebhookConfig>) => {
-    setForm((p) => ({
-      ...p,
-      webhookconfig: {
-        ...p.webhookconfig,
-        ...patch,
-      },
-    }))
-  }
 
-  const applyWebhookTemplate = (templateId: string) => {
-    const template = templates.find((item) => item.id === templateId)
-    if (!template) return
-    setForm((p) => ({
-      ...p,
-      webhookconfig: normalizeWebhook(template.config),
-    }))
-    setSelectedTemplateId(templateId)
-    setTemplateName(template.builtin ? '' : template.name)
-    setTemplateDescription(template.builtin ? '' : template.description)
-    setActiveTab('webhook')
-  }
 
-  const saveCurrentWebhookTemplate = async () => {
-    const name = templateName.trim()
-    if (!name) {
-      setErr('请填写模板名称')
-      return
-    }
-    setTemplateBusy(true)
-    try {
-      const created = await api.addWebhookTemplate({
-        name,
-        description: templateDescription.trim(),
-        config: normalizeWebhook(form.webhookconfig),
-      })
-      setTemplates((p) => [...p, { ...created, config: normalizeWebhook(created.config) }])
-      setSelectedTemplateId(created.id)
-      setTemplateName('')
-      setTemplateDescription('')
-      setErr('')
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '保存模板失败')
-    } finally {
-      setTemplateBusy(false)
-    }
-  }
-
-  const updateCurrentWebhookTemplate = async () => {
-    const current = templates.find((item) => item.id === selectedTemplateId)
-    if (!current || current.builtin) {
-      setErr('请选择一个自定义模板')
-      return
-    }
-    const name = templateName.trim()
-    if (!name) {
-      setErr('请填写模板名称')
-      return
-    }
-    setTemplateBusy(true)
-    try {
-      const updated = await api.updateWebhookTemplate({
-        id: current.id,
-        name,
-        description: templateDescription.trim(),
-        config: normalizeWebhook(form.webhookconfig),
-      })
-      setTemplates((p) =>
-        p.map((item) => (
-          item.id === updated.id ? { ...updated, config: normalizeWebhook(updated.config) } : item
-        )),
-      )
-      setErr('')
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '更新模板失败')
-    } finally {
-      setTemplateBusy(false)
-    }
-  }
-
-  const deleteSavedWebhookTemplate = async (templateId: string) => {
-    setTemplateBusy(true)
-    try {
-      await api.deleteWebhookTemplate(templateId)
-      setTemplates((p) => p.filter((item) => item.id !== templateId))
-      if (selectedTemplateId === templateId) setSelectedTemplateId('')
-      setTemplateName('')
-      setTemplateDescription('')
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '删除模板失败')
-    } finally {
-      setTemplateBusy(false)
-    }
-  }
 
   const submit = async () => {
     if (!form.name.trim()) {
@@ -1288,215 +1194,70 @@ function ServiceModal({
 
           {activeTab === 'webhook' && (
             <div className="mx-auto max-w-2xl">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={form.webhookconfig.enabled}
-                  onChange={(e) => updateWebhook({ enabled: e.target.checked })}
-                  className="h-3.5 w-3.5"
-                />
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
                 <Send className="h-4 w-4 text-blue-500" />
-                Webhook
-              </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => updateWebhook({ enabled: !form.webhookconfig.enabled })}
-                    className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
-                      form.webhookconfig.enabled
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                    }`}
-                  >
-                    {form.webhookconfig.enabled ? '已启用' : '未启用'}
-                  </button>
-                </div>
+                通知渠道
+              </div>
+              <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500">
+                渠道在「通知」页里统一配置（推送地址、token 都存那儿），这里只选用 ——
+                同一个群机器人被多个服务用的时候，改一次全都跟着变。
+                <a href="#/notify" className="ml-1 text-blue-600 underline-offset-2 hover:underline">
+                  去配置渠道 ↗
+                </a>
               </div>
 
-              <div className="mb-4 rounded-xl bg-slate-50 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-600">
-                  <LayoutTemplate className="h-3.5 w-3.5 text-blue-500" />
-                  选择模板，填入下方表单
+              {channelsLoading ? (
+                <div className="rounded-xl border border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                  正在加载渠道…
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {templatesLoading && (
-                    <div className="w-44 shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-400">
-                      模板加载中...
+              ) : channels.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400">
+                  还没有任何通知渠道。
+                  <a href="#/notify" className="ml-1 text-blue-600 underline-offset-2 hover:underline">
+                    去添加一个
+                  </a>
+                  ，之后这个服务就能选它来发通知了。
+                </div>
+              ) : (
+                <div className="space-y-1.5 rounded-xl border border-slate-200 p-3">
+                  {channels.map((ch) => (
+                    <label key={ch.id} className="flex cursor-pointer items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={form.channelIds.includes(ch.id)}
+                        onChange={(e) =>
+                          setForm((p) => ({
+                            ...p,
+                            channelIds: e.target.checked
+                              ? [...p.channelIds, ch.id]
+                              : p.channelIds.filter((id) => id !== ch.id),
+                          }))
+                        }
+                      />
+                      <span className={ch.enabled ? 'text-slate-700' : 'text-slate-400'}>
+                        {ch.name}
+                        {!ch.enabled && '（已停用，勾了也不会发）'}
+                      </span>
+                    </label>
+                  ))}
+                  {form.channelIds.length === 0 && (
+                    <div className="pt-1 text-[11px] text-slate-400">
+                      一个都不选 = 这个服务不发通知。
                     </div>
                   )}
-                  {!templatesLoading && templates.length === 0 && (
-                    <div className="w-44 shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-400">
-                      暂无模板
-                    </div>
-                  )}
-                  {templates.map((template) => (
-                    <div
-                      key={template.id}
-                      className={`flex w-52 shrink-0 items-start gap-2 rounded-xl border bg-white p-2.5 transition ${
-                        selectedTemplateId === template.id
-                          ? 'border-blue-400 bg-blue-50/70'
-                          : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/60'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => applyWebhookTemplate(template.id)}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate text-xs font-bold text-slate-700">{template.name}</span>
-                          {template.builtin && (
-                            <span className="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-[10px] font-semibold text-blue-500">
-                              内置
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-400">{template.description}</div>
-                        <div className="mt-2 truncate font-mono text-[10px] text-slate-400">
-                          {template.config.method} {template.config.url || '未填写 URL'}
-                        </div>
-                      </button>
-                      {!template.builtin && (
-                        <button
-                          type="button"
-                          disabled={templateBusy}
-                          onClick={() => deleteSavedWebhookTemplate(template.id)}
-                          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40"
-                          title="删除模板"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
                 </div>
-              </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2 block sm:col-span-1">
-                <div className="mb-1 text-xs font-semibold text-slate-500">请求方法</div>
-                <select
-                  value={form.webhookconfig.method}
-                  disabled={!form.webhookconfig.enabled}
-                  onChange={(e) => updateWebhook({ method: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
-                >
-                  {webhookMethods.map((method) => (
-                    <option key={method} value={method}>{method}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="col-span-2 block sm:col-span-1">
-                <div className="mb-1 text-xs font-semibold text-slate-500">代理（可选）</div>
-                <input
-                  value={form.webhookconfig.proxy}
-                  disabled={!form.webhookconfig.enabled}
-                  onChange={(e) => updateWebhook({ proxy: e.target.value })}
-                  placeholder="http://127.0.0.1:7890"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </label>
-              <label className="col-span-2 block">
-                <div className="mb-1 text-xs font-semibold text-slate-500">Webhook URL</div>
-                <input
-                  value={form.webhookconfig.url}
-                  disabled={!form.webhookconfig.enabled}
-                  onChange={(e) => updateWebhook({ url: e.target.value })}
-                  placeholder="https://example.com/hook?addr=#{address}"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </label>
-              <label className="col-span-2 block">
-                <div className="mb-1 text-xs font-semibold text-slate-500">Headers</div>
-                <textarea
-                  value={form.webhookconfig.headers}
-                  disabled={!form.webhookconfig.enabled}
-                  onChange={(e) => updateWebhook({ headers: e.target.value })}
-                  rows={3}
-                  placeholder={'Content-Type: application/json\nAuthorization: Bearer xxx'}
-                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </label>
-              {/* CF 重定向那份模板的 JSON 就有十几行，原来 4 行的框要一直滚才能看全一对括号 */}
-              <label className="col-span-2 block">
-                <div className="mb-1 text-xs font-semibold text-slate-500">Body</div>
-                <textarea
-                  value={form.webhookconfig.body}
-                  disabled={!form.webhookconfig.enabled}
-                  onChange={(e) => updateWebhook({ body: e.target.value })}
-                  rows={14}
-                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs leading-5 outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </label>
-              <div className="col-span-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={form.webhookconfig.onlyWhenChanged}
-                    disabled={!form.webhookconfig.enabled}
-                    onChange={(e) => updateWebhook({ onlyWhenChanged: e.target.checked })}
-                    className="h-3.5 w-3.5"
-                  />
-                  地址变化时才触发
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={form.webhookconfig.disableSuccessCheck}
-                    disabled={!form.webhookconfig.enabled}
-                    onChange={(e) => updateWebhook({ disableSuccessCheck: e.target.checked })}
-                    className="h-3.5 w-3.5"
-                  />
-                  只检查 HTTP 2xx
-                </label>
-              </div>
-              {!form.webhookconfig.disableSuccessCheck && (
-                <label className="col-span-2 block">
-                  <div className="mb-1 text-xs font-semibold text-slate-500">成功包含文本</div>
-                  <input
-                    value={form.webhookconfig.successContains}
-                    disabled={!form.webhookconfig.enabled}
-                    onChange={(e) => updateWebhook({ successContains: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
-                  />
-                </label>
               )}
-              <div className="col-span-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-                <input
-                  value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  placeholder="模板名称"
-                  className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
-                />
-                <input
-                  value={templateDescription}
-                  onChange={(e) => setTemplateDescription(e.target.value)}
-                  placeholder="模板描述"
-                  className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
-                />
-                <button
-                  type="button"
-                  onClick={saveCurrentWebhookTemplate}
-                  disabled={templateBusy}
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-500 text-white shadow-sm shadow-blue-500/20 transition hover:bg-blue-600 disabled:opacity-50"
-                  title="保存当前为模板"
-                >
-                  <BookmarkPlus className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={updateCurrentWebhookTemplate}
-                  disabled={templateBusy || !selectedTemplateId || templates.find((item) => item.id === selectedTemplateId)?.builtin}
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-700 text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-40"
-                  title="更新选中的自定义模板"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
+
+              {form.webhookconfig.url !== '' && (
+                <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-700 ring-1 ring-amber-200">
+                  这个服务原来配过内联 Webhook（{form.webhookconfig.url}）。
+                  它已被迁移成一个全局渠道，原来的配置保留着没动 ——
+                  如果迁移结果不对，可以在通知页打开「回退」退回旧行为。
+                </div>
+              )}
             </div>
           )}
+
 
           {activeTab === 'redirect' && form.protocol === 'TCP' && (
             <div className="mx-auto max-w-2xl">
@@ -2538,6 +2299,8 @@ export function Stun() {
       ...formToPayloadTLS(form),
       enabled: form.enabled,
       description: form.description.trim(),
+      // channelIds 是服务自己的字段（渠道 ID 列表），不属于 webhookconfig
+      channelIds: form.channelIds,
       webhookconfig: {
         ...form.webhookconfig,
         url: form.webhookconfig.url.trim(),
