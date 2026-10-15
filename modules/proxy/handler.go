@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"github.com/chenggegedeid/catflap/modules/audit"
 	"github.com/chenggegedeid/catflap/modules/traffic"
 
 	"context"
@@ -37,6 +38,13 @@ func newHandler(currentRouter func() *Router) http.Handler {
 func serve(router *Router, w http.ResponseWriter, r *http.Request) {
 	if router == nil {
 		writeNoSite(w, r, r.Host, nil)
+		return
+	}
+
+	// 全局封禁：放在最前面，优先于站点规则。
+	// 被拉黑的 IP 不该有机会碰到任何站点的规则判断（那也是一次处理开销）。
+	if b, blocked := audit.IsBlocked(clientIP(r)); blocked {
+		writeBlocked(w, r, b)
 		return
 	}
 

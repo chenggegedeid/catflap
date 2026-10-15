@@ -1,0 +1,158 @@
+package audit
+
+import (
+	"testing"
+	"time"
+)
+
+// 「可疑」的判据是安全功能的核心：判宽了把自己人封了，判严了扫描器漏过去。
+func TestSuspiciousJudgement(t *testing.T) {
+	cases := []struct {
+		name string
+		st   IPStat
+		want bool
+	}{
+		{
+			name: "扫描器：大量 404",
+			st:   IPStat{Requests: 12847, Errors: 12801},
+			want: true,
+		},
+		{
+			name: "正常服务：偶尔 404",
+			st:   IPStat{Requests: 5000, Errors: 120},
+			want: false, // 占比 2.4%，正常
+		},
+		{
+			name: "样本太少：自己点两下",
+			st:   IPStat{Requests: 3, Errors: 3},
+			want: false, // 100% 但只有 3 次，不说明问题
+		},
+		{
+			name: "刚好过错误数门槛且占比高",
+			st:   IPStat{Requests: 60, Errors: 50},
+			want: true, // 50 次错误是门槛，占比 83%
+		},
+		{
+			name: "错误够多但占比低：说明是正常服务被调错",
+			st:   IPStat{Requests: 100000, Errors: 2000},
+			want: false, // 2%
+		},
+		{
+			name: "没有任何请求",
+			st:   IPStat{Requests: 0, Errors: 0},
+			want: false,
+		},
+	}
+
+	for _, c := range cases {
+		if got := c.st.Suspicious(); got != c.want {
+			t.Errorf("%s：期望 %v，实际 %v（请求 %d 错误 %d）",
+				c.name, c.want, got, c.st.Requests, c.st.Errors)
+		}
+	}
+}
+
+// 临时封禁到期后要失效
+func TestBlockEntryExpiry(t *testing.T) {
+	now := time.Now()
+
+	permanent := BlockEntry{IP: "1.2.3.4"}
+	if permanent.Expired(now) {
+		t.Fatal("没设到期时间的应视为永久，不该过期")
+	}
+
+	past := BlockEntry{IP: "1.2.3.4", ExpiresAt: now.Add(-time.Minute)}
+	if !past.Expired(now) {
+		t.Fatal("已过期的应判为过期")
+	}
+
+	future := BlockEntry{IP: "1.2.3.4", ExpiresAt: now.Add(time.Hour)}
+	if future.Expired(now) {
+		t.Fatal("还没到期的不该判过期")
+	}
+}
+
+// 路径去重且封顶：被扫的 IP 能刷出几万条不同路径，
+// 不封顶的话 ipstats.json 会涨到几十 MB
+func TestAddCappedDedupAndLimit(t *testing.T) {
+	var list []string
+	// 重复的只记一次
+	list = addCapped(list, "/a", 3)
+	list = addCapped(list, "/a", 3)
+	if len(list) != 1 {
+		t.Fatalf("重复项应去重，实际 %v", list)
+	}
+
+	// 超过上限不再加
+	list = addCapped(list, "/b", 3)
+	list = addCapped(list, "/c", 3)
+	list = addCapped(list, "/d", 3)
+	if len(list) != 3 {
+		t.Fatalf("应封顶在 3，实际 %d：%v", len(list), list)
+	}
+	// 但已记的不能丢
+	if list[0] != "/a" {
+		t.Fatalf("已记的项不该被挤掉：%v", list)
+	}
+
+	// 空字符串不记
+	list2 := addCapped(nil, "", 3)
+	if len(list2) != 0 {
+		t.Fatalf("空字符串不该记，实际 %v", list2)
+	}
+}
+
+// IP / CIDR 解析：封禁要支持网段，也要拒绝乱七八糟的输入
+func TestParseCIDROrIP(t *testing.T) {
+	if parseCIDROrIP("192.168.1.10") == nil {
+		t.Fatal("单个 IP 应该能解析")
+	}
+	if parseCIDROrIP("203.0.113.0/24") == nil {
+		t.Fatal("CIDR 应该能解析")
+	}
+	if parseCIDROrIP("2001:db8::1") == nil {
+		t.Fatal("IPv6 应该能解析")
+	}
+	// 这些不该被当成有效目标
+	for _, bad := range []string{"", "  ", "example.com", "192.168.1.999", "not-an-ip"} {
+		if parseCIDROrIP(bad) != nil {
+			t.Errorf("%q 不该被解析成有效网段", bad)
+		}
+	}
+}
+
+// 网段匹配
+func TestMatchAny(t *testing.T) {
+	nets := parseNets([]string{"203.0.113.0/24", "192.168.1.10"})
+
+	if !matchAny(nets, "203.0.113.99") {
+		t.Fatal("网段内的地址应匹配")
+	}
+	if !matchAny(nets, "192.168.1.10") {
+		t.Fatal("单个 IP 应精确匹配")
+	}
+	if matchAny(nets, "192.168.1.11") {
+		t.Fatal("不在名单里的不该匹配")
+	}
+	if matchAny(nets, "not-an-ip") {
+		t.Fatal("解析不了的输入不该匹配")
+	}
+}
+
+// 手动封禁在前、自动在后 —— 自动的可能误伤，排后面便于复查
+func TestSortBlocksManualFirst(t *testing.T) {
+	now := time.Now()
+	list := []BlockEntry{
+		{IP: "auto-new", Auto: true, AddedAt: now},
+		{IP: "manual-old", Auto: false, AddedAt: now.Add(-time.Hour)},
+		{IP: "manual-new", Auto: false, AddedAt: now},
+	}
+	sortBlocks(list)
+
+	if list[0].IP != "manual-new" || list[1].IP != "manual-old" {
+		t.Fatalf("手动封禁应排前面且新的在前，实际 %v", []string{list[0].IP, list[1].IP, list[2].IP})
+	}
+	if list[2].IP != "auto-new" {
+		t.Fatalf("自动封禁应排最后，实际 %v", list[2].IP)
+	}
+}

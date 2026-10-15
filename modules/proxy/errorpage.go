@@ -75,6 +75,9 @@ func writeOriginUnreachable(w http.ResponseWriter, req *http.Request, host, back
 //
 // 把已配置的域名列出来——用户十有八九是把域名拼错了，或者忘了那个站点没启用。
 func writeNoSite(w http.ResponseWriter, req *http.Request, hostHeader string, hosts []string) {
+	// 没匹配到站点也是"门禁拒绝"：扫描器常拿不存在的域名来试。
+	// 这类响应不该计入访问统计（否则光扫域名就能把错误数刷上去）
+	markDenied(w)
 	setNoStoreHeaders(w.Header())
 
 	if !wantsHTML(req) {

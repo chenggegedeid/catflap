@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/chenggegedeid/catflap/modules/audit"
 	"github.com/chenggegedeid/catflap/modules/traffic"
 
 	"github.com/sirupsen/logrus"
@@ -57,6 +58,28 @@ func withAccessLog(next http.Handler) http.Handler {
 		if traffic.Enabled() {
 			traffic.Record(siteID, bytesIn, rec.bytesOut, rec.status)
 		}
+
+		// 访问审计：记结构化记录（与日志独立，见 docs/design/日志规范.md）。
+		// **不记 query string** —— URL 里可能带 token，而这份记录要长期保留。
+		//
+		// 但**被自己封禁拒绝的请求不记**：那个 403 是我们发的，不是对方的问题。
+		// 记进去会让被拉黑 IP 的错误数继续涨（而它已经封了），
+		// 统计上看着像"封了还在扫"，其实是自己数自己。
+		if audit.Enabled() && !rec.denied {
+			audit.RecordAccess(audit.Record{
+				Time:       start,
+				IP:         clientIP(r),
+				Method:     r.Method,
+				Host:       r.Host,
+				Path:       r.URL.Path,
+				Status:     rec.status,
+				BytesIn:    bytesIn,
+				BytesOut:   rec.bytesOut,
+				DurationMs: time.Since(start).Milliseconds(),
+				UserAgent:  r.UserAgent(),
+				SiteID:     siteID,
+			})
+		}
 	})
 }
 
@@ -89,7 +112,33 @@ type statusRecorder struct {
 	status   int
 	written  bool
 	bytesOut int64
+	// denied 这个响应是"门禁拒绝"（全局封禁 / 站点白黑名单 / 无匹配站点）。
+	// 审计要跳过它们，理由见 withAccessLog 里的注释。
+	denied bool
 }
+
+// markDenied 从 ResponseWriter 反查我们那层包装并打标记。
+//
+// 门禁的响应函数拿到的 w 可能是被包过的（中间还可能有别的包装），
+// 所以用 Unwrap 一路找下去 —— 直接断言会漏掉。
+func markDenied(w http.ResponseWriter) {
+	for i := 0; i < 8 && w != nil; i++ {
+		if rec, ok := w.(*statusRecorder); ok {
+			rec.markDenied()
+			return
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = u.Unwrap()
+	}
+}
+
+// markDenied 标记这个响应是门禁拒绝的。
+// 门禁的写响应函数调它 —— 用显式标记而不是靠比对状态码，
+// 因为 403 也可能是后端服务自己返回的（那种要记）。
+func (s *statusRecorder) markDenied() { s.denied = true }
 
 func (s *statusRecorder) WriteHeader(code int) {
 	if !s.written {
