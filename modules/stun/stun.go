@@ -139,6 +139,11 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 	}
 
 	// UPNP启动 映射 网关的localPort->localip:localPort UDP 不需要upnp
+	//
+	// upnpActive 记录 UPnP 这条腿到底站没站住，后面保活只在这个为真时才去
+	// 检测/续约映射。用 req.UseUPnP 是不行的：那是「用户想不想用」，
+	// 而不是「现在能不能用」。
+	upnpActive := false
 	if protocol == "tcp" {
 		if req.UseUPnP {
 			upnpCtx, upnpCancel := context.WithTimeout(ctx, 20*time.Second)
@@ -150,17 +155,27 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 				fmt.Sprintf("EasyLink-%s", req.ServiceName),
 				localIP,
 			)
-			if err != nil {
-				upnpCancel()
-				return err
-			}
-			// 释放资源
 			upnpCancel()
-			defer func() {
-				go DeletePortMapping(localPort, strings.ToUpper(protocol))
-			}()
+			if err != nil {
+				// UPnP 是锦上添花，不是打洞的前提。以前这里直接 return，
+				// 结果是路由器没开 UPnP、或处于 CGNAT（路由器 WAN 是私网地址）
+				// 时，打洞被 UPnP 的失败一起拖死，界面只剩"重启 4 次"。
+				//
+				// 实际上这类网络里 UPnP 建的映射压根不会生效，而打洞本身是
+				// 能通的（同类产品不用 UPnP 照样稳定）。所以这里降级：
+				// 记清楚原因，继续走纯打洞。
+				logrus.Warnf("[stun] %s UPnP 端口映射失败（%v），转为纯打洞继续", req.ServiceName, err)
+				onState(STUNState{State: STUNLog, Log: fmt.Sprintf("UPnP 不可用（%v），转为纯打洞", err)})
+			} else {
+				upnpActive = true
+				defer func() {
+					go DeletePortMapping(localPort, strings.ToUpper(protocol))
+				}()
+				onState(STUNState{State: STUNLog, Log: fmt.Sprintf("UPNP启动成功：路由:%d->%s:%d", localPort, localIP, localPort)})
+			}
+		} else {
+			onState(STUNState{State: STUNLog, Log: "未启用 UPnP，纯打洞"})
 		}
-		onState(STUNState{State: STUNLog, Log: fmt.Sprintf("UPNP启动成功：路由:%d->%s:%d", localPort, localIP, localPort)})
 	}
 
 	// 把端口传出去
@@ -181,7 +196,10 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 				publicPort,
 				localPort,
 				localIP,
-				req.UseUPnP,
+				// 传「UPnP 现在到底能不能用」，不是「用户想不想用」。
+				// 初始建映射失败时这里是 false，保活就不会再去碰那条不存在的
+				// 映射——否则重建失败又会把已经通了的洞给掐掉。
+				upnpActive,
 				protocol,
 				req.ServiceName,
 				onState,
