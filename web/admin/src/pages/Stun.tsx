@@ -27,6 +27,7 @@ import {
   X,
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
+import { LanScanModal } from '../components/LanScanModal'
 import { modalBackdrop } from '../components/modal'
 import * as api from '../lib/api'
 import { hasCapability, loadProviderTypes } from '../lib/providerTypes'
@@ -200,232 +201,6 @@ function DeviceModal({
  *
  * 网段列表由外面先取好再传进来，弹窗一开下拉框就是满的。
  */
-function LanScanModal({
-  subnets,
-  devices,
-  onCancel,
-  onPick,
-  onPickPort,
-}: {
-  subnets: LanSubnet[]
-  devices: StunDevice[]
-  onCancel: () => void
-  onPick: (host: LanHost) => void
-  onPickPort: (device: StunDevice, port: LanPort) => void
-}) {
-  const [cidr, setCidr] = useState(subnets[0]?.cidr ?? '')
-  const [hosts, setHosts] = useState<LanHost[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  // 扫完之后用户可能直接在底下把设备加了，加完这一行要变成「已加入」，
-  // 所以别信扫描结果里的 added，按当前设备列表现算
-  const byIP = useMemo(() => {
-    const m = new Map<string, StunDevice>()
-    for (const d of devices) if (d.ip) m.set(d.ip, d)
-    return m
-  }, [devices])
-
-  // 这个 IP 的这个端口上已经建过服务了。不标的话同一个端口很容易建出两份，
-  // 两份各自去打一个洞，对外两个地址指向同一个服务
-  const takenPorts = useMemo(() => {
-    const s = new Set<string>()
-    for (const d of devices) {
-      for (const svc of d.services ?? []) s.add(`${d.ip}:${svc.internalPort}`)
-    }
-    return s
-  }, [devices])
-
-  const run = async () => {
-    setBusy(true)
-    setErr('')
-    // 上一轮的结果先清掉。换个网段再扫的时候，旧的那几台还挂在那儿，
-    // 看着就跟这一轮扫出来的一样
-    setHosts(null)
-    try {
-      setHosts(await api.scanLan(cidr))
-    } catch (e) {
-      setHosts(null)
-      setErr(e instanceof Error ? e.message : '扫描失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div
-      className={modalBackdrop}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onCancel()
-      }}
-    >
-      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">扫描局域网</div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {subnets.length === 0 ? (
-          <div className="rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-700">
-            没找到本机接着的内网网段。手动填 IP 添加设备吧。
-          </div>
-        ) : (
-          <>
-            <div className="flex items-end gap-2">
-              <label className="min-w-0 flex-1">
-                <div className="mb-1 text-xs font-semibold text-slate-500">扫哪一段</div>
-                <select
-                  value={cidr}
-                  onChange={(e) => setCidr(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
-                >
-                  {subnets.map((s) => (
-                    <option key={s.cidr} value={s.cidr}>
-                      {s.cidr} · {s.iface}（本机 {s.localIP}）
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={run}
-                disabled={busy}
-                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-600 disabled:opacity-50"
-              >
-                {busy ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Radar className="h-4 w-4" />
-                )}
-                {busy ? '扫描中' : '开始扫描'}
-              </button>
-            </div>
-
-            {/*
-              扫不到的是防火墙设成「什么都不回」的机器，Windows 默认就这样。
-              不说这句的话，用户会以为那台设备根本不在网里，转头去查网线。
-            */}
-            <div className="mt-2 text-[11px] leading-5 text-slate-400">
-              两三秒出结果。防火墙拦得严的机器（Windows 默认就是）扫不出来，这种只能自己填 IP。
-            </div>
-
-            {err && <div className="mt-3 text-xs text-rose-500">扫不了：{err}</div>}
-
-            {hosts && (
-              <div className="mt-4">
-                <div className="mb-2 flex items-baseline gap-2">
-                  <span className="text-xs font-semibold text-slate-500">找到 {hosts.length} 台</span>
-                  {/* 端口能点这件事看不出来，得说一句 */}
-                  <span className="text-[11px] text-slate-400">已加过的设备，点端口直接建服务</span>
-                </div>
-                {hosts.length === 0 ? (
-                  <div className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
-                    一台都没扫到。换个网段试试，或者手动填 IP
-                  </div>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {hosts.map((h) => {
-                      const dev = byIP.get(h.ip)
-                      return (
-                        <li
-                          key={h.ip}
-                          className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Server className="h-4 w-4 shrink-0 text-slate-400" />
-                            <span className="truncate font-mono text-sm font-semibold text-slate-700">
-                              {h.ip}
-                            </span>
-                            {h.name && (
-                              <span className="truncate text-xs text-slate-400">{h.name}</span>
-                            )}
-                            {h.self && (
-                              <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
-                                本机
-                              </span>
-                            )}
-                            <div className="flex-1" />
-                            {dev ? (
-                              <span className="shrink-0 truncate text-[11px] text-emerald-600">
-                                已加过「{dev.name || dev.ip}」
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => onPick(h)}
-                                className="shrink-0 rounded-md bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                              >
-                                添加
-                              </button>
-                            )}
-                          </div>
-                          {h.ports.length > 0 && (
-                            <div className="mt-1.5 flex flex-wrap gap-1">
-                              {h.ports.map((p) => {
-                                const taken = takenPorts.has(`${h.ip}:${p.port}`)
-                                // 端口能点着建服务的前提是这台先成了设备——
-                                // 服务得挂在某台设备底下，不然没地方放
-                                if (!dev || taken) {
-                                  return (
-                                    <span
-                                      key={p.port}
-                                      title={taken ? '这个端口已经建过服务了' : '先把这台加成设备'}
-                                      className={`rounded px-1.5 py-0.5 text-[10px] ring-1 ${
-                                        taken
-                                          ? 'bg-emerald-50 text-emerald-600 ring-emerald-200'
-                                          : 'bg-white text-slate-500 ring-slate-200'
-                                      }`}
-                                    >
-                                      {taken && '✓ '}
-                                      {p.port}
-                                      {p.name && <span className="opacity-70"> {p.name}</span>}
-                                    </span>
-                                  )
-                                }
-                                return (
-                                  <button
-                                    key={p.port}
-                                    type="button"
-                                    onClick={() => onPickPort(dev, p)}
-                                    title={`建一个服务，对外开放 ${p.port} 端口`}
-                                    className="rounded bg-white px-1.5 py-0.5 text-[10px] text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
-                                  >
-                                    {p.port}
-                                    {p.name && <span className="opacity-70"> {p.name}</span>}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-              </div>
-            )}
-          </>
-        )}
-
-        <div className="mt-5 flex justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
-          >
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 interface ServiceFormState {
   name: string
@@ -2263,12 +2038,45 @@ export function Stun() {
 
   // 不关扫描弹窗：一次扫描常常要加好几台，关掉就得再等一轮。
   // 添加窗盖在上面，存完退回来，刚加的那台会变成「已加过」
+  // 这个 IP 的这个端口上已经建过服务了。
+  // 不标的话同一个端口很容易建出两份，两份各自去打一个洞，
+  // 对外两个地址指向同一个服务。
+  const scanTakenPorts = useMemo(() => {
+    const set = new Set<string>()
+    for (const d of config?.devices ?? []) {
+      for (const svc of d.services ?? []) set.add(`${d.ip}:${svc.internalPort}`)
+    }
+    return set
+  }, [config])
+
+  // 已经在设备列表里的机器：标出来，免得用户照着扫描结果又加一遍
+  // （会出现两个同 IP 的设备，而这个错要等服务加错地方才发现）
+  const scanAddedHosts = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const d of config?.devices ?? []) {
+      if (d.ip) m.set(d.ip, d.name || d.ip)
+    }
+    return m
+  }, [config])
+
   const pickScanned = (h: LanHost) => {
     setDeviceModal({ open: true, prefill: { name: h.name, ip: h.ip } })
   }
 
   // 扫描结果里点一个端口：名字和内网端口都填好，剩下的按默认来，直接能存
-  const pickScannedPort = (dev: StunDevice, p: LanPort) => {
+  /**
+   * 点了扫描结果里的端口。
+   *
+   * 共用组件给的是 LanHost（它不认识"设备"这个概念），这里按 IP 反查设备
+   * 拿 ID —— 服务必须挂在某台设备底下。查不到说明那台还没加成设备，
+   * 提示一下而不是静默失败。
+   */
+  const pickScannedPort = (host: LanHost, p: LanPort) => {
+    const dev = (config?.devices ?? []).find((d) => d.ip === host.ip)
+    if (!dev) {
+      toast(`请先把 ${host.ip} 添加为设备，服务要挂在这台设备下面`)
+      return
+    }
     setServiceModal({
       open: true,
       deviceId: getDeviceId(dev),
@@ -2889,7 +2697,10 @@ export function Stun() {
       {scanModal.open && (
         <LanScanModal
           subnets={scanModal.subnets}
-          devices={config.devices ?? []}
+          // 这两组数据是 stun 的业务知识（什么叫"已建过服务"、什么叫"已添加"），
+          // 由这里算好传给共用组件 —— 组件那边不认识 devices 是什么
+          takenPorts={scanTakenPorts}
+          addedHosts={scanAddedHosts}
           onCancel={() => setScanModal({ open: false, subnets: [] })}
           onPick={pickScanned}
           onPickPort={pickScannedPort}

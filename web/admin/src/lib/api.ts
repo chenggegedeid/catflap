@@ -883,3 +883,13 @@ export const saveAuditSettings = (body: {
   whitelist: string[]
   trustedProxies: string[]
 }) => requestWithMsg<unknown>('/api/audit/settings', { method: 'POST', body: JSON.stringify(body) })
+
+// ===================== 反代复用局域网扫描 =====================
+//
+// 和穿透那边是同一套后端实现（core/lanscan），只是填的字段不同：
+// 那边点端口是"建服务"，这边是"填站点 backend"。
+
+export const getProxyLanSubnets = () => request<LanSubnet[]>('/api/proxy/lan/subnets')
+
+export const scanProxyLan = (cidr: string) =>
+  request<LanHost[]>('/api/proxy/lan/scan', { method: 'POST', body: JSON.stringify({ cidr }) })

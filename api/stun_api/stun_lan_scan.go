@@ -1,8 +1,8 @@
 package stun_api
 
 import (
+	"github.com/chenggegedeid/catflap/core/lanscan"
 	"github.com/chenggegedeid/catflap/middleware"
-	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/utils/res"
 
 	"github.com/gin-gonic/gin"
@@ -12,7 +12,7 @@ import (
 //
 // 只读本机网卡，不发一个包，所以做成 GET、随时能调。
 func (StunApi) StunLanSubnetListView(c *gin.Context) {
-	res.OkWithData(stun.ListLanSubnets(), c)
+	res.OkWithData(lanscan.ListLanSubnets(), c)
 }
 
 type StunLanScanRequest struct {
@@ -30,7 +30,7 @@ type StunLanScanRequest struct {
 func (StunApi) StunLanScanView(c *gin.Context) {
 	cr := middleware.GetBindRequest[StunLanScanRequest](c)
 
-	hosts, err := stun.ScanLan(c.Request.Context(), cr.CIDR)
+	hosts, err := lanscan.ScanLan(c.Request.Context(), cr.CIDR)
 	if err != nil {
 		res.FailWithMsg(err.Error(), c)
 		return

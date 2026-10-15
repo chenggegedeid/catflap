@@ -55,6 +55,12 @@ func ProxyRouters(g *gin.RouterGroup) {
 		middleware.BindJsonMiddleware[proxy_api.SiteSaveRequest],
 		app.ProxySiteTestView,
 	)
+
+	// 局域网扫描：和穿透那边共用 core/lanscan 的实现。
+	// 站点表单里「扫描局域网选机器」用它填 backend。
+	g.GET("proxy/lan/subnets", app.ProxyLanSubnetsView)
+	g.POST("proxy/lan/scan",
+		middleware.BindJsonMiddleware[proxy_api.ProxyLanScanRequest], app.ProxyLanScanView)
 }
 
 // 把本模块的挂载交给组件注册表，routers/enter.go 不再需要列它。
