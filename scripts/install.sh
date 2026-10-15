@@ -63,7 +63,13 @@ while [ $# -gt 0 ]; do
     --dry-run)   DRY_RUN=1; shift ;;
     --uninstall) ACTION="uninstall"; shift ;;
     --purge)     ACTION="purge"; shift ;;
-    -h|--help)   sed -n '3,30p' "$0"; exit 0 ;;
+    -h|--help)
+      # 只打印文件开头那段连续的注释，并且去掉行首的 "# "。
+      # 之前写的是 sed -n '3,30p'，注释块结束之后就把代码也打出来了（REPO=… 之类），
+      # 行数一改还会错位。改成「遇到第一行不是注释就停」，跟着内容走不跟着行号走。
+      awk 'NR>=3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
+      exit 0
+      ;;
     *)           die "不认识的参数：$1（用 --help 看用法）" ;;
   esac
 done
