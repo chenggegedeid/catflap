@@ -659,6 +659,10 @@ func buildSTUNRequest(device *model.Device, service *model.Service) STUNRequest 
 		Redirect:      service.Redirect,
 		MCEntry:       service.MCEntry,
 
+		// 流量统计要按服务归组
+		DeviceID:  device.DeviceID,
+		ServiceID: service.ID,
+
 		// 用户配的固定本机端口。0 = 自动；运行中调度器还会用上次成功的端口覆盖它，
 		// 见 runService 里那段说明。
 		PreferredLocalPort: service.PunchLocalPort,

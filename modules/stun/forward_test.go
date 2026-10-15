@@ -104,7 +104,7 @@ func newHole(t *testing.T, target string, opt ForwardOptions) string {
 			if err != nil {
 				return
 			}
-			go ForwardTCP(c, target, "tcp", opt)
+			go ForwardTCP(c, target, "tcp", opt, 0, 0)
 		}
 	}()
 	return ln.Addr().String()

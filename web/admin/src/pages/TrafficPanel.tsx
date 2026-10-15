@@ -161,7 +161,7 @@ export function TrafficPanel() {
             <CardHeader title="各服务流量" />
           </div>
           <div className="px-5 pb-4">
-            <SiteBars bySite={trend?.bySite ?? {}} />
+            <TopList trend={trend} />
           </div>
         </Card>
       </div>
@@ -294,20 +294,37 @@ function DailyBars({ days }: { days: TrafficDailyTotals[] }) {
 }
 
 /**
- * 各服务流量横条。
+ * 各服务流量横条：**反代站点 + 穿透服务**合在一起排。
  *
- * 站点名要从 proxy 配置里查（bySite 的键是站点 ID）—— 但这里不额外请求，
- * 拿不到名字就直接显示 `站点 #3`：这是**少一次请求**与"名字好看"的取舍，
- * 而流量数字本身才是这一块的重点。
+ * 合在一起是因为用户关心的是"哪个服务用了多少流量"，不该去记这个服务是走
+ * 反代出去的还是穿透出去的。分开两块反而看不出谁最多。
+ *
+ * 名字：键本身只有 ID，查真实名字要额外请求站点/设备配置。这里不查 ——
+ * 流量数字才是这一块的重点，名字用 `站点 #3` / `穿透 #1-2` 够认就行。
  */
-function SiteBars({ bySite }: { bySite: Record<string, { in: number; out: number; requests: number }> }) {
-  const rows = Object.entries(bySite)
-    .map(([id, t]) => ({ id, total: t.in + t.out, requests: t.requests }))
+function TopList({ trend }: { trend: TrafficTrend | null }) {
+  const rows = [
+    ...Object.entries(trend?.bySite ?? {}).map(([id, t]) => ({
+      key: `site-${id}`,
+      label: id === '0' ? '未匹配站点' : `站点 #${id}`,
+      total: t.in + t.out,
+      requests: t.requests,
+      tunnel: false,
+    })),
+    ...Object.entries(trend?.byTunnel ?? {}).map(([key, t]) => ({
+      key: `tun-${key}`,
+      // "s1-2" → "穿透 #1-2"（设备 1、服务 2）
+      label: `穿透 #${key.replace(/^s/, '')}`,
+      total: t.in + t.out,
+      requests: t.requests,
+      tunnel: true,
+    })),
+  ]
     .sort((a, b) => b.total - a.total)
     .slice(0, 6)
 
   if (rows.length === 0) {
-    return <div className="flex h-[110px] items-center justify-center text-xs text-slate-400">暂无站点流量</div>
+    return <div className="flex h-[110px] items-center justify-center text-xs text-slate-400">暂无流量</div>
   }
 
   const peak = rows[0].total || 1
@@ -315,17 +332,27 @@ function SiteBars({ bySite }: { bySite: Record<string, { in: number; out: number
   return (
     <div className="space-y-2.5">
       {rows.map((r) => (
-        <div key={r.id}>
+        <div key={r.key}>
           <div className="mb-1 flex items-baseline justify-between text-xs">
             <span className="text-slate-600">
-              {r.id === '0' ? '未匹配站点' : `站点 #${r.id}`}
-              <span className="ml-2 text-[11px] text-slate-400">{fmtCount(r.requests)} 次</span>
+              {r.tunnel && (
+                <span
+                  title="穿透服务（不经过反向代理，直接由洞口转发）"
+                  className="mr-1 rounded bg-blue-50 px-1 py-0.5 text-[10px] font-bold text-blue-600"
+                >
+                  穿透
+                </span>
+              )}
+              {r.label}
+              <span className="ml-2 text-[11px] text-slate-400">
+                {fmtCount(r.requests)} {r.tunnel ? '次连接' : '次'}
+              </span>
             </span>
             <span className="tabular-nums text-slate-500">{fmtBytes(r.total)}</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-blue-500"
+              className={`h-full rounded-full ${r.tunnel ? 'bg-blue-400' : 'bg-blue-500'}`}
               style={{ width: `${Math.max((r.total / peak) * 100, 2)}%` }}
             />
           </div>

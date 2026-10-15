@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Ban, Check, RotateCw, Search, ShieldOff, TriangleAlert } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
-import type { AuditConfigView, AuditIPStat, AuditRecord } from '../types'
+import type { AuditConfigView, AuditIPStat, AuditRecord, LoginEvent, LoginSummary } from '../types'
 
 const fmtBytes = (n: number): string => {
   if (!n) return '0 B'
@@ -248,6 +248,9 @@ export function Audit() {
           )}
         </div>
       </Card>
+
+      {/* 登录尝试：和"谁访问了服务"分开 —— 这是"谁在试着进后台" */}
+      <LoginPanel />
 
       {/* 封禁表 + 设置 */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -664,5 +667,111 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
         {value}
       </div>
     </div>
+  )
+}
+
+/**
+ * 登录尝试。
+ *
+ * 单独一块而不是混进上面的访问来源：那是"谁访问了我的服务"，这是
+ * "谁在试着进我的后台"。两者的处置方式也不同 —— 后者要的是"看有没有人在
+ * 试密码、试的是哪些用户名"，而不是按 IP 统计流量。
+ *
+ * 界面上刻意显示**用户名**：看到一堆 admin / root / test 就知道有人在字典
+ * 攻击，这比只给一个 IP 有用得多。
+ */
+function LoginPanel() {
+  const [data, setData] = useState<{ list: LoginEvent[]; day: string; summary: LoginSummary } | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setData(await api.getAuditLogins({ limit: 50 }))
+    } catch {
+      // 没有记录 / 接口不可用都不该影响这一页其它块
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const s = data?.summary
+  const failed = s?.failed ?? 0
+  const total = s?.total ?? 0
+
+  return (
+    <Card className="!p-0">
+      <div className="px-5 pt-4">
+        <CardHeader
+          title={
+            <span>
+              登录尝试
+              {data?.day && (
+                <span className="ml-1 font-normal text-slate-400">{data.day}，最多 50 条</span>
+              )}
+            </span>
+          }
+        />
+      </div>
+      <div className="px-5 pb-5">
+        {!s || total === 0 ? (
+          <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+            还没有登录记录
+          </div>
+        ) : (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <span className="text-slate-500">
+                共 <span className="font-semibold text-slate-700">{total}</span> 次
+              </span>
+              {failed > 0 && (
+                <span className="text-rose-600">
+                  失败 <span className="font-semibold">{failed}</span>
+                </span>
+              )}
+              {s.succeeded > 0 && (
+                <span className="text-emerald-600">
+                  成功 <span className="font-semibold">{s.succeeded}</span>
+                </span>
+              )}
+              {failed > 0 && (
+                <span className="text-[11px] text-slate-400">
+                  来自 {s.ips.length} 个地址
+                  {s.usernames.length > 1 && ` · 试过 ${s.usernames.length} 个用户名`}
+                </span>
+              )}
+            </div>
+
+            {/* 失败明显偏多时提示一句 —— 这是用户真正需要被提醒的信号 */}
+            {failed >= 10 && (
+              <div className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-700 ring-1 ring-rose-200">
+                有 {failed} 次登录失败。如果是你不小心输错，忽略即可；
+                如果来自不认识的地址，说明有人在试你的密码 —— 检查上面的来源，必要时拉黑。
+              </div>
+            )}
+
+            <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-lg bg-slate-50/60 p-2">
+              {(data?.list ?? []).map((e, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 py-1 text-[11px]">
+                  <span className="font-mono text-slate-400">{e.time.slice(5, 19).replace('T', ' ')}</span>
+                  <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-bold ${
+                    e.success ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+                  }`}>
+                    {e.success ? '成功' : '失败'}
+                  </span>
+                  <span className="font-mono text-slate-700">{e.ip}</span>
+                  <span className="text-slate-500">
+                    用户名 <span className="font-mono text-slate-700">{e.username || '（空）'}</span>
+                  </span>
+                  {!e.success && e.reason && (
+                    <span className="text-[10px] text-slate-400">{e.reason}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   )
 }

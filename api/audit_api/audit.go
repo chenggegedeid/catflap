@@ -238,3 +238,36 @@ func trimAll(in []string) []string {
 	}
 	return out
 }
+
+// ===================== 登录事件 =====================
+
+// AuditLoginsView 某天的登录尝试（新的在前）
+//
+// 和访问审计分开看：这是"谁在试着进后台"，那个是"谁访问了服务"。
+func (AuditApi) AuditLoginsView(c *gin.Context) {
+	day := strings.TrimSpace(c.Query("day"))
+	ip := strings.TrimSpace(c.Query("ip"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if limit <= 0 {
+		limit = 100
+	}
+	if day == "" {
+		days := audit.Days()
+		if len(days) == 0 {
+			res.OkWithData(gin.H{"list": []audit.LoginEvent{}, "day": ""}, c)
+			return
+		}
+		day = days[0]
+	}
+
+	list, err := audit.ReadLoginEvents(day, ip, limit)
+	if err != nil {
+		// 那天没有登录记录，不是错误
+		res.OkWithData(gin.H{"list": []audit.LoginEvent{}, "day": day}, c)
+		return
+	}
+	if list == nil {
+		list = []audit.LoginEvent{}
+	}
+	res.OkWithData(gin.H{"list": list, "day": day, "summary": audit.SummarizeLogins(day)}, c)
+}

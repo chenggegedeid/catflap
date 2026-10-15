@@ -37,6 +37,8 @@ type MinuteRecord struct {
 	Requests int64                  `json:"requests"`
 	Errors   int64                  `json:"errors"`
 	BySite   map[string]SiteTraffic `json:"bySite,omitempty"`
+	// ByTunnel 穿透服务的流量，键是 "s<设备ID>-<服务ID>"
+	ByTunnel map[string]SiteTraffic `json:"byTunnel,omitempty"`
 }
 
 // SiteTraffic 单个站点的流量
@@ -267,6 +269,24 @@ func AggregateBySite(recs []MinuteRecord) map[string]SiteTraffic {
 			cur.Out += st.Out
 			cur.Requests += st.Requests
 			out[id] = cur
+		}
+	}
+	return out
+}
+
+// AggregateByTunnel 按穿透服务汇总。
+//
+// 和站点分开返回：它们是两种东西（一个是反代站点、一个是穿透服务），
+// 前端要分别显示，且键的格式也不同（"s1-2" vs "1"）。
+func AggregateByTunnel(recs []MinuteRecord) map[string]SiteTraffic {
+	out := map[string]SiteTraffic{}
+	for _, r := range recs {
+		for key, st := range r.ByTunnel {
+			cur := out[key]
+			cur.In += st.In
+			cur.Out += st.Out
+			cur.Requests += st.Requests
+			out[key] = cur
 		}
 	}
 	return out

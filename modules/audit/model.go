@@ -31,6 +31,28 @@ type Record struct {
 	SiteID     uint   `json:"siteId"`
 }
 
+// LoginEvent 一次登录尝试。
+//
+// **单独一个类型而不是塞进 Record**：登录不是"访问某个站点"，它没有
+// 域名、路径、字节数。硬塞进去会让每条记录都带着几个空字段，
+// 界面上也得靠"这些字段是不是空"来分辨，很别扭。
+//
+// **绝不记录密码本身** —— 连掩码都不记。审计记录要长期保留并在界面上展示，
+// 里面出现任何密码片段都是事故。
+type LoginEvent struct {
+	Time time.Time `json:"time"`
+	IP   string    `json:"ip"`
+	// Username 试的用户名。记它是为了看"攻击者在猜哪些名字"
+	// （比如看到一堆 admin/root/test 就知道有人在字典攻击）
+	Username string `json:"username"`
+	// Success 是否成功
+	Success bool `json:"success"`
+	// Reason 失败原因：密码错误 / 次数超限 / 尚未初始化
+	Reason string `json:"reason,omitempty"`
+	// UserAgent 浏览器标识
+	UserAgent string `json:"userAgent,omitempty"`
+}
+
 // isError 4xx/5xx 都算异常访问
 func (r Record) isError() bool { return r.Status >= 400 }
 

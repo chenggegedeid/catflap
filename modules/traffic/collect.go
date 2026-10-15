@@ -117,6 +117,8 @@ type minuteAccum struct {
 	requests int64
 	errors   int64 // 4xx/5xx 计数，用来识别扫描
 	bySite   map[uint]*siteAccum
+	// byTunnel 穿透服务的流量：键是 "s<设备ID>-<服务ID>"
+	byTunnel map[string]*siteAccum
 }
 
 type siteAccum struct {
@@ -125,7 +127,10 @@ type siteAccum struct {
 	Requests int64
 }
 
-var accum = &minuteAccum{bySite: map[uint]*siteAccum{}}
+var accum = &minuteAccum{
+	bySite:   map[uint]*siteAccum{},
+	byTunnel: map[string]*siteAccum{},
+}
 
 // Record 记一次请求。这是热路径上的入口。
 //
@@ -188,9 +193,17 @@ func (a *minuteAccum) flushLocked() {
 		Requests: a.requests,
 		Errors:   a.errors,
 		BySite:   map[string]SiteTraffic{},
+		ByTunnel: map[string]SiteTraffic{},
 	}
 	for id, sa := range a.bySite {
 		rec.BySite[strconv.FormatUint(uint64(id), 10)] = SiteTraffic{
+			In:       sa.In,
+			Out:      sa.Out,
+			Requests: sa.Requests,
+		}
+	}
+	for key, sa := range a.byTunnel {
+		rec.ByTunnel[key] = SiteTraffic{
 			In:       sa.In,
 			Out:      sa.Out,
 			Requests: sa.Requests,
@@ -210,6 +223,7 @@ func (a *minuteAccum) flushLocked() {
 	// 重置
 	a.in, a.out, a.requests, a.errors = 0, 0, 0, 0
 	a.bySite = map[uint]*siteAccum{}
+	a.byTunnel = map[string]*siteAccum{}
 	a.minute = 0
 }
 
@@ -241,4 +255,52 @@ func TodayTotals() DailyTotals {
 		day.Errors += r.Errors
 	}
 	return day
+}
+
+// ===================== 穿透服务的流量 =====================
+//
+// 反向代理那边的采集在 proxy 层（每个 HTTP 请求结束记一次）。
+// 穿透是**另一条出口**：外部直接连到洞上、由这里转发到内网，
+// 根本不经过反代 —— 所以必须单独在这里采，否则那部分流量是漏的。
+//
+// 与反代的两个区别：
+//   - 反代按"请求"记（有 URL、状态码）；穿透是字节流，只按"连接"记
+//   - 穿透的连接可能很长（SSH、看视频），所以**连接结束才上报**，
+//     中途不记（转发中途上报既拿不到最终值又要额外加锁）
+
+// RecordStun 记一次穿透转发的流量。
+//
+// deviceID / serviceID 用于按服务归组；都是 0 时算到"未分组"，不影响累计值。
+func RecordStun(deviceID, serviceID uint, bytesIn, bytesOut int64) {
+	if bytesIn <= 0 && bytesOut <= 0 {
+		return
+	}
+	// 实时速率：与反代共用同一个滚动窗口，仪表盘上看到的是两者之和
+	rateWindow.Add(bytesIn, bytesOut, 1)
+
+	accum.mu.Lock()
+	defer accum.mu.Unlock()
+
+	now := time.Now()
+	thisMinute := now.Truncate(time.Minute).Unix()
+	if accum.minute != 0 && accum.minute != thisMinute {
+		accum.flushLocked()
+	}
+	accum.minute = thisMinute
+
+	accum.in += bytesIn
+	accum.out += bytesOut
+	accum.requests++ // 一条连接算一次
+
+	// 按"穿透服务"分组。键用 s<设备>-<服务>，和站点的纯数字 ID 区分开，
+	// 前端显示时据此知道这是穿透服务而不是反代站点
+	key := "s" + strconv.FormatUint(uint64(deviceID), 10) + "-" + strconv.FormatUint(uint64(serviceID), 10)
+	sa := accum.byTunnel[key]
+	if sa == nil {
+		sa = &siteAccum{}
+		accum.byTunnel[key] = sa
+	}
+	sa.In += bytesIn
+	sa.Out += bytesOut
+	sa.Requests++
 }

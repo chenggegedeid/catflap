@@ -2,7 +2,11 @@ package auth_api
 
 import (
 	"errors"
+	"net"
+	"time"
+
 	"github.com/chenggegedeid/catflap/middleware"
+	"github.com/chenggegedeid/catflap/modules/audit"
 	"github.com/chenggegedeid/catflap/modules/auth"
 	"github.com/chenggegedeid/catflap/utils/res"
 
@@ -26,6 +30,8 @@ func (AuthApi) LoginView(c *gin.Context) {
 	// 攻击者伪造头就能换一个桶绕过限速（见 auth.clientKey 的说明）
 	token, err := auth.Runtime.Login(cr.Username, cr.Password, c.Request.RemoteAddr, cr.Remember)
 	if err != nil {
+		// 失败也要记：这正是"有没有人在试我的密码"的答案
+		recordLogin(c, cr.Username, false, err.Error())
 		if errors.Is(err, auth.ErrLoginLimited) {
 			res.FailRateLimited(c)
 			return
@@ -43,5 +49,25 @@ func (AuthApi) LoginView(c *gin.Context) {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
+	recordLogin(c, cr.Username, true, "")
 	res.OkWithData(gin.H{"token": token}, c)
+}
+
+// recordLogin 记一次登录尝试。
+//
+// 刻意**不记密码**（连掩码都不记）—— 审计记录要长期保留并在界面上展示，
+// 里面出现任何密码片段都是事故。
+func recordLogin(c *gin.Context, username string, success bool, reason string) {
+	host := c.Request.RemoteAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	audit.RecordLogin(audit.LoginEvent{
+		Time:      time.Now(),
+		IP:        host,
+		Username:  username,
+		Success:   success,
+		Reason:    reason,
+		UserAgent: c.Request.UserAgent(),
+	})
 }

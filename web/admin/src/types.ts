@@ -725,6 +725,8 @@ export interface TrafficTrend {
   days: TrafficDailyTotals[]
   /** 键是站点 ID 的字符串形式 */
   bySite: Record<string, TrafficSiteTraffic>
+  /** 穿透服务的流量，键是 "s<设备ID>-<服务ID>" */
+  byTunnel: Record<string, TrafficSiteTraffic>
 }
 
 // ===================== 访问审计与 IP 管理 =====================
@@ -805,4 +807,23 @@ export interface ProxySiteOptions {
   domains: ProxyDomainOption[]
   subnets: LanSubnet[]
   localIPs: string[]
+}
+
+/** 一次登录尝试（注意：不含密码） */
+export interface LoginEvent {
+  time: string
+  ip: string
+  username: string
+  success: boolean
+  reason?: string
+  userAgent?: string
+}
+
+/** 某天登录事件的汇总 */
+export interface LoginSummary {
+  total: number
+  failed: number
+  succeeded: number
+  ips: string[]
+  usernames: string[]
 }
