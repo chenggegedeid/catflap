@@ -618,6 +618,8 @@ export interface ProxyConfig {
   listeners: ProxyListener[]
   sites: ProxySite[]
   errorPage: ErrorPageConfig
+  /** 是否允许把管理后台通过反代挂出去（远程管理用，默认 false） */
+  exposeAdmin: boolean
 }
 
 /** 隧道运行状态（token 不回显，只说填没填） */
