@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
 #
-# Catflap 一键安装脚本（Debian / Ubuntu，systemd）。
+# Catflap 一键安装 / 更新 / 卸载脚本（Debian / Ubuntu，systemd）。
 #
+# 推荐写法（先下载成文件再跑，交互最稳）：
+#   URL="https://raw.githubusercontent.com/chenggegedeid/catflap/main"
+#   curl -fsSL "$URL/scripts/install.sh" -o /tmp/install.sh && sudo bash /tmp/install.sh "$URL"
+#
+# 管道写法也能用（一样会弹菜单，会去读 /dev/tty）：
 #   curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh | sudo bash
 #
-# 直接下载下来再跑，会进入**交互式菜单**（可选版本、安装目录、运行账号、端口）：
+# 直接跑会先看你装没装：
+#   · 没装过 → 问装哪个版本
+#   · 装过   → 问「更新 / 重装 / 卸载 / 完全卸载」，不会闷头就开始下载
 #
-#   curl -fsSL .../install.sh -o install.sh && sudo bash install.sh
-#
-# 也能干别的：
-#   sudo bash install.sh                # 安装或升级到最新版
-#   sudo bash install.sh --uninstall    # 卸载（默认保留配置与数据）
-#   sudo bash install.sh --purge        # 卸载并删除配置与数据
-#   sudo bash install.sh --version v1.2.0
-#   sudo bash install.sh --dry-run      # 只打印将要做什么，不动手
-#   sudo bash install.sh --run-as-root  # 让服务进程用 root 跑（需要绑 80/443 时）
+# 自动化（给了任何参数就不弹菜单，保证结果确定）：
+#   sudo bash install.sh --status          只看装没装、装的哪版，不动手
+#   sudo bash install.sh --yes             非交互安装 / 升级到最新版
+#   sudo bash install.sh --version v2.0.0  装指定版本
+#   sudo bash install.sh --uninstall       卸载（保留配置与数据）
+#   sudo bash install.sh --purge           卸载并删除配置与数据（**删之前自动备份**）
+#   sudo bash install.sh --dir /etc/catflap 指定安装目录（卸载定位非默认目录时用）
+#   sudo bash install.sh --dry-run         只打印将要做什么，不动手
+#   sudo bash install.sh --run-as-root     让服务进程用 root 跑（需要绑 80/443 时）
 #
 # 可选环境变量：
-#   CATFLAP_VERSION=1.0.0   装指定版本（不带 v 前缀也行）
-#   CATFLAP_MIRROR=<前缀>   下载慢时用它当前缀，例如
-#                           https://ghfast.top/https://github.com/...
+#   CATFLAP_VERSION=2.0.0   装指定版本（不带 v 前缀也行）
+#   CATFLAP_MIRROR=<前缀>   下载慢时用它当前缀，例如 https://ghfast.top
 #   CATFLAP_PORT=8081       改监听端口（写进服务单元的 Environment）
 #   CATFLAP_RUN_AS=root     同上，让服务进程用 root 跑
 #
@@ -33,8 +39,9 @@
 # 设计上刻意遵守的几条：
 #   - **不用 root 跑服务**：建专用用户 catflap，程序目录只读。面板能读写配置、
 #     能把内网服务暴露到公网，用 root 跑是把风险放大一级。
-#   - **配置与数据默认不动**：升级只换二进制。--purge 才删。
+#   - **配置与数据默认不动**：升级只换二进制。--purge 才删，且**删之前先打包备份**。
 #   - **先校验再替换**：下载后比对 sha256，不对就停下，绝不把坏二进制装进去。
+#   - **装过就不闷头下载**：先问你要更新还是卸载，别让人以为只是"查一下"结果被升了级。
 
 set -euo pipefail
 
@@ -51,8 +58,9 @@ PORT="${CATFLAP_PORT:-}"
 RUN_AS="${CATFLAP_RUN_AS:-catflap}"
 DRY_RUN=0
 ACTION="install"
-# 有没有显式给过参数。给了就完全按参数走（适合自动化），一个都没给且终端可用
-# 时才进交互菜单。
+ASSUME_YES=0
+# 有没有显式给过参数。给了就完全按参数走（适合自动化），一个都没给且能交互
+# 时才进菜单。
 ARGS_GIVEN=0
 
 # 重跑自己时该写什么命令。直接写 $0 在 `curl ... | sudo bash` 这种管道执行下会
@@ -67,6 +75,7 @@ esac
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; exit 1; }
+info() { printf '    %s\n' "$*"; }
 
 run() {
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -86,7 +95,10 @@ while [ $# -gt 0 ]; do
     --version)   VERSION="${2:-}"; ARGS_GIVEN=1; shift 2 ;;
     --mirror)    MIRROR="${2:-}"; ARGS_GIVEN=1; shift 2 ;;
     --port)      PORT="${2:-}"; ARGS_GIVEN=1; shift 2 ;;
+    --dir)       INSTALL_DIR="${2:-}"; BIN="${INSTALL_DIR}/${APP}"; ARGS_GIVEN=1; shift 2 ;;
     --dry-run)   DRY_RUN=1; ARGS_GIVEN=1; shift ;;
+    --yes|-y)    ASSUME_YES=1; ARGS_GIVEN=1; shift ;;
+    --status)    ACTION="status"; ARGS_GIVEN=1; shift ;;
     --uninstall) ACTION="uninstall"; ARGS_GIVEN=1; shift ;;
     --purge)     ACTION="purge"; ARGS_GIVEN=1; shift ;;
     --run-as-root) RUN_AS="root"; ARGS_GIVEN=1; shift ;;
@@ -97,20 +109,114 @@ while [ $# -gt 0 ]; do
       awk 'NR>=3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
       exit 0
       ;;
+    # 位置参数：下载源前缀（和 Lucky 的 `sh install.sh "$URL"` 一个意思）。
+    # 这样换镜像不用记 --mirror，把源直接写在后面就行。
+    http://*|https://*)
+      MIRROR="${1%/}"; ARGS_GIVEN=1; shift ;;
     *)           die "不认识的参数：$1（用 --help 看用法）" ;;
   esac
 done
 
+# ── 交互终端在哪 ────────────────────────────────────────────────────────────
+#
+# 关键改动：`curl ... | sudo bash` 时 stdin 是管道，`[ -t 0 ]` 为假，
+# 老版本因此**整个跳过菜单**直接开始下载 —— 装过的机器也会被闷头覆盖掉。
+#
+# 但管道执行不代表不能交互：进程的**控制终端** /dev/tty 还在（只要你是坐在
+# 终端前敲的这条命令）。所以这里除了 stdin，再试一次 /dev/tty。
+# 真的都拿不到（CI / 非交互 SSH）才认命走非交互分支。
+TTY_DEV=""
+# 注意重定向顺序：`: < /dev/tty 2>/dev/null` 是不行的 ——
+# bash 从左到右处理重定向，< /dev/tty 先失败就把错误打出来了，
+# 那时 2>/dev/null 还没生效（脚本里会冒一行 "/dev/tty: 没有那个设备或地址"）。
+# 丢进子 shell 再整体重定向才压得住。
+if [ -t 0 ]; then
+  TTY_DEV="/dev/stdin"
+elif ( : < /dev/tty ) 2>/dev/null; then
+  TTY_DEV="/dev/tty"
+fi
+
+# ── 探测已安装 ──────────────────────────────────────────────────────────────
+#
+# 不能只看 /opt/catflap 在不在：安装目录当初是可以改的（菜单里能选，--dir 也能给），
+# 硬认默认目录会导致"明明装了却说没装"，以及更糟的 —— 卸载时删错地方。
+#
+# 所以优先从服务单元里把真实安装目录**反解出来**：ExecStart= 那行去掉参数取目录。
+detect_install_dir() {
+  local exec_line d
+  [ -f "$SERVICE_FILE" ] || return 0
+  exec_line="$(sed -n 's/^ExecStart=//p' "$SERVICE_FILE" | head -n1)"
+  [ -n "$exec_line" ] || return 0
+  # 去掉命令行参数，只留可执行文件路径
+  d="$(dirname "${exec_line%% *}")"
+  [ -d "$d" ] || return 0
+  INSTALL_DIR="$d"
+  BIN="${INSTALL_DIR}/${APP}"
+}
+
+is_installed() {
+  [ -x "$BIN" ] || [ -f "$SERVICE_FILE" ]
+}
+
+# 已装版本。三个来源按可靠度排：安装时写下的 VERSION 文件 → 直接问二进制 → 问接口。
+# 之所以要 VERSION 文件兜底：老版本装的机器上没有它，而服务可能没在跑（问不了接口）。
+installed_version() {
+  local v=""
+  if [ -r "${INSTALL_DIR}/VERSION" ]; then
+    v="$(head -n1 "${INSTALL_DIR}/VERSION" 2>/dev/null || true)"
+  fi
+  if [ -z "$v" ] && [ -x "$BIN" ] && command -v timeout >/dev/null 2>&1; then
+    # ⚠️ 必须加 timeout：2.0.0 之前的二进制**不认 --version**，
+    # 它会把参数直接忽略、把后端跑起来（进程里是 select{}，永不退出）。
+    # 不加超时的话，在装了老版本的机器上跑这个脚本会**卡死在这里**，
+    # 而且看不出为什么 —— 只看到服务莫名其妙被启动了一次。
+    v="$(timeout 5 "$BIN" --version 2>/dev/null | head -n1 || true)"
+  fi
+  if [ -z "$v" ] && command -v curl >/dev/null 2>&1; then
+    v="$(curl -fsS "http://127.0.0.1:${PORT:-3791}/api/version" 2>/dev/null \
+         | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n1 || true)"
+  fi
+  # 归一成带 v 的形式再显示：三个来源给的写法不一致 ——
+  # VERSION 文件存的是发布标签（v2.0.0），而二进制 --version 报的是注入值
+  # （发布工作流注入的是去掉 v 的 "2.0.0"）。不归一的话菜单里会出现
+  # 「已装版本：2.0.0 → 将更新到 v2.0.0」这种看着像降级的一行。
+  case "$v" in
+    v*)            ;;
+    [0-9]*[0-9])   v="v${v}" ;;
+  esac
+  printf '%s' "${v:-未知}"
+}
+
+service_state() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$APP" 2>/dev/null; then
+    printf '运行中'
+  elif [ -f "$SERVICE_FILE" ]; then
+    printf '已安装未运行'
+  else
+    printf '无服务'
+  fi
+}
+
+detect_install_dir
+
+# ── --status：只看不动手 ────────────────────────────────────────────────────
+if [ "$ACTION" = "status" ]; then
+  if is_installed; then
+    echo "已安装：Catflap $(installed_version)"
+    echo "  目录：${INSTALL_DIR}"
+    echo "  服务：$(service_state)"
+  else
+    echo "未安装 Catflap"
+  fi
+  exit 0
+fi
+
 # ── 交互菜单 ────────────────────────────────────────────────────────────────
-#
-# 只在「没给任何参数」且「标准输入是终端」时才进菜单。
-#
-# 为什么要判断 -t 0：curl ... | sudo bash 这种写法里，stdin 被脚本自己占着，
-# 菜单读不到东西（读到的可能是脚本剩下还没被 shell 读走的内容），会莫名其妙
-# 地选错或者直接卡住。给过任何参数也一律不进菜单 —— 自动化场景要的是确定性。
-#
-# 菜单只负责把这几个变量问出来，后面走的还是原来那条安装路径，
+# 菜单只负责把变量问出来，后面走的还是那条安装路径，
 # 不存在「菜单装的和命令装的不一样」这种情况。
+#
+# 输错数字**回到菜单**而不是退出 —— 手滑按错一个键就得重跑一遍脚本太烦人
+# （老版本是 die 直接退出）。
 
 ask() {
   # $1 提示，$2 默认值
@@ -121,90 +227,184 @@ ask() {
   printf '  %s' "$1" >&2
   [ -n "${2:-}" ] && printf '（默认 %s）' "$2" >&2
   printf ' > ' >&2
-  read -r ans || ans=""
+  local ans=""
+  if [ -n "$TTY_DEV" ]; then
+    read -r ans < "$TTY_DEV" || ans=""
+  fi
   ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
   if [ -z "$ans" ]; then printf '%s' "${2:-}"; else printf '%s' "$ans"; fi
 }
 
-menu() {
+banner() {
   echo
   echo "*************************************************"
   echo "**                 欢迎使用                    **"
   echo "**                Catflap 管理脚本             **"
   echo "*************************************************"
   echo
-  echo "  1 安装 / 升级 Catflap"
-  echo "  2 卸载（保留配置与数据）"
-  echo "  3 完全卸载（连配置与数据一起删）"
-  echo "  0 退出"
-  echo
-  choice="$(ask '请输入对应数字' '1')"
-  case "$choice" in
-    1) ACTION="install" ;;
-    2) ACTION="uninstall" ;;
-    3) ACTION="purge" ;;
-    0) echo "已退出"; exit 0 ;;
-    *) die "没有这个选项：$choice" ;;
-  esac
+}
 
-  [ "$ACTION" = "install" ] || return 0
+# 已安装时的菜单：把「更新」和「卸载」摆在一起，默认项是更新但不自动动手。
+menu_installed() {
+  while :; do
+    banner
+    echo "  检测到已安装 Catflap $(installed_version)"
+    echo "    目录：${INSTALL_DIR}"
+    echo "    服务：$(service_state)"
+    echo
+    echo "  1 更新到最新版（保留配置与数据）"
+    echo "  2 重装 / 安装指定版本"
+    echo "  3 卸载（保留配置与数据）"
+    echo "  4 完全卸载（连配置与数据一起删，删前自动备份）"
+    echo "  0 退出"
+    echo
+    case "$(ask '请输入对应数字' '1')" in
+      1) ACTION="install"; break ;;
+      2) ACTION="install"; ask_version; break ;;
+      3) ACTION="uninstall"; break ;;
+      4) ACTION="purge"; break ;;
+      0) echo "已退出"; exit 0 ;;
+      *) echo "  没有这个选项，请重新输入" ;;
+    esac
+  done
+}
 
+menu_fresh() {
+  while :; do
+    banner
+    echo "  1 安装最新版"
+    echo "  2 安装指定版本"
+    echo "  0 退出"
+    echo
+    case "$(ask '请输入对应数字' '1')" in
+      1) ACTION="install"; break ;;
+      2) ACTION="install"; ask_version; break ;;
+      0) echo "已退出"; exit 0 ;;
+      *) echo "  没有这个选项，请重新输入" ;;
+    esac
+  done
+  ask_options
+}
+
+# 装新的时候才问目录 / 账号 / 端口。更新时不问 —— 那些值已经落在服务单元里了，
+# 再问一遍等于给用户一个"不小心改掉运行方式"的机会。
+ask_version() {
   echo
   echo "--- 版本 ---"
-  echo "  直接回车 = 装最新版；也可以填指定版本，例如 1.0.0"
+  echo "  直接回车 = 最新版；也可以填指定版本，例如 2.0.0"
   VERSION="$(ask '版本号')"
+}
 
+ask_options() {
   echo
   echo "--- 安装目录 ---"
   echo "  常用：/opt/catflap（默认）、/etc/catflap、/usr/share/catflap"
   INSTALL_DIR="$(ask '安装目录' '/opt/catflap')"
-  BIN="${INSTALL_DIR}/catflap"
+  BIN="${INSTALL_DIR}/${APP}"
 
   echo
   echo "--- 服务用什么账号跑 ---"
   echo "  1 catflap（专用用户，默认，更安全）"
   echo "  2 root（需要用 80/443 或动 iptables 时选这个）"
-  acct="$(ask '请选择' '1')"
-  case "$acct" in
+  case "$(ask '请选择' '1')" in
     1) RUN_AS="catflap" ;;
     2) RUN_AS="root" ;;
-    *) die "没有这个选项：$acct" ;;
+    *) echo "  没有这个选项，按默认（catflap）"; RUN_AS="catflap" ;;
   esac
 
   echo
   echo "--- 监听端口 ---"
   PORT="$(ask '端口' '3791')"
+}
 
+confirm_or_exit() {
+  # $1 要干什么的一句话
   echo
-  printf '  即将：安装到 %s，用 %s 跑，端口 %s\n' "$INSTALL_DIR" "$RUN_AS" "$PORT"
-  confirm="$(ask '确认开始？[y/N]' 'y')"
-  case "$confirm" in
-    y|Y|yes|YES) ;;
+  printf '  即将：%s\n' "$1"
+  case "$(ask '确认开始？[Y/n]' 'y')" in
+    y|Y|yes|YES|'') ;;
     *) echo "已取消"; exit 0 ;;
   esac
 }
 
-if [ "$ARGS_GIVEN" -eq 0 ] && [ -t 0 ]; then
-  menu
+if [ "$ARGS_GIVEN" -eq 0 ] && [ -n "$TTY_DEV" ]; then
+  if is_installed; then menu_installed; else menu_fresh; fi
+  case "$ACTION" in
+    install) confirm_or_exit "安装 / 更新到 ${INSTALL_DIR}（账号 ${RUN_AS}，端口 ${PORT:-3791}）" ;;
+    uninstall) confirm_or_exit "卸载但保留 ${INSTALL_DIR} 下的配置与数据" ;;
+    purge) confirm_or_exit "完全卸载并删除 ${INSTALL_DIR}（含配置与数据，删前先备份）" ;;
+  esac
+fi
+
+# ── 非交互但已经装过：不动手，把选项说清楚 ────────────────────────────────
+#
+# 管道执行又抓不到终端（CI、非交互 SSH）时，装没装是两回事：
+#   · 没装过 → 照常装，不然 CI 里"一条命令装好"这件事就废了；
+#   · 装过   → **什么也别做**。用户很可能只是想看看，闷头升级等于替他做了决定，
+#             而升级是有风险的（配置格式会变、服务会重启）。
+if [ "$ARGS_GIVEN" -eq 0 ] && [ -z "$TTY_DEV" ] && is_installed; then
+  echo
+  echo "  检测到已安装 Catflap $(installed_version)（目录 ${INSTALL_DIR}，服务$(service_state)）"
+  echo "  当前不是交互终端，为避免动到你现有的配置与数据，**未做任何改动**。"
+  echo "  你的配置与数据都保留在 ${INSTALL_DIR}。"
+  echo
+  echo "  要更新：  sudo ${SELF} --yes"
+  echo "  要升级到指定版本：  sudo ${SELF} --yes --version v2.0.0"
+  echo "  要卸载（保留配置）：  sudo ${SELF} --uninstall"
+  echo "  要完全卸载：  sudo ${SELF} --purge"
+  exit 0
 fi
 
 # ── 卸载 ────────────────────────────────────────────────────────────────────
 if [ "$ACTION" = "uninstall" ] || [ "$ACTION" = "purge" ]; then
   [ "$(id -u)" -eq 0 ] || die "卸载需要 root：sudo ${SELF} --uninstall"
+  is_installed || die "没找到已安装的 Catflap（${INSTALL_DIR}）。装在别的地方就用 --dir 指一下：sudo ${SELF} --uninstall --dir /etc/catflap"
+
   log "停止并禁用服务"
   run systemctl stop "$APP" 2>/dev/null || true
   run systemctl disable "$APP" 2>/dev/null || true
+  # reset-failed 必须做：服务失败过的话 systemd 会留一个 failed 状态，
+  # 不清掉下次 install 同一个名字会被报成"已存在且失败"，看着像装坏了。
+  run systemctl reset-failed "$APP" 2>/dev/null || true
+
+  log "删除服务单元"
   run rm -f "$SERVICE_FILE"
   run systemctl daemon-reload
+
+  # 兜底：进程可能不是 systemd 拉起来的（比如手动跑过一次），停服务管不到它
+  if command -v pkill >/dev/null 2>&1 && [ "$DRY_RUN" -eq 0 ]; then
+    pkill -f "${BIN}" 2>/dev/null || true
+  fi
+
   if [ "$ACTION" = "purge" ]; then
+    # 删数据之前**先打包备份**。用户可能几年后才想起"那条 DDNS 配置"，
+    # 也可能只是手滑选了 4 —— 备份一份，删错了还能救回来。
+    # tar 失败就停手：备份没做成还删数据，是最坏的组合。
+    bak="${INSTALL_DIR}.bak-$(date +%Y%m%d-%H%M%S).tar.gz"
+    log "备份 ${INSTALL_DIR} → ${bak}"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      tar czf "$bak" -C "$(dirname "$INSTALL_DIR")" "$(basename "$INSTALL_DIR")" \
+        || die "备份失败，已停止卸载（数据都还在）。空间不够就先清一下再试。"
+    fi
     log "删除 ${INSTALL_DIR}（含配置与数据）"
     run rm -rf "$INSTALL_DIR"
-    run userdel "$APP" 2>/dev/null || true
+    if id -u "$APP" >/dev/null 2>&1; then
+      log "删除系统用户 ${APP}"
+      run userdel "$APP" 2>/dev/null || true
+    fi
+    log "完全卸载完成"
+    echo
+    info "配置与数据的备份在：${bak}"
+    info "确认不需要了再删： rm -f ${bak}"
   else
     log "保留 ${INSTALL_DIR} 下的配置与数据"
     run rm -f "$BIN"
+    run rm -f "${INSTALL_DIR}/VERSION"
+    log "卸载完成"
+    echo
+    info "配置与数据还在 ${INSTALL_DIR}，随时可以重装回来。"
+    info "要连它们一起删： sudo ${SELF} --purge"
   fi
-  log "完成"
   exit 0
 fi
 
@@ -258,10 +458,10 @@ if [ -z "$VERSION" ]; then
     rm -f "$api_err"
     die "查不到最新版本。
   可以直接指定版本号跳过这一步（版本号见 https://github.com/${REPO}/releases）：
-    ${SELF} --version v1.0.0
+    ${SELF} --version v2.0.0
   若是网络问题，加代理或镜像前缀：
-    sudo env http_proxy=http://<代理>:<端口> ${SELF} --version v1.0.0
-    sudo ${SELF} --version v1.0.0 --mirror https://ghfast.top"
+    sudo env http_proxy=http://<代理>:<端口> ${SELF} --version v2.0.0
+    sudo ${SELF} --version v2.0.0 --mirror https://ghfast.top"
   fi
   rm -f "$api_err"
   # 拿到什么就信什么是危险的：API 偶尔返回空串、带换行或者别的东西，
@@ -269,7 +469,7 @@ if [ -z "$VERSION" ]; then
   # 看不出真正原因。这里先把关，不合格就说清楚。
   case "$latest" in
     v[0-9]*[0-9]) ;;
-    *) die "从 GitHub 拿到的版本号不像样（${latest}）。请手动指定：--version v1.0.0" ;;
+    *) die "从 GitHub 拿到的版本号不像样（${latest}）。请手动指定：--version v2.0.0" ;;
   esac
   VERSION="$latest"
 fi
@@ -287,6 +487,11 @@ case "$VERSION" in
 esac
 TAG="v${VERSION}"
 log "版本：${TAG}"
+
+# 装过的机器先说一声：让用户知道这只是在换二进制，配置不会动
+if is_installed; then
+  log "已装版本：$(installed_version) → 将更新到 ${TAG}（配置与数据保留）"
+fi
 
 base_url() {
   # MIRROR 是「前缀」而不是完整 URL：拼在 github.com 前面即可
@@ -353,6 +558,9 @@ if systemctl is-active --quiet "$APP" 2>/dev/null; then
   systemctl stop "$APP"
 fi
 install -m 0755 "${tmpdir}/${ASSET}" "$BIN"
+# 记下这一版：卸载/更新时要告诉用户"你装的是哪一版"，
+# 光靠二进制问不总是行（服务没起、老版本还没有 --version）。
+printf '%s\n' "$TAG" > "${INSTALL_DIR}/VERSION"
 
 # ── systemd 单元 ────────────────────────────────────────────────────────────
 log "写入 ${SERVICE_FILE}"
@@ -373,9 +581,9 @@ UNIT
   # User/Group 不能用 heredoc 直接写：那段是 <<'UNIT'（不展开变量），
   # 写进去就变成字面量 ${RUN_AS}。和下面的 Environment 一样用 printf 输出。
   printf 'User=%s\nGroup=%s\n' "$RUN_AS" "$RUN_AS"
+  # 安装目录也不能写死：菜单和 --dir 都能改它，写死的话装到别处就启不来。
+  printf 'WorkingDirectory=%s\nExecStart=%s\n' "$INSTALL_DIR" "$BIN"
   cat <<'UNIT'
-WorkingDirectory=/opt/catflap
-ExecStart=/opt/catflap/catflap
 Restart=on-failure
 RestartSec=5
 # 新建文件默认只对属主可读写（config/ 里是明文凭据）
@@ -384,8 +592,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/catflap
 UNIT
+  printf 'ReadWritePaths=%s\n' "$INSTALL_DIR"
   if [ -n "$PORT" ]; then
     printf 'Environment=CATFLAP_PORT=%s\n' "$PORT"
   fi
@@ -434,6 +642,8 @@ cat <<EOF
   常用命令：
       systemctl status catflap
       journalctl -u catflap -f
+      catflap --version
+      sudo ${SELF} --status
       sudo ${SELF} --uninstall
 
 EOF
