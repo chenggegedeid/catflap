@@ -19,11 +19,11 @@ import (
 // 所以这个测试不是"文案检查"：secrets 里每一条都是能被拿去用的东西。
 func TestNoSitePageLeaksNothing(t *testing.T) {
 	secrets := []string{
-		"nas.example.com",   // 已配置的域名
-		"192.168.9.6",       // 内网后端 IP
-		":5000",             // 内网后端端口
-		"Catflap",           // 产品名（可用来批量搜索暴露实例）
-		"反向代理",             // 同上，中文指纹
+		"nas.example.com", // 已配置的域名
+		"192.168.9.6",     // 内网后端 IP
+		":5000",           // 内网后端端口
+		"Catflap",         // 产品名（可用来批量搜索暴露实例）
+		"反向代理",            // 同上，中文指纹
 	}
 
 	cases := []struct {
