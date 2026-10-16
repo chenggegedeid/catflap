@@ -8,8 +8,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/chenggegedeid/catflap/modules/audit"
 	"github.com/chenggegedeid/catflap/utils/jwt"
 	"github.com/chenggegedeid/catflap/utils/pwd"
+
+	"github.com/sirupsen/logrus"
 )
 
 // 密码长度区间。
@@ -90,6 +93,9 @@ func (r *AuthRuntime) WithLock(mutator func(cfg *Config) error) error {
 	}
 	snapshot := r.Config
 	r.mu.Unlock()
+	// 写配置是所有设置的唯一出口，所以在这里同步限流器就够了：
+	// 改完密码 / 改完白名单立刻生效，不用重启。
+	ApplyConfig(snapshot)
 	return UpdateConfig(snapshot)
 }
 
@@ -165,10 +171,25 @@ func (r *AuthRuntime) Login(username, password, remoteAddr string, remember bool
 		return "", ErrNotInitialized
 	}
 
-	// 本机不限速：自己调试时输错密码不该被锁在外面
+	// 本机 + 白名单不限速、不封禁。
+	//
+	// 白名单用的是**审计模块那份**（审计页「永不封禁」一栏），不另开一份 ——
+	// 两处各配各的，用户永远搞不清该填哪个。
+	//
+	// 这条是安全设施不是便利设施：没有它，别人只要知道管理员的出口 IP，
+	// 故意输错几次就能把管理员自己关在门外 —— 一次成本极低的 DoS。
 	var key string
-	if k := clientKey(remoteAddr); !isExemptFromLimit(k) {
+	if k := clientKey(remoteAddr); !isExemptFromLimit(k) && !audit.IsWhitelisted(k) {
 		key = k
+	}
+
+	// 审计的封禁列表优先：这里和「异常访问自动拉黑」共用一份，
+	// 所以被自动拉黑过的来源，连登录也进不来（不是只挡页面）。
+	// 也意味着上次登录失败留下的封禁**重启之后依然有效**。
+	if key != "" {
+		if _, blocked := audit.IsBlocked(key); blocked {
+			return "", ErrLoginLimited
+		}
 	}
 
 	if !globalLoginFailureLimiter.begin(key, time.Now()) {
@@ -176,7 +197,18 @@ func (r *AuthRuntime) Login(username, password, remoteAddr string, remember bool
 	}
 	loginResult := loginAttemptIgnored
 	defer func() {
-		globalLoginFailureLimiter.finish(loginResult, key, time.Now())
+		// 达到阈值时把封禁写进审计：持久 + 和异常访问共用一份列表，
+		// 于是审计页上看得见、标着「自动」、也能手动解封。
+		if globalLoginFailureLimiter.finish(loginResult, key, time.Now()) && key != "" {
+			minutes := cfg.LoginBlockMinutes
+			if minutes <= 0 {
+				minutes = defaultLoginBlockMinutes
+			}
+			reason := fmt.Sprintf("自动拉黑：登录失败 %d 次", cfg.LoginFailMax)
+			if err := audit.BlockAuto(key, reason, minutes); err != nil {
+				logrus.Warnf("[auth] 写入审计封禁失败（%v），进程内封禁仍然有效", err)
+			}
+		}
 	}()
 
 	// 用户名不对就**别去算密码哈希**：Argon2 很慢，让攻击者拿它做 CPU 消耗

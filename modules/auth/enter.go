@@ -21,6 +21,21 @@ type Config struct {
 	// 不至于因为升级把自己锁在外面）。
 	Username string `json:"username,omitempty"`
 
+	// 登录限速。管理后台一旦对公网开放，/api/auth/login 就是个公开的爆破入口，
+	// 这几项决定「输错几次封多久」。
+	//
+	// **默认 5 次 / 封 60 分钟**，比早先的「3 分钟 13 次（软限）」严得多。
+	// 之所以能收紧，是因为下面那条白名单 —— 没有白名单的话，把阈值压这么低
+	// 等于给了攻击者一次很便宜的 DoS：他只要知道管理员的出口 IP，故意输错 5 次
+	// 就能把管理员自己关在门外。
+	//
+	// <=0 表示用 login_limit.go 里的默认常量。
+	LoginFailMax      int `json:"loginFailMax,omitempty"`
+	LoginBlockMinutes int `json:"loginBlockMinutes,omitempty"`
+
+	// 阈值说明见上面；白名单不在这份配置里，用的是审计模块的 Whitelist
+	// （审计页「永不封禁」那一栏）。两处各配各的，用户永远搞不清该填哪个。
+
 	UpdatedAt string `json:"updatedAt"`
 }
 

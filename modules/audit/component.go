@@ -209,6 +209,71 @@ func Block(ip, reason string, minutes int) error {
 	return nil
 }
 
+// BlockAuto 自动拉黑（区别于 Block 的手动）。
+//
+// 给别的模块用：登录失败达到阈值时，由 auth 调它把来源封掉。
+// 走同一份封禁列表的好处是**只有一处能管** —— 审计页上看得见、标了「自动」、
+// 也能手动解封。各模块自己存一份封禁表的话，用户封了这里漏了那里。
+//
+// 白名单是硬兜底：自动拉黑绝不碰白名单里的地址。
+// 这条不能省 —— 没有它，别人只要知道管理员的出口 IP，故意触发几次，
+// 就能把管理员自己关在门外（一次成本极低的 DoS）。
+func BlockAuto(ip, reason string, minutes int) error {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return errEmptyIP
+	}
+	if parseCIDROrIP(ip) == nil {
+		return errBadIP
+	}
+
+	cfg := Runtime.Snapshot()
+	if IsWhitelisted(ip) {
+		logrus.Debugf("[audit] %s 在白名单里，跳过自动拉黑", ip)
+		return errWhitelisted
+	}
+	_ = cfg
+
+	var entry BlockEntry
+	entry.IP = ip
+	entry.Reason = strings.TrimSpace(reason)
+	entry.AddedAt = time.Now()
+	entry.Auto = true
+	if minutes > 0 {
+		entry.ExpiresAt = time.Now().Add(time.Duration(minutes) * time.Minute)
+	}
+
+	if err := Runtime.Update(func(c *Config) error {
+		for i := range c.Blocks {
+			if c.Blocks[i].IP == ip {
+				// 已存在就续期并更新原因，别塞两条一样的
+				c.Blocks[i] = entry
+				return nil
+			}
+		}
+		c.Blocks = append(c.Blocks, entry)
+		return nil
+	}); err != nil {
+		return err
+	}
+	syncBlockedFlags()
+	logrus.Warnf("[audit] 自动拉黑 %s（%s）", ip, reason)
+	return nil
+}
+
+// IsWhitelisted 这个 IP 是否在白名单（永不封禁）里。
+//
+// auth 那边也要用：登录限速的豁免名单就是这一份，
+// 免得两处各配各的、用户不知道该填哪个。
+func IsWhitelisted(ip string) bool {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return false
+	}
+	cfg := Runtime.Snapshot()
+	return matchAny(parseNets(cfg.Whitelist), ip)
+}
+
 // Unblock 解除封禁
 func Unblock(ip string) error {
 	defer syncBlockedFlags()

@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-const testLimit = 13
+// 和实际出厂值一致（默认 5 次），这样测的就是真正会上线的行为
+const testLimit = 5
 
 func testLimiter() *loginFailureLimiter {
 	l := newLoginFailureLimiter()
@@ -37,10 +38,60 @@ func TestLoginFailureLimiterOnlyCountsFailures(t *testing.T) {
 	if limiter.begin(key, now) {
 		t.Fatal("attempt above the failure limit should be rejected")
 	}
-	if !limiter.begin(key, now.Add(limiter.ipWindow)) {
-		t.Fatal("attempt should be allowed after the failure window expires")
+
+	// 窗口过了**也不该放行**：以前是「3 分钟 13 次」的软限，撑过窗口又能接着试，
+	// 爆破者只要放慢节奏（每分钟 4 次）就能无限试下去。现在是封禁到点才放。
+	if limiter.begin(key, now.Add(limiter.ipWindow)) {
+		t.Fatal("should still be blocked after the failure window expires")
 	}
-	limiter.finish(loginAttemptIgnored, key, now.Add(limiter.ipWindow))
+	// 封禁到期才放行
+	if !limiter.begin(key, now.Add(limiter.blockFor+time.Second)) {
+		t.Fatal("should be allowed once the block expires")
+	}
+	limiter.finish(loginAttemptIgnored, key, now.Add(limiter.blockFor+time.Second))
+}
+
+// 达到阈值那一次，finish 要返回 true —— 调用方靠它决定是否写进审计的封禁列表
+func TestLoginFailureLimiterReportsBlockAtThreshold(t *testing.T) {
+	limiter := testLimiter()
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	const key = "203.0.113.7"
+
+	for i := 0; i < testLimit-1; i++ {
+		limiter.begin(key, now)
+		if limiter.finish(loginAttemptFailed, key, now) {
+			t.Fatalf("第 %d 次失败就报封禁了，太早", i+1)
+		}
+	}
+	limiter.begin(key, now)
+	if !limiter.finish(loginAttemptFailed, key, now) {
+		t.Fatalf("第 %d 次失败应当触发封禁并上报", testLimit)
+	}
+}
+
+// 成功之后失败计数清零，重新数
+func TestLoginFailureLimiterResetsAfterSuccess(t *testing.T) {
+	limiter := testLimiter()
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	const key = "203.0.113.7"
+
+	for i := 0; i < testLimit-1; i++ {
+		limiter.begin(key, now)
+		limiter.finish(loginAttemptFailed, key, now)
+	}
+	limiter.begin(key, now)
+	limiter.finish(loginAttemptSucceeded, key, now)
+
+	// 成功清了旧账，还能再错 testLimit-1 次而不被封
+	for i := 0; i < testLimit-1; i++ {
+		if !limiter.begin(key, now) {
+			t.Fatalf("success 之后的第 %d 次失败不该被拒", i+1)
+		}
+		limiter.finish(loginAttemptFailed, key, now)
+	}
+	if !limiter.begin(key, now) {
+		t.Fatal("成功清零后，额度应当恢复")
+	}
 }
 
 // 登录成功会把这个来源的失败记录清掉

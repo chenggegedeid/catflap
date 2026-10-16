@@ -2,6 +2,7 @@ package res
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -84,10 +85,22 @@ func FailTooManyRequests(c *gin.Context) {
 	})
 }
 
+// FailRateLimited 登录被限速/封禁。
+//
+// ⚠️ 以前这里把「3 分钟 13 次」写死在字符串里，配置一改文案就成了假话。
+// 现在由调用方把真实的剩余时间传进来 —— 用户看到的是真话，也知道要等多久
+// （不知道还要等多久的等待最折磨人）。
 func FailRateLimited(c *gin.Context) {
+	FailRateLimitedWith("", c)
+}
+
+func FailRateLimitedWith(msg string, c *gin.Context) {
+	if strings.TrimSpace(msg) == "" {
+		msg = "登录失败次数过多，请稍后再试"
+	}
 	c.JSON(http.StatusTooManyRequests, Response{
 		Code: CodeTooManyRequests,
 		Data: gin.H{},
-		Msg:  "3 分钟内登录失败最多 13 次，请稍后重试",
+		Msg:  msg,
 	})
 }
