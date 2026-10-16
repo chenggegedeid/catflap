@@ -2,11 +2,18 @@
 #
 # Catflap 一键安装 / 更新 / 卸载脚本（Debian / Ubuntu，systemd）。
 #
-# 推荐写法（先下载成文件再跑，交互最稳）：
-#   URL="https://raw.githubusercontent.com/chenggegedeid/catflap/main"
-#   curl -fsSL "$URL/scripts/install.sh" -o /tmp/install.sh && sudo bash /tmp/install.sh "$URL"
+# 推荐写法（先下载成文件再跑，之后 `sudo bash /tmp/install.sh` 就是管理菜单）：
+#
+#   curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh \
+#     -o /tmp/install.sh && sudo bash /tmp/install.sh
+#
+# ⚠️ 别把「脚本的来源地址」当作参数传回来 —— Release 资产不在
+# raw.githubusercontent.com 上，传了会被当成镜像前缀拼进下载链接，拼出
+# `.../main/https://github.com/...` 这种畸形 URL（curl 报 404 且看不出原因）。
+# 要换镜像就传镜像域名：sudo bash /tmp/install.sh https://ghfast.top
 #
 # 管道写法也能用（一样会弹菜单，会去读 /dev/tty）：
+#
 #   curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh | sudo bash
 #
 # 直接跑会先看你装没装：
@@ -22,6 +29,8 @@
 #   sudo bash install.sh --dir /etc/catflap 指定安装目录（卸载定位非默认目录时用）
 #   sudo bash install.sh --dry-run         只打印将要做什么，不动手
 #   sudo bash install.sh --run-as-root     让服务进程用 root 跑（需要绑 80/443 时）
+#   sudo bash install.sh --mirror https://ghfast.top   走镜像下载
+#   sudo bash install.sh https://ghfast.top            同上（位置参数写法）
 #
 # 可选环境变量：
 #   CATFLAP_VERSION=2.0.0   装指定版本（不带 v 前缀也行）
@@ -109,10 +118,25 @@ while [ $# -gt 0 ]; do
       awk 'NR>=3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
       exit 0
       ;;
-    # 位置参数：下载源前缀（和 Lucky 的 `sh install.sh "$URL"` 一个意思）。
+    # 位置参数：镜像前缀（和 Lucky 的 `sh install.sh "$URL"` 一个意思）。
     # 这样换镜像不用记 --mirror，把源直接写在后面就行。
+    #
+    # ⚠️ 但**脚本的来源地址不是下载镜像**：
+    # `.../install.sh` 从 raw.githubusercontent.com 来，而 Release 资产只能从
+    # github.com（或镜像）下。照着「把脚本的 URL 原样传回来」的直觉写，
+    # 会拼出 `https://raw.githubusercontent.com/.../main/https://github.com/...`
+    # 这种畸形 URL，curl 报 "The requested URL returned error: 404"，
+    # 光看报错完全想不到是参数被当成前缀了。
+    # 所以这里认出是脚本源地址就明确忽略并说清楚，不悄悄拼坏。
     http://*|https://*)
-      MIRROR="${1%/}"; ARGS_GIVEN=1; shift ;;
+      case "$1" in
+        *raw.githubusercontent.com*|*gist.githubusercontent.com*|*jsdelivr*|*fastgit.org*)
+          warn "忽略参数 $1：它是脚本自己的来源地址，不能拿来当下载镜像（Release 资产不在那儿）。"
+          warn "要换镜像请用 --mirror https://ghfast.top，或直接不带参数。"
+          ;;
+        *) MIRROR="${1%/}" ;;
+      esac
+      ARGS_GIVEN=1; shift ;;
     *)           die "不认识的参数：$1（用 --help 看用法）" ;;
   esac
 done
@@ -495,11 +519,26 @@ fi
 
 base_url() {
   # MIRROR 是「前缀」而不是完整 URL：拼在 github.com 前面即可
-  if [ -n "$MIRROR" ]; then
-    printf '%s' "${MIRROR%/}/https://github.com"
-  else
+  if [ -z "$MIRROR" ]; then
     printf '%s' "https://github.com"
+    return 0
   fi
+  m="$MIRROR"
+  # 没写 scheme 就补上：用户常写成 --mirror ghfast.top，
+  # 拼出来是 "ghfast.top/https://github.com"（没有 scheme，curl 直接失败）。
+  case "$m" in
+    http://*|https://*) ;;
+    *) m="https://${m}" ;;
+  esac
+  # 前缀里不该再出现 github —— 那是拼坏的迹象（多半是把完整 URL 当前缀传了）。
+  #
+  # ⚠️ 只写 `*github*` 不要写 `*github.com*`：
+  # raw.githubusercontent.com 里是 "githubusercontent"，**不包含**
+  # "github.com" 这个子串 —— 用后者这个守卫形同虚设（实测漏过）。
+  case "$m" in
+    *github*) die "镜像前缀里不该带 github（拿到的是 ${MIRROR}）。前缀只填镜像域名，例如 https://ghfast.top" ;;
+  esac
+  printf '%s' "${m%/}/https://github.com"
 }
 BASE="$(base_url)"
 BIN_URL="${BASE}/${REPO}/releases/download/${TAG}/${ASSET}"

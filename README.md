@@ -123,16 +123,41 @@ catflap/
 ### Debian / Ubuntu —— 一行命令（推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh \
+  -o /tmp/install.sh && sudo bash /tmp/install.sh
 ```
 
 脚本会做的事：识别架构 → 拉最新 Release → **比对 sha256** → 建专用用户 `catflap`
 （**不用 root 跑服务**）→ 装 systemd 单元 → 开机自启 → 打印访问地址。
 
-- 升级：再跑一次同一条命令（只换二进制，配置与数据不动）
-- 卸载：`sudo bash install.sh --uninstall`（保留配置）；`--purge` 连配置一起删
-- 指定版本：`CATFLAP_VERSION=1.0.0 ...`；改端口：`CATFLAP_PORT=8081 ...`
-- 下载慢：`CATFLAP_MIRROR=https://ghfast.top ...`
+**已经装过的话，它会先问你要干什么，不会闷头就开始下载**：
+
+```
+  检测到已安装 Catflap v2.0.0
+    目录：/opt/catflap
+    服务：运行中
+
+  1 更新到最新版（保留配置与数据）
+  2 重装 / 安装指定版本
+  3 卸载（保留配置与数据）
+  4 完全卸载（连配置与数据一起删，删前自动备份）
+  0 退出
+```
+
+管道写法 `curl -fsSL .../install.sh | sudo bash` 也能用，一样会弹这个菜单。
+推荐上面那种「先下载成文件」的写法，是为了让你手上有份脚本可以反复用
+（`sudo bash /tmp/install.sh` 直接就是管理菜单）。
+
+> 别把脚本的来源地址当参数传回来（`... install.sh "$URL"`）——
+> Release 资产不在 raw.githubusercontent.com 上，传了会被当成镜像前缀拼进下载链接，
+> 拼出 `.../main/https://github.com/...` 这种畸形 URL（curl 报 404）。
+
+- 升级：再跑一次（默认就是第 1 项，只换二进制，配置与数据不动）
+- 卸载：`sudo bash /tmp/install.sh --uninstall`（保留配置）；`--purge` 连配置一起删
+  （**删之前会自动打包备份到 `/opt/catflap.bak-<时间戳>.tar.gz`**）
+- 只看不动手：`sudo bash /tmp/install.sh --status`
+- 指定版本：`--version v2.0.0`；改端口：`--port 8081`
+- 下载慢：加镜像 `sudo bash /tmp/install.sh https://ghfast.top`
 
 ### 飞牛 fnOS
 
