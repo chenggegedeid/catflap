@@ -605,10 +605,19 @@ export interface ProxyAccess {
   rules: string[]
 }
 
+/** 外网错误页（404 没匹配到站点 / 502 后端连不上）的显示方式 */
+export interface ErrorPageConfig {
+  /** ''（= 默认脱敏）| 'simple' | 'custom' */
+  mode: string
+  /** 自定义整页 HTML，支持 {{status}} 与 {{message}} 两个占位符 */
+  customHtml?: string
+}
+
 export interface ProxyConfig {
   entry: ProxyEntry
   listeners: ProxyListener[]
   sites: ProxySite[]
+  errorPage: ErrorPageConfig
 }
 
 /** 隧道运行状态（token 不回显，只说填没填） */

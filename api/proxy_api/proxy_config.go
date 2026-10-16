@@ -19,6 +19,8 @@ type ProxyConfigView struct {
 	// Forwards 端口转发。**必须有**：「端口转发」页读的就是这个接口，
 	// 少了这个字段，添加能成功但列表永远是空的（用户实测踩到）。
 	Forwards []proxymodel.Forward `json:"forwards"`
+	// ErrorPage 外网错误页（404 / 502）的显示方式。「系统设置」页用。
+	ErrorPage proxymodel.ErrorPage `json:"errorPage"`
 }
 
 // EntryView 两个默认入口的设置。
@@ -48,7 +50,8 @@ func (ProxyApi) ProxyConfigView(c *gin.Context) {
 		// 不排的话拖完一刷新就回到原顺序 —— 表现为「拖动没反应」。
 		Sites: proxy.SortSites(cfg.Sites),
 		// 端口转发同样要带上：这个视图就是「端口转发」页的数据源。
-		Forwards: proxy.SortForwards(cfg.Forwards),
+		Forwards:  proxy.SortForwards(cfg.Forwards),
+		ErrorPage: cfg.ErrorPage,
 	}, c)
 }
 

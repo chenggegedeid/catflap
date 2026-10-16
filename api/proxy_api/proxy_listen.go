@@ -3,6 +3,7 @@ package proxy_api
 import (
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/proxy"
+	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
 	"github.com/chenggegedeid/catflap/utils/res"
 
 	"github.com/gin-gonic/gin"
@@ -73,4 +74,25 @@ func (ProxyApi) ProxyAccessLogView(c *gin.Context) {
 		return
 	}
 	res.OkWithMsg("访问日志已关闭", c)
+}
+
+// ErrorPageSaveRequest 错误页设置
+type ErrorPageSaveRequest struct {
+	// Mode ""（默认脱敏）| "simple" | "custom"
+	Mode string `json:"mode"`
+	// CustomHTML 自定义整页 HTML，支持 {{status}} 与 {{message}}
+	CustomHTML string `json:"customHtml"`
+}
+
+// ProxyErrorPageSaveView 保存外网错误页的显示方式
+func (ProxyApi) ProxyErrorPageSaveView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ErrorPageSaveRequest](c)
+	if err := proxy.SetErrorPage(proxymodel.ErrorPage{
+		Mode:       cr.Mode,
+		CustomHTML: cr.CustomHTML,
+	}); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithMsg("已保存，下一次错误响应就生效", c)
 }

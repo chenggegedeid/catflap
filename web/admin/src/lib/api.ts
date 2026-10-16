@@ -671,6 +671,13 @@ export const saveProxyEntry = (body: EntryPayload) =>
     body: JSON.stringify(body),
   })
 
+/** 外网错误页：默认脱敏（不列域名、不说后端地址），也可换成自定义 HTML */
+export const saveErrorPage = (body: { mode: string; customHtml: string }) =>
+  requestWithMsg<unknown>('/api/proxy/errorpage', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
 /** 单独一个接口：它即点即生效，不该顺带把监听重开一遍 */
 export const setProxyAccessLog = (enabled: boolean) =>
   request<unknown>('/api/proxy/accesslog', {

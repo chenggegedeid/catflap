@@ -19,6 +19,9 @@ func InitProxy() error {
 	Runtime.Config = cfg
 	Runtime.Router = NewRouter(cfg.Sites)
 	Runtime.mu.Unlock()
+	// 启动后先把错误页配置灌进读取缓存（见 errorPageCache 的说明）。
+	// 不在包级初始化里做，是为了避免 Runtime 的初始化环。
+	setErrorPageCache(cfg.ErrorPage)
 
 	// 老配置的站点/转发里 deviceId 还是 0（那是后加的字段，以前按 IP 字符串关联）。
 	// **放在这里**：配置刚读完、数据一定在 —— 改设备 IP 时才知道该同步哪几条规则。

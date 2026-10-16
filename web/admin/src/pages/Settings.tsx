@@ -6,9 +6,11 @@ import {
   MIN_PASSWORD_LENGTH,
   changePassword,
   checkUpdate,
+  getProxyConfig,
   getStunNetwork,
   getUpdateStatus,
   installUpdate,
+  saveErrorPage,
   setToken,
   setUpdateConfig,
   updateStunNetwork,
@@ -24,7 +26,15 @@ export function Settings() {
   return (
     <div className="space-y-4">
       <SoftwareUpdate />
-      <ChangePassword />
+      {/*
+        这两张并排：改密码的表单本来就窄（max-w-sm），
+        一个人占一整行右边空一大片，看着像页面没排完。
+        窄屏（手机）自动回到上下堆叠。
+      */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChangePassword />
+        <ErrorPageSettings />
+      </div>
       <NetworkSettings />
     </div>
   )
@@ -157,7 +167,135 @@ function ChangePassword() {
   )
 }
 
-// ModeSwitch 三选一的分段按钮
+/**
+ * 错误页设置 —— 外网访客看到 404 / 502 时是什么样子。
+ *
+ * 默认是「不透露」：不列已配置的域名、不说后端地址、不出现产品名。
+ * 以前那个页面会把域名清单直接打给任何带着任意 Host 头来的请求，
+ * 等于替人做了一遍子域名枚举 —— 这一页就是把那个口子关掉、并留一个
+ * 愿意自己写页面时的出口。
+ */
+function ErrorPageSettings() {
+  const [mode, setMode] = useState('')
+  const [html, setHtml] = useState('')
+  const [savedMode, setSavedMode] = useState('')
+  const [savedHtml, setSavedHtml] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [done, setDone] = useState('')
+
+  useEffect(() => {
+    getProxyConfig()
+      .then((cfg) => {
+        const p = cfg.errorPage || { mode: '' }
+        setMode(p.mode || '')
+        setHtml(p.customHtml || '')
+        setSavedMode(p.mode || '')
+        setSavedHtml(p.customHtml || '')
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : '读取失败'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const dirty = mode !== savedMode || (mode === 'custom' && html !== savedHtml)
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    setErr('')
+    setDone('')
+    if (mode === 'custom' && !html.trim()) {
+      setErr('选了自定义就要填页面内容')
+      return
+    }
+    setBusy(true)
+    try {
+      const { msg } = await saveErrorPage({ mode, customHtml: html })
+      // 切回默认时后端会把内容清掉，界面跟着清，不然框里留着旧内容、下次切回去
+      // 会突然冒出来
+      const keptHtml = mode === 'custom' ? html : ''
+      setSavedMode(mode)
+      setSavedHtml(keptHtml)
+      setHtml(keptHtml)
+      setDone(msg || '已保存')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader title="外网错误页" />
+
+      <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+        别人访问到不存在的域名、或者后端连不上时看到的那页。
+        <br />
+        <span className="font-semibold text-slate-600">默认那页什么都不透露</span>
+        ：不列你配了哪些域名、不说后端地址在哪、也不写这是什么软件 —— 谁都能请求到它，
+        写多了等于替人枚举一遍站点。真要查为什么连不上，去「运行日志」看，那里每条都记着。
+      </div>
+
+      {loading ? (
+        <div className="py-6 text-center text-sm text-slate-400">正在加载…</div>
+      ) : (
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <div className={labelCls}>显示方式</div>
+            <ModeSwitch
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: '', label: '默认（不透露）' },
+                { value: 'custom', label: '自定义 HTML' },
+              ]}
+            />
+            <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
+              {mode === 'custom'
+                ? '整页 HTML，支持两个占位符：{{status}}（404 / 502）、{{message}}（一句说明）。想伪装成什么站点都行。'
+                : '一张中性卡片，只说「没有找到」或「服务暂时不可用」，看不出是谁家的服务。'}
+            </div>
+          </div>
+
+          {mode === 'custom' && (
+            <label className="block">
+              <div className={labelCls}>页面内容（HTML）</div>
+              <textarea
+                value={html}
+                onChange={(e) => setHtml(e.target.value)}
+                rows={7}
+                spellCheck={false}
+                placeholder={`<!DOCTYPE html>
+<html><body style="font-family:system-ui;text-align:center;padding:4rem">
+  <h1>{{status}}</h1>
+  <p>{{message}}</p>
+</body></html>`}
+                className={`${fieldCls} font-mono text-xs`}
+              />
+            </label>
+          )}
+
+          {err && <div className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
+          {done && (
+            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-600">{done}</div>
+          )}
+
+          <button
+            type="submit"
+            disabled={busy || !dirty}
+            className="flex items-center gap-1.5 rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            {busy ? '保存中…' : '保存'}
+          </button>
+        </form>
+      )}
+    </Card>
+  )
+}
+
+// ModeSwitch 三选一的分段按钮段按钮
 function ModeSwitch<T extends string>({
   value,
   options,
