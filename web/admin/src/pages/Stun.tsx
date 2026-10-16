@@ -2298,15 +2298,16 @@ export function Stun() {
     )
   }
 
-  if (!config) {
-    return <Card><div className="py-12 text-center text-sm text-slate-400">正在加载...</div></Card>
-  }
-
   // 拖动排序：设备和设备内的服务都能拖
   const [dragDev, setDragDev] = useState(0)
   const [overDev, setOverDev] = useState(0)
   const [dragSvc, setDragSvc] = useState('')
   const [overSvc, setOverSvc] = useState('')
+
+  if (!config) {
+    return <Card><div className="py-12 text-center text-sm text-slate-400">正在加载...</div></Card>
+  }
+
 
   /** 设备之间换顺序：把 from 挪到 to 的位置再提交 */
   const commitDeviceOrder = async (from: number, to: number) => {
