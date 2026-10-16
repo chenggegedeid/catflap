@@ -11,6 +11,7 @@ import {
   getUpdateStatus,
   installUpdate,
   saveErrorPage,
+  saveExposeAdmin,
   setToken,
   setUpdateConfig,
   updateStunNetwork,
@@ -98,8 +99,9 @@ function ChangePassword() {
       <CardHeader title="修改密码" />
 
       <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
-        登录要同时给用户名和密码。连续错 13 次会锁 3 分钟，**这个锁是按来源 IP
-        算的** —— 别人一直试只会把他自己挡住，你从别的地方照样能进来。
+        登录要同时给用户名和密码。连续错 5 次会把来源 IP 封禁 1 小时（阈值和时长可在后台配置里改），
+        **这个锁是按来源 IP 算的** —— 别人一直试只会把他自己挡住，你从别的地方照样能进来。
+        被封的来源在「访问审计」页能手动解封；把你的出口 IP 填进「永不封禁」名单就永远不会被误封。
         <br />
         用户名不区分大小写，登录时怎么敲都认。
       </div>
@@ -180,6 +182,8 @@ function ErrorPageSettings() {
   const [html, setHtml] = useState('')
   const [savedMode, setSavedMode] = useState('')
   const [savedHtml, setSavedHtml] = useState('')
+  // 远程管理开关（默认关，打开后站点后端才允许填后台端口）
+  const [exposeAdmin, setExposeAdmin] = useState(false)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -193,10 +197,41 @@ function ErrorPageSettings() {
         setHtml(p.customHtml || '')
         setSavedMode(p.mode || '')
         setSavedHtml(p.customHtml || '')
+        setExposeAdmin(!!cfg.exposeAdmin)
       })
       .catch((e) => setErr(e instanceof Error ? e.message : '读取失败'))
       .finally(() => setLoading(false))
   }, [])
+
+  // 开远程管理是**危险操作**，单独一把处理，不跟错误页共用保存按钮 ——
+  // 免得改个壁纸顺手把后台挂出去
+  const toggleExpose = async () => {
+    const next = !exposeAdmin
+    if (
+      next &&
+      !confirm(
+        '打开之后，站点后端就可以填 Catflap 自己的后台端口了 —— 那等于把登录页挂到公网上，' +
+          '任何人都能来试密码。\n\n' +
+          '打开前请确认：审计页「永不封禁」名单里已经填了你自己的出口 IP。' +
+          '否则别人故意输错几次密码，就能把你关在门外。\n\n' +
+          '确定要打开吗？',
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    setErr('')
+    setDone('')
+    try {
+      const { msg } = await saveExposeAdmin(next)
+      setExposeAdmin(next)
+      setDone(msg || '已保存')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const dirty = mode !== savedMode || (mode === 'custom' && html !== savedHtml)
 
@@ -227,7 +262,7 @@ function ErrorPageSettings() {
 
   return (
     <Card>
-      <CardHeader title="外网错误页" />
+      <CardHeader title="外网访问" />
 
       <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
         别人访问到不存在的域名、或者后端连不上时看到的那页。
@@ -275,6 +310,42 @@ function ErrorPageSettings() {
               />
             </label>
           )}
+
+          {/* 远程管理。和错误页放一张卡里：它们都是「对外暴露什么」 */}
+          <div className="border-t border-slate-100 pt-3">
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={exposeAdmin}
+                aria-label="允许通过反代暴露管理后台"
+                onClick={toggleExpose}
+                disabled={busy}
+                className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition ${
+                  exposeAdmin ? 'bg-blue-500' : 'bg-slate-300'
+                } ${busy ? 'opacity-60' : ''}`}
+              >
+                <span
+                  className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    exposeAdmin ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-700">允许通过反代暴露管理后台</div>
+                <div className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  关着的时候，站点后端不能填 Catflap 自己的后台端口 —— 那是防手滑用的。
+                  打开后才能用「反代 → 后台」这条路从外面管理。
+                  <br />
+                  <span className={exposeAdmin ? 'text-amber-600' : 'text-slate-500'}>
+                    {exposeAdmin
+                      ? '现在是开着的：登录页对对应站点可见。请确认审计页「永不封禁」名单里有你自己的出口 IP。'
+                      : '打开后，登录失败 5 次会自动封禁来源（阈值和时长可在后台配置里改）。'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {err && <div className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
           {done && (

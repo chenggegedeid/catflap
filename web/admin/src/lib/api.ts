@@ -678,6 +678,13 @@ export const saveErrorPage = (body: { mode: string; customHtml: string }) =>
     body: JSON.stringify(body),
   })
 
+/** 是否允许把管理后台通过反代挂出去（远程管理用，默认关） */
+export const saveExposeAdmin = (enabled: boolean) =>
+  requestWithMsg<unknown>('/api/proxy/expose-admin', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  })
+
 /** 单独一个接口：它即点即生效，不该顺带把监听重开一遍 */
 export const setProxyAccessLog = (enabled: boolean) =>
   request<unknown>('/api/proxy/accesslog', {
