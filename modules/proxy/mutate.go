@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/chenggegedeid/catflap/core"
+	device "github.com/chenggegedeid/catflap/modules/device"
 	"github.com/chenggegedeid/catflap/modules/proxy/model"
 	"github.com/chenggegedeid/catflap/utils/domain"
+
+	"github.com/sirupsen/logrus"
 )
 
 // 本文件是 api 层改配置的唯一入口。
@@ -26,6 +29,11 @@ func SaveSite(in model.Site) (model.Site, error) {
 	site, err := normalizeSite(in, Runtime.Snapshot().BaseDomain)
 	if err != nil {
 		return model.Site{}, err
+	}
+	// 前端没显式传 deviceId 时（老数据 / 手填 backend），按 backend 的 IP 反查设备。
+	// 存下来之后，改那台设备的 IP 也不会把这条站点判成"未归设备"。
+	if site.DeviceID == 0 {
+		site.DeviceID = deviceIDByIP(site.Backend)
 	}
 
 	var saved model.Site
@@ -477,6 +485,9 @@ func normalizeForward(in model.Forward, entry model.ProxyConfig) (model.Forward,
 
 // SaveForward 新增或修改一条端口转发（ID 为 0 表示新增）
 func SaveForward(in model.Forward) (model.Forward, error) {
+	if in.DeviceID == 0 {
+		in.DeviceID = deviceIDByIP(in.Target)
+	}
 	var saved model.Forward
 	err := Runtime.Update(func(cfg *model.ProxyConfig) error {
 		f, err := normalizeForward(in, *cfg)
@@ -579,4 +590,134 @@ func SortSites(in []model.Site) []model.Site {
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+// SortForwards 端口转发按界面顺序排（sortOrder 小的在前）。
+//
+// 和 SortSites 同一套规则：拖动排序存在转发自己的 sortOrder 上，
+// 接口返回时不排的话，拖完一刷新就回原顺序 —— 表现为「拖动没反应」。
+func SortForwards(in []model.Forward) []model.Forward {
+	out := make([]model.Forward, len(in))
+	copy(out, in)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// deviceIDByIP 从 "ip:port" 里切出 IP，反查设备表的 ID；查不到返回 0（调用方按老逻辑：按 IP 字符串匹配）。
+//
+// **放在这里而不是 device 模块**：proxy 已经依赖 device（拿设备列表），不需要再绕一层。
+// 返回值只用于"归属"，拿不到就按 IP 匹配 —— 不会因为设备表里没有这台机器就丢规则。
+func deviceIDByIP(addr string) uint {
+	ip := addr
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		ip = addr[:i]
+	}
+	if ip == "" {
+		return 0
+	}
+	if d := device.GetByIP(ip); d != nil {
+		return d.DeviceID
+	}
+	return 0
+}
+
+// SyncIPsAfterDeviceChange 设备 IP 变了之后调用：把本模块里按旧 IP 写的
+// 规则（Site.Backend / Forward.Target）里的那段 IP 换成新 IP。
+//
+// **由 device 模块通过回调调用**（device.SetIPChangedHook）—— 依赖方向是
+// proxy → device，device 不能反向 import proxy，所以同步逻辑放在这边。
+//
+// 为什么必须同步：设备表里的 IP 是单一真相，而 Backend/Target 里存了一份
+// "ip:port" 字符串。不同步的话，改完设备 IP 后这条规则的 IP 还是旧的
+// → 前端按 deviceId 找得到设备，但按 IP 匹配不上 → 被判成"未归设备"。
+//
+// 只改 IP 段、保留端口：端口是服务自己的，跟设备无关。
+func SyncIPsAfterDeviceChange(oldIP, newIP string) error {
+	if oldIP == "" || oldIP == newIP {
+		return nil
+	}
+	return Runtime.Update(func(cfg *model.ProxyConfig) error {
+		for i := range cfg.Sites {
+			if ip, port := splitAddr(cfg.Sites[i].Backend); ip == oldIP {
+				cfg.Sites[i].Backend = joinAddr(newIP, port)
+			}
+		}
+		for i := range cfg.Forwards {
+			if ip, port := splitAddr(cfg.Forwards[i].Target); ip == oldIP {
+				cfg.Forwards[i].Target = joinAddr(newIP, port)
+			}
+		}
+		return nil
+	})
+}
+
+// splitAddr 把 "ip:port" 拆成两段；没有冒号时 port 为空（只有 IP）。
+func splitAddr(addr string) (ip string, port string) {
+	i := strings.LastIndex(addr, ":")
+	if i < 0 {
+		return addr, ""
+	}
+	return addr[:i], addr[i+1:]
+}
+
+// BackfillDeviceIDs 把老数据里 deviceId 还是 0 的站点 / 转发回填上设备 ID。
+//
+// **什么时候需要**：deviceId 字段是后加的（之前站点按 Backend 里的 IP 字符串
+// 关联设备），老配置读进来全是 0。不回填的话：
+//   - 改设备 IP 时同步不了（找不到"这条规则属于哪台设备"）
+//   - 界面按 deviceId 找不到 → 掉进"未归到设备"
+//
+// 启动时跑一次即可；之后每次保存都会由 SaveSite / SaveForward 维护。
+// 返回填了几条（日志用），失败返回错误。
+func BackfillDeviceIDs() (int, error) {
+	n := 0
+	err := Runtime.Update(func(cfg *model.ProxyConfig) error {
+		// **空配置绝不写盘**：如果这时配置还没加载（调用时机错了），
+		// Update 会把"空"当成新状态写进文件 —— 那是一次真实事故的原因
+		// （用户的 4 条站点被写成空表）。宁可什么都不做，也不能覆盖掉真实数据。
+		if len(cfg.Sites) == 0 && len(cfg.Forwards) == 0 {
+			logrus.Warn("[proxy] BackfillDeviceIDs 跳过：配置为空（通常意味着调用时机太早，配置还没加载）")
+			return nil
+		}
+		logrus.Infof("[proxy] BackfillDeviceIDs 开始：sites=%d forwards=%d", len(cfg.Sites), len(cfg.Forwards))
+		for i := range cfg.Sites {
+			// 老表单留下的脏数据：选了设备但端口没填时会被拼成 "192.168.9.8:"，
+			// 末尾那个空冒号会让后端解析不出端口、转发失败。顺手在这里清掉。
+			cfg.Sites[i].Backend = strings.TrimSuffix(cfg.Sites[i].Backend, ":")
+			if cfg.Sites[i].DeviceID == 0 {
+				id := deviceIDByIP(cfg.Sites[i].Backend)
+				logrus.Infof("[proxy] 站点 #%d backend=%s → 匹配到设备 id=%d", cfg.Sites[i].ID, cfg.Sites[i].Backend, id)
+				if id != 0 {
+					cfg.Sites[i].DeviceID = id
+					n++
+				}
+			}
+		}
+		for i := range cfg.Forwards {
+			cfg.Forwards[i].Target = strings.TrimSuffix(cfg.Forwards[i].Target, ":")
+			if cfg.Forwards[i].DeviceID == 0 {
+				if id := deviceIDByIP(cfg.Forwards[i].Target); id != 0 {
+					cfg.Forwards[i].DeviceID = id
+					n++
+				}
+			}
+		}
+		return nil
+	})
+	return n, err
+}
+
+// joinAddr 把 IP 和端口拼回 "ip:port"。
+// **端口为空就只给 IP**：老配置里 backend 可能只写了 IP（没有 :port），
+// 那种情况拼成 "192.168.9.77:" 会多一个冒号，转发时解析不出端口。
+func joinAddr(ip, port string) string {
+	if port == "" {
+		return ip
+	}
+	return ip + ":" + port
 }

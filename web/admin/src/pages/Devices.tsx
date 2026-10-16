@@ -10,11 +10,22 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { GripVertical, HardDrive, Pencil, Plus, Radar, Server, Trash2 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
-import type { Device, ProxyConfig, StunConfig } from '../types'
+import type { Device, LanHost, LanSubnet, ProxyConfig, StunConfig } from '../types'
+import { LanScanModal } from '../components/LanScanModal'
+import { modalBackdrop } from '../components/modal'
 
 export function Devices() {
   const [devices, setDevices] = useState<Device[]>([])
   const [modal, setModal] = useState<{ open: boolean; initial?: Device }>({ open: false })
+  // 扫描弹窗：scan() 打开它，addScanned 在用户点某台机器时被调。
+  const [scanModal, setScanModal] = useState<{ open: boolean; subnets: LanSubnet[] }>({ open: false, subnets: [] })
+  // 删除确认框：设备上还有服务时，把清单给用户看，确认才连带删
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    open: boolean
+    device?: Device
+    detail: string
+  }>({ open: false, detail: '' })
+  const [deleting, setDeleting] = useState(false)
   const [toast, setToast] = useState('')
 
   const load = useCallback(async () => {
@@ -51,7 +62,13 @@ export function Devices() {
     }
   }
 
-  /** 全局扫描：扫网段找机器，加进设备表 */
+  /**
+   * 全局扫描：扫网段找机器，**弹窗列出，用户点哪台加哪台** —— 不再自动全加。
+   *
+   * 旧版会直接把所有新机器存进设备表（带自定名），结果 LAN 上谁扫谁都是一堆
+   * 重复设备。现在用 LanScanModal（和穿透页同一个组件，样式一致）展示，
+   * 用户点一台就加一台，不点就不加。
+   */
   const scan = async () => {
     setToast('正在扫描局域网…')
     try {
@@ -60,31 +77,66 @@ export function Devices() {
         setToast('没找到可扫描的网段')
         return
       }
-      const hosts = await api.scanProxyLan(subnets[0].cidr)
-      const known = new Set(devices.map((d) => d.ip))
-      const fresh = hosts.filter((h) => !known.has(h.ip) && !h.self)
-      if (fresh.length === 0) {
-        setToast('没有发现新的机器')
-        return
-      }
-      for (const h of fresh) {
-        await api.saveDevice(0, h.name || h.ip, h.ip)
-      }
-      setToast(`已添加 ${fresh.length} 台设备`)
-      await load()
+      setScanModal({ open: true, subnets })
     } catch (e) {
       setToast(e instanceof Error ? e.message : '扫描失败')
     }
   }
 
+  /** 扫描弹窗里点了某台机器 → 加进设备表（已在列表里的会标"已加入"，不重复加） */
+  const addScanned = async (host: LanHost) => {
+    if (devices.some((d) => d.ip === host.ip)) {
+      setToast(`${host.name || host.ip} 已经在设备列表里`)
+      return
+    }
+    try {
+      await api.saveDevice(0, host.name || host.ip, host.ip)
+      setToast(`已添加 ${host.name || host.ip}`)
+      await load()
+    } catch (e) {
+      setToast('添加失败: ' + (e instanceof Error ? e.message : ''))
+    }
+  }
+
+  /**
+   * 删设备。这台设备上还挂着服务时，后端会返回 409 并列出那些服务 ——
+   * 把清单弹给用户看清楚，确认后带 cascade 再删一次（连带删掉那些服务）。
+   *
+   * 为什么要连带删：设备删了，挂在它上面的服务就成了孤儿 —— 配置还在、
+   * 但永远匹配不到设备，于是**静默地不再运行**，比直接删掉更难查。
+   */
   const remove = async (d: Device) => {
-    if (!window.confirm(`确认删除设备「${d.name}」？`)) return
     try {
       await api.deleteDevice(d.id)
       setToast('已删除')
       await load()
+      return
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      // 不是"上面还有服务"的错误 → 真失败，直接报
+      if (!msg.includes('这台设备上还有')) {
+        setToast(msg || '删除失败')
+        return
+      }
+      setDeleteConfirm({ open: true, device: d, detail: msg })
+    }
+  }
+
+  /** 用户在确认框里点了「一并删除」 */
+  const removeCascade = async () => {
+    const d = deleteConfirm.device
+    if (!d) return
+    setDeleting(true)
+    try {
+      await api.deleteDevice(d.id, true)
+      setDeleteConfirm({ open: false, detail: '' })
+      setToast('已删除设备及其服务')
+      await load()
     } catch (e) {
       setToast(e instanceof Error ? e.message : '删除失败')
+      setDeleteConfirm({ open: false, detail: '' })
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -183,6 +235,48 @@ export function Devices() {
             setModal({ open: false })
             setToast('已保存')
             await load()
+          }}
+        />
+      )}
+
+      {deleteConfirm.open && deleteConfirm.device && (
+        <div className={modalBackdrop} onMouseDown={(e) => { if (e.target === e.currentTarget) setDeleteConfirm({ open: false, detail: '' }) }}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl ring-1 ring-slate-200">
+            <h3 className="mb-3 text-sm font-bold text-slate-800">
+              删除设备「{deleteConfirm.device.name}」
+            </h3>
+            {/* detail 是后端返回的清单，逐条列出将被连带删掉的服务 */}
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-rose-50 p-3 text-[11px] leading-relaxed text-rose-700">
+{deleteConfirm.detail}
+            </pre>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteConfirm({ open: false, detail: '' })}
+                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={removeCascade}
+                disabled={deleting}
+                className="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-600 disabled:opacity-50"
+              >
+                {deleting ? '删除中…' : '确认，一并删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scanModal.open && (
+        <LanScanModal
+          subnets={scanModal.subnets}
+          takenPorts={new Set<string>()}
+          addedHosts={new Map(devices.map((d) => [d.ip, d.name]))}
+          onCancel={() => setScanModal({ open: false, subnets: [] })}
+          onPick={(h) => void addScanned(h)}
+          onPickPort={() => {
+            /* 设备页只加设备，不关心端口 */
           }}
         />
       )}

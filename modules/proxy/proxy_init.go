@@ -20,6 +20,16 @@ func InitProxy() error {
 	Runtime.Router = NewRouter(cfg.Sites)
 	Runtime.mu.Unlock()
 
+	// 老配置的站点/转发里 deviceId 还是 0（那是后加的字段，以前按 IP 字符串关联）。
+	// **放在这里**：配置刚读完、数据一定在 —— 改设备 IP 时才知道该同步哪几条规则。
+	// （早些时候放在启动钩子里，结果读到未加载的空配置，退出时又把空表写回文件，
+	//   那次把用户的 4 条站点清空了。）
+	if n, err := BackfillDeviceIDs(); err != nil {
+		logrus.Warnf("[proxy] 回填站点/转发的 deviceId 失败：%v", err)
+	} else if n > 0 {
+		logrus.Infof("[proxy] 已为 %d 条站点/转发补上设备归属", n)
+	}
+
 	core.OnShutdown(func() {
 		Runtime.pool.StopAll()
 		if err := SaveConfig(Runtime.Snapshot()); err != nil {

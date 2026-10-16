@@ -45,6 +45,7 @@ import type {
   Device,
   LanPort,
   ProxyForward,
+  NotifyServiceRef,
 } from '../types'
 
 interface ApiResponse<T> {
@@ -366,6 +367,11 @@ export const deleteStunDevice = (deviceId: number) =>
 export interface StunServicePayload {
   deviceId: number
   name: string
+  /**
+   * 访问控制（IP 门禁）—— 和反代站点同一套结构。
+   * 新建时不传会按默认处理：黑名单模式 + 空规则。
+   */
+  access?: { mode: string; rules?: string[] }
   internalPort: number
   protocol: string
   useUpnp: boolean
@@ -390,6 +396,13 @@ export interface StunServicePayload {
   description: string
   /** 选用的全局通知渠道 ID */
   channelIds: string[]
+  /**
+   * 自定义通知正文（#{xxx} 占位符）。
+   *
+   * 通知方式和 token 在通知页全局配，服务只管内容和模板。
+   * 这个字段以前没进报文 —— 界面上写了模板，点保存后落盘里根本没有它。
+   */
+  notifyTemplate?: string
   /** 旧的内联 webhook，已被通知中心取代（保留做回退，界面不再编辑） */
   webhookconfig?: WebhookConfig
   redirect?: RedirectConfig
@@ -464,6 +477,20 @@ export const getHomeConfig = () =>
 // ===================== DDNS =====================
 
 export const getDdnsConfig = () => request<DdnsConfig>('/api/ddns/config')
+
+/**
+ * DDNS 里配置过的**主域列表**（去重）—— 域名输入控件的主域下拉用。
+ * 没配 DDNS 时返回空数组，DomainInput 会退化成普通完整域名输入。
+ */
+export const getDdnsZones = () =>
+  getDdnsConfig().then((c) => {
+    const set = new Set<string>()
+    for (const r of c.records ?? []) {
+      const d = (r.domain || '').trim().toLowerCase()
+      if (d) set.add(d)
+    }
+    return [...set]
+  })
 
 /** 本机网卡列表，给「本地网卡」这个 IP 来源当选项 */
 export const getDdnsInterfaces = () => request<NetInterface[]>('/api/ddns/interfaces')
@@ -662,6 +689,11 @@ export const restartTunnel = () =>
   request<TunnelRuntimeState>('/api/tunnel/restart', { method: 'POST' })
 
 export interface ProxySitePayload {
+  /**
+   * 站点后端在哪台设备上。**按 id 关联，改设备 IP 时归属不变。**
+   * 后端在没传时会按 backend 的 IP 反查兜底，但前端有准的就该给准的。
+   */
+  deviceId: number
   hosts: string[]
   pathPrefix: string
   stripPrefix: boolean
@@ -827,6 +859,9 @@ export async function getNotifyConfig(): Promise<NotifyConfigView> {
   return data
 }
 
+/** 哪些穿透服务在用哪些渠道（独立接口，方便通知页直接拉） */
+export const getNotifyServiceRefs = () => request<NotifyServiceRef[]>('/api/notify/service-refs')
+
 export const saveNotifyChannel = (body: NotifyChannelSavePayload) =>
   request<{ id: string }>('/api/notify/channel', { method: 'POST', body: JSON.stringify(body) })
 
@@ -835,6 +870,30 @@ export const deleteNotifyChannel = (id: string) =>
 
 export const testNotifyChannel = (body: { id?: string; type?: string; config?: Record<string, string> }) =>
   requestWithMsg<unknown>('/api/notify/channel/test', { method: 'POST', body: JSON.stringify(body) })
+
+export interface NotifyServiceTestResult {
+  channelId: string
+  channelName: string
+  ok: boolean
+  error?: string
+}
+
+/**
+ * 用服务自己的配置（渠道 + 模板）试发一条。
+ *
+ * 用户最想知道的就是"我这样配到底能不能收到"，所以走真实事件那条
+ * 渲染 + 发送路径，逐渠道回结果 —— 三个渠道里两个通一个不通时，
+ * 只回一句"发送失败"他根本不知道该去改哪个。
+ */
+export const testNotifyService = (body: {
+  channelIds: string[]
+  template?: string
+  fields?: Record<string, string>
+}) =>
+  request<{ results: NotifyServiceTestResult[]; sent: number; total: number }>(
+    '/api/notify/service-test',
+    { method: 'POST', body: JSON.stringify(body) },
+  )
 
 export const saveNotifyRule = (body: NotifyRuleSavePayload) =>
   request<unknown>('/api/notify/rule', { method: 'POST', body: JSON.stringify(body) })
@@ -852,7 +911,16 @@ export const deleteNotifyRule = (id: string) =>
 export const getTrafficRealtime = () => request<TrafficRealtime>('/api/traffic/realtime')
 
 /** 近 N 天趋势（默认 7 天） */
-export const getTrafficTrend = (days = 7) => request<TrafficTrend>(`/api/traffic/trend?days=${days}`)
+/**
+ * 流量趋势。**hours 优先**（近 1 小时 / 近 24 小时这类），没传用 days。
+ * 聚合粒度后端按范围自动定：≤48 小时按小时，更大按天。
+ */
+export const getTrafficTrend = (params: { hours?: number; days?: number } = {}) => {
+  const q = new URLSearchParams()
+  if (params.hours) q.set('hours', String(params.hours))
+  else q.set('days', String(params.days ?? 7))
+  return request<TrafficTrend>(`/api/traffic/trend?${q.toString()}`)
+}
 
 // ===================== 访问审计与 IP 管理 =====================
 
@@ -866,13 +934,22 @@ export const getAuditIPs = (params: { sort?: string; suspicious?: boolean; limit
   return request<{ list: AuditIPStat[] }>(`/api/audit/ips?${q.toString()}`)
 }
 
-export const getAuditRecords = (params: { day?: string; ip?: string; limit?: number } = {}) => {
+export const getAuditRecords = (
+  params: { day?: string; ip?: string; siteId?: number; ref?: string; limit?: number } = {},
+) => {
   const q = new URLSearchParams()
   if (params.day) q.set('day', params.day)
   if (params.ip) q.set('ip', params.ip)
+  // siteId：反代站点的日志模块用 —— "最近谁访问过我这个站点"
+  if (params.siteId) q.set('siteId', String(params.siteId))
+  // ref：穿透服务的日志模块用 —— "s<设备ID>-<服务ID>"（穿透没有站点 ID 这个概念）
+  if (params.ref) q.set('ref', params.ref)
   if (params.limit) q.set('limit', String(params.limit))
   return request<{ list: AuditRecord[]; day?: string }>(`/api/audit/records?${q.toString()}`)
 }
+
+/** 日志弹窗用的记录类型（就是 AuditRecord，起个别名给组件用） */
+export type AuditRecordLike = AuditRecord
 
 export const blockIP = (body: { ip: string; reason: string; minutes: number }) =>
   requestWithMsg<unknown>('/api/audit/block', { method: 'POST', body: JSON.stringify(body) })
@@ -938,8 +1015,9 @@ export const getDevices = () => request<Device[]>('/api/device/list')
 export const saveDevice = (id: number, name: string, ip: string) =>
   request<Device>('/api/device', { method: id ? 'PUT' : 'POST', body: JSON.stringify({ id, name, ip }) })
 
-export const deleteDevice = (id: number) =>
-  request<unknown>('/api/device', { method: 'DELETE', body: JSON.stringify({ id }) })
+/** 删一台设备。cascade=true 时连带删掉它上面的服务 */
+export const deleteDevice = (id: number, cascade = false) =>
+  request<unknown>('/api/device', { method: 'DELETE', body: JSON.stringify({ id, cascade }) })
 
 // ===================== 端口转发 =====================
 
@@ -970,3 +1048,29 @@ export const reorderStunServices = (deviceId: number, ids: number[]) =>
     method: 'POST',
     body: JSON.stringify({ deviceId, ids }),
   })
+
+/**
+ * 一条规则（站点 / 转发 / 穿透服务）归属到哪台设备。
+ *
+ * **先按 deviceId，找不到再按 IP**：
+ * 这是"改设备 IP 不丢归属"的关键 —— 老数据只有 IP（deviceId 是 0），新数据按 id 关联。
+ * 两边都试一遍，任何一边对得上就算归到那台设备，不会因为 IP 变了就掉进"未归到设备"。
+ *
+ * @param rule     规则对象（有 deviceId 和/或 addr）
+ * @param addr    规则里的 "ip:port" 字符串（站点的 backend / 转发的 target / 穿透不需要）
+ * @param devices 设备列表
+ */
+export function deviceOf<T extends { id: number; ip: string }>(
+  rule: { deviceId?: number },
+  addr: string,
+  devices: T[],
+): T | undefined {
+  if (rule.deviceId) {
+    const d = devices.find((x) => x.id === rule.deviceId)
+    if (d) return d
+  }
+  // 兜底：老数据按 IP 字符串匹配（站点/转发），穿透服务没有 addr 就跳过
+  const ip = String(addr ?? '').split(':')[0]
+  if (!ip) return undefined
+  return devices.find((x) => x.ip === ip)
+}

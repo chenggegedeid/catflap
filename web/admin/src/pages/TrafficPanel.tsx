@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, RotateCw } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
-import type { AuditIPStat, TrafficDailyTotals, TrafficRealtime, TrafficTrend } from '../types'
+import type { AuditIPStat, TrafficRealtime, TrafficTrend } from '../types'
 
 /** 刷新间隔（毫秒）。后端只读内存，2 秒一次没有压力。 */
 const REFRESH_MS = 2000
@@ -48,13 +48,16 @@ export function TrafficPanel() {
     }
   }, [])
 
+  // 趋势范围（小时）：近1小时/近24小时/近7天/近30天 —— 参考飞牛的快捷档。
+  // 聚合粒度后端自动定（≤48h 按小时，更大按天），前端只管把速率画出来。
+  const [trendHours, setTrendHours] = useState(168)
   const loadTrend = useCallback(async () => {
     try {
-      setTrend(await api.getTrafficTrend(7))
+      setTrend(await api.getTrafficTrend({ hours: trendHours }))
     } catch {
       // 趋势拿不到不该影响实时区，静默
     }
-  }, [])
+  }, [trendHours])
 
   // 实时：定时刷。页面藏到后台时停掉 —— 定时器在不可见标签页里
   // 本来就该少干活，而且用户看不到，刷新没有意义
@@ -81,7 +84,7 @@ export function TrafficPanel() {
       stop()
       document.removeEventListener('visibilitychange', onVis)
     }
-  }, [loadRealtime, loadTrend])
+  }, [loadRealtime, loadTrend, trendHours])
 
   // 暂停：想安静看一个瞬时值时不希望它一直在跳
   useEffect(() => {
@@ -148,11 +151,43 @@ export function TrafficPanel() {
       {/* 趋势 + 站点 Top */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="!p-0">
-          <div className="px-5 pt-4">
-            <CardHeader title="近 7 天流量" />
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+            <CardHeader
+              title={
+                trend?.bucket === 'hour'
+                  ? `流量速率 · 近 ${trend.hours} 小时（按小时聚合）`
+                  : `流量速率 · 近 ${Math.round((trend?.hours ?? 168) / 24)} 天（按天聚合）`
+              }
+            />
+            {/* 快捷范围（和飞牛同一个四档）：聚合粒度自动，不用人选 */}
+            <div className="flex gap-1">
+              {(
+                [
+                  [1, '近1小时'],
+                  [24, '近24小时'],
+                  [168, '近7天'],
+                  [720, '近30天'],
+                ] as [number, string][]
+              ).map(([h, label]) => (
+                <button
+                  key={h}
+                  onClick={() => setTrendHours(h)}
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                    trendHours === h
+                      ? 'bg-blue-50 text-blue-600 ring-1 ring-blue-200'
+                      : 'text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="px-5 pb-4">
-            <DailyBars days={trend?.days ?? []} />
+            <RateLineChart
+              series={trend?.series ?? []}
+              bucketSeconds={trend?.bucketSeconds ?? 3600}
+            />
           </div>
         </Card>
 
@@ -252,57 +287,9 @@ function RateChart({ series }: { series: { in: number; out: number }[] }) {
 }
 
 /** 近 N 天柱状图。入站在左、出站在右，同一天并排 */
-function DailyBars({ days }: { days: TrafficDailyTotals[] }) {
-  if (days.length === 0) {
-    return <div className="flex h-[110px] items-center justify-center text-xs text-slate-400">暂无历史数据</div>
-  }
-
-  const W = 280
-  const H = 100
-  const slot = W / days.length
-  const barW = Math.min(9, slot / 3)
-  const gap = 3
-
-  let peak = 1
-  for (const d of days) peak = Math.max(peak, d.in, d.out)
-
-  const h = (v: number) => (v / peak) * (H - 18)
-
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img">
-        <title>近 {days.length} 天入站与出站流量</title>
-        {days.map((d, i) => {
-          const cx = i * slot + slot / 2
-          const hi = h(d.in)
-          const ho = h(d.out)
-          return (
-            <g key={d.date}>
-              <rect x={cx - barW - gap / 2} y={H - 16 - hi} width={barW} height={hi} fill="#378ADD" rx={1.5} />
-              <rect x={cx + gap / 2} y={H - 16 - ho} width={barW} height={ho} fill="#639922" rx={1.5} />
-            </g>
-          )
-        })}
-      </svg>
-      <div className="flex justify-between text-[11px] text-slate-400">
-        <span>{days[0]?.date.slice(5)}</span>
-        <span>峰值 {fmtBytes(peak)}</span>
-        <span>{days[days.length - 1]?.date.slice(5)}</span>
-      </div>
-    </div>
-  )
-}
-
-/**
- * 各服务流量横条：**反代站点 + 穿透服务**合在一起排。
- *
- * 合在一起是因为用户关心的是"哪个服务用了多少流量"，不该去记这个服务是走
- * 反代出去的还是穿透出去的。分开两块反而看不出谁最多。
- *
- * 名字：键本身只有 ID，查真实名字要额外请求站点/设备配置。这里不查 ——
- * 流量数字才是这一块的重点，名字用 `站点 #3` / `穿透 #1-2` 够认就行。
- */
 function TopList({ trend }: { trend: TrafficTrend | null }) {
+  // 展开的是哪个服务（key = site-<id> / tun-<ref>）
+  const [expanded, setExpanded] = useState('')
   // 名字由后端解析好（「设备名 · 服务名」），拿不到就回落成编号
   const names = trend?.names ?? {}
   const rows = [
@@ -357,6 +344,49 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
               style={{ width: `${Math.max((r.total / peak) * 100, 2)}%` }}
             />
           </div>
+
+          {/* 展开看这个服务**按天**的流量历史 —— 之前只有总量，看不出哪天用得多 */}
+          {expanded === r.key && (
+            <div className="mt-2 rounded-lg bg-slate-50 px-2.5 py-2">
+              {(trend?.perServiceDay?.[r.key.replace(/^(site-|tun-)/, '')] ?? []).length === 0 ? (
+                <div className="text-[11px] text-slate-400">这个范围内没有它的记录</div>
+              ) : (
+                <MiniDayBars
+                  points={trend!.perServiceDay![r.key.replace(/^(site-|tun-)/, '')]}
+                />
+              )}
+            </div>
+          )}
+          <button
+            onClick={() => setExpanded(expanded === r.key ? '' : r.key)}
+            className="mt-0.5 text-[10px] text-slate-400 transition hover:text-blue-500"
+          >
+            {expanded === r.key ? '收起历史 ▲' : '按天历史 ▼'}
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 小型按天柱状图（服务的历史流量展开用） */
+function MiniDayBars({ points }: { points: { date: string; in: number; out: number }[] }) {
+  const peak = Math.max(...points.map((p) => p.in + p.out), 1)
+  return (
+    <div className="space-y-1">
+      {points.map((p) => (
+        <div key={p.date} className="flex items-center gap-2 text-[10px]">
+          <span className="w-[68px] shrink-0 font-mono text-slate-400">{p.date.slice(5)}</span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-white ring-1 ring-slate-200/70">
+            <div
+              className="h-full rounded-full bg-blue-400"
+              style={{ width: `${Math.max(((p.in + p.out) / peak) * 100, 2)}%` }}
+              title={`${p.date}：入 ${fmtBytes(p.in)} / 出 ${fmtBytes(p.out)}`}
+            />
+          </div>
+          <span className="w-[64px] shrink-0 text-right tabular-nums text-slate-500">
+            {fmtBytes(p.in + p.out)}
+          </span>
         </div>
       ))}
     </div>
@@ -466,5 +496,92 @@ function SuspiciousPanel() {
         {msg && <div className="mt-2 text-[11px] text-slate-500">{msg}</div>}
       </div>
     </Card>
+  )
+}
+
+/**
+ * RateLineChart 速率折线图（入站/出站两条线），参考飞牛的"网络速率历史趋势"。
+ *
+ * 速率 = 桶内流量 / 桶长 —— 后端给的是每个桶的**总量**和桶长（秒），
+ * 换算成 Mbps 在这里做，图上直接就是速率而不是"这段时间用了多少"。
+ *
+ * 用手写 SVG 不引图表库：两条折线 + 一圈刻度，引个 chart 库比图本身还重。
+ */
+function RateLineChart({
+  series,
+  bucketSeconds,
+}: {
+  series: { time: number; in: number; out: number }[]
+  bucketSeconds: number
+}) {
+  if (series.length === 0) {
+    return <div className="flex h-[180px] items-center justify-center text-xs text-slate-400">这个范围内没有流量记录</div>
+  }
+
+  // 速率（bps），画图前先找到峰值用来定 y 轴刻度
+  const pts = series.map((p) => ({
+    t: p.time,
+    inBps: (p.in * 8) / bucketSeconds,
+    outBps: (p.out * 8) / bucketSeconds,
+  }))
+  const peak = Math.max(...pts.map((p) => Math.max(p.inBps, p.outBps)), 1)
+
+  const W = 600
+  const H = 170
+  const PAD_L = 46
+  const PAD_B = 18
+  const t0 = pts[0].t
+  const t1 = Math.max(pts[pts.length - 1].t, t0 + bucketSeconds)
+  const x = (t: number) => PAD_L + ((t - t0) / (t1 - t0)) * (W - PAD_L - 8)
+  const y = (v: number) => H - PAD_B - (v / peak) * (H - PAD_B - 8)
+
+  const line = (get: (p: (typeof pts)[number]) => number) =>
+    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(1)},${y(get(p)).toFixed(1)}`).join(' ')
+
+  // y 轴刻度：峰值取整到好看的档位（0.4 / 1.2 / 2.8 Mbps 这种）
+  const nicePeak = (() => {
+    const mag = Math.pow(10, Math.floor(Math.log10(peak)))
+    return Math.ceil(peak / mag) * mag
+  })()
+  const fmtRate = (bps: number) =>
+    bps >= 1e6 ? (bps / 1e6).toFixed(1) + 'M' : bps >= 1e3 ? (bps / 1e3).toFixed(0) + 'K' : bps.toFixed(0)
+
+  // x 轴刻度：取 4 个均匀的时间点
+  const ticks = [0, 1, 2, 3].map((i) => t0 + ((t1 - t0) * i) / 3)
+  const fmtTick = (t: number) =>
+    new Date(t * 1000).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-4 text-[11px] text-slate-500">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full bg-slate-400" /> 入站速率
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full bg-violet-400" /> 出站速率
+        </span>
+        <span className="ml-auto text-slate-400">
+          峰值 {fmtRate(peak)}bps
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="流量速率趋势">
+        {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+          <g key={f}>
+            <line x1={PAD_L} x2={W - 8} y1={y(nicePeak * f)} y2={y(nicePeak * f)} stroke="#e2e8f0" strokeWidth="0.5" />
+            <text x={PAD_L - 4} y={y(nicePeak * f)} textAnchor="end" dominantBaseline="central" fontSize="9" fill="#94a3b8">
+              {fmtRate(nicePeak * f)}
+            </text>
+          </g>
+        ))}
+        {/* 出站画在下层、入站在上层；线宽 1.2 两个桶之间就有连续感 */}
+        <path d={line((p) => p.outBps)} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeLinejoin="round" />
+        <path d={line((p) => p.inBps)} fill="none" stroke="#94a3b8" strokeWidth="1.2" strokeLinejoin="round" />
+        {ticks.map((t, i) => (
+          <text key={i} x={x(t)} y={H - 4} textAnchor={i === 0 ? 'start' : i === 3 ? 'end' : 'middle'} fontSize="9" fill="#94a3b8">
+            {fmtTick(t)}
+          </text>
+        ))}
+      </svg>
+    </div>
   )
 }

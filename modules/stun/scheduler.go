@@ -110,9 +110,13 @@ type serviceEntry struct {
 	externalPort uint16       // STUN 映射后的外部端口
 	// localPort 上一次打洞实际用的本机端口。重打时优先复用它：
 	// 本机端口不变，NAT 给的外部端口就不变，面板上的端口才不会一直跳。
-	localPort    uint16
-	lastWebhook  string // 最近一次触发 webhook 的 publicIP:port
-	restartCount int    // 重启次数
+	localPort   uint16
+	lastWebhook string // 最近一次触发 webhook 的 publicIP:port
+	// lastNotifyAt 最近一次走通知中心发出通知的时间。
+	// 通知中心和 webhook 各记各的冷却：外部端口一抖就是一条新地址，
+	// 上面的 lastWebhook 判重会失效，没有这道闸就会一直往手机上推。
+	lastNotifyAt time.Time
+	restartCount int // 重启次数
 	lastError    string
 	logMessages  []ServiceLog // 滚动日志
 	updatedAt    time.Time
@@ -674,11 +678,28 @@ func buildSTUNRequest(device *model.Device, service *model.Service) STUNRequest 
 	}
 }
 
+// notifyCenterCooldown 同一服务走通知中心的最小间隔。
+//
+// STUNAlive 是几秒一次的心跳，公网端口一变就是一条新地址，
+// 上面那个「地址变了才发」的判重在这种情况下等于没有。
+// 没有冷却的话用户手机会被同一条穿透成功刷屏。
+const notifyCenterCooldown = 5 * time.Minute
+
 func (s *Scheduler) sendServiceWebhook(entry *serviceEntry, key string, req STUNRequest, state STUNState, phaseChanged bool) {
+	// 「发不发」要看两条路，任意一条通就行：
+	//   1. 服务选了全局通知渠道 → 交给通知中心（方式、token、模板都在通知页配）
+	//   2. 服务自己内联的老 webhook 开着 → 退回原来的路径
+	//
+	// 这里原来写的是 `if !cfg.Enabled { return }` —— 一刀切把通知中心也挡死了：
+	// 老 webhook 界面上已经不再编辑（默认关着），于是用户在服务上选好渠道、
+	// 保存也成功了，却永远收不到一条通知。判据必须是「两条路都没开才 return」。
 	cfg := req.WebhookConfig
-	if !cfg.Enabled {
+	svcCfg := LookupService(req.DeviceID, req.ServiceID)
+	useNotifyCenter := hasNotifyCenter() && svcCfg != nil && len(svcCfg.ChannelIDs) > 0
+	if !useNotifyCenter && !cfg.Enabled {
 		return
 	}
+
 	publicIP := state.ExternalIP
 	if publicIP == "" {
 		publicIP = Runtime.Network.PublicIP
@@ -688,18 +709,50 @@ func (s *Scheduler) sendServiceWebhook(entry *serviceEntry, key string, req STUN
 	}
 
 	port := strconv.Itoa(int(state.ExternalPort))
-	address := net.JoinHostPort(publicIP, port)
-	if !entry.shouldSendWebhook(address, phaseChanged, cfg.OnlyWhenChanged) {
+	// 外部地址**优先用域名**，和界面上的卡片保持一致
+	// （卡片是 svc.domain || publicIP）：配了域名还发 IP 的话，
+	// 终结 TLS 的服务拿这个地址去连必然报证书错 —— 证书是按域名签的。
+	host := publicIP
+	domain := ""
+	if svcCfg != nil {
+		domain = strings.TrimSpace(svcCfg.Domain)
+		if domain != "" {
+			host = domain
+		}
+	}
+	address := net.JoinHostPort(host, port)
+	ipAddr := net.JoinHostPort(publicIP, port)
+	// OnlyWhenChanged 是老 webhook 的字段。走通知中心时用户根本没见过这个开关，
+	// 不该拿一个他没配过的默认值（false 恰好是"变了就发"，能用）以外的东西挡住。
+	onlyWhenChanged := cfg.OnlyWhenChanged
+	if !cfg.Enabled {
+		onlyWhenChanged = false
+	}
+	if !entry.shouldSendWebhook(address, phaseChanged, onlyWhenChanged) {
+		return
+	}
+
+	// 通知中心的冷却单独一道闸，放在 fields 拼好之前，省掉无谓的开销
+	if useNotifyCenter && !entry.allowNotify(notifyCenterCooldown) {
+		logrus.Debugf("[stun] %s 通知在冷却窗口内，跳过", key)
 		return
 	}
 
 	event := entry.snapshot(key, EventPhaseChanged)
+	now := time.Now()
 	fields := map[string]string{
-		"address":       address,
+		// address 是**真正拿去连的地址**：配了域名就是 域名:端口，没配才是 IP:端口。
+		// 以前这里恒等于 IP:端口，用户在手机上拿到的是 IP，
+		// 和界面卡片上显示的（域名优先）对不上。
+		"address": address,
+		// ip_addr 恒等于 IP:端口 —— 域名解析还没生效时要用它，
+		// 老模板里写了 #{address} 想要 IP 的也能换成这个。
+		"ip_addr":       ipAddr,
+		"domain":        domain,
 		"device_name":   event.DeviceName,
 		"external_ip":   publicIP,
 		"external_port": port,
-		"ipAddr":        address,
+		"ipAddr":        ipAddr,
 		"internal_port": fmt.Sprintf("%d", req.InternalPort),
 		"phase":         PhaseRunning.String(),
 		"port":          port,
@@ -707,7 +760,45 @@ func (s *Scheduler) sendServiceWebhook(entry *serviceEntry, key string, req STUN
 		"service_key":   key,
 		"service_name":  req.ServiceName,
 		"target_ip":     req.TargetIP,
-		"updated_at":    time.Now().Format(time.RFC3339),
+		"updated_at":    now.Format(time.RFC3339),
+		// 给用户看的时间。updated_at 是 RFC3339（带 +08:00 尾巴），
+		// 直接塞进正文不好读，老模板要精确值可以继续用它。
+		"time": now.Format("2006-01-02 15:04:05"),
+	}
+
+	// **优先走通知中心**：服务选了全局渠道（ChannelIDs）就交给它发 ——
+	// 通知方式、token、各渠道的正文格式都在通知页配好，服务只提供内容和模板。
+	// 没选渠道才退回这个服务内联的老 webhook。
+	// svcCfg 在上面已经查过一次（判断走哪条路），这里直接用。
+	if useNotifyCenter {
+		// 进 goroutine 之前先把要用的值拷出来：svcCfg 是指向 Runtime.Config
+		// 里那个 Service 的指针，别人（保存服务）随时可能整份替换配置，
+		// 异步里再读它的字段就是数据竞争（go test -race 能抓到）。
+		channelIDs := append([]string(nil), svcCfg.ChannelIDs...)
+		template := svcCfg.NotifyTemplate
+		go func() {
+			// 从 atomic 里取一次再用：同时装/读是数据竞争，见 notify_hook.go
+			hook := currentNotifyHook()
+			hook(NotifyRequest{
+				ChannelIDs: channelIDs,
+				Template:   template,
+				// 标题就是「服务名:外部端口」—— 手机锁屏上不点开也能看见
+				// 这次分到哪个端口，详情（域名、IP、设备）都在正文里。
+				// 以前写的是「xxx 穿透成功」，看着像一句话，其实最有用的
+				// 那个端口号被挡在点开之后了。
+				Title:  fmt.Sprintf("%s:%s", req.ServiceName, port),
+				Fields: fields,
+				Key:    "stun|" + key,
+			})
+			// 老配置还在的话也发一份 —— 用户在旧路径上配过的通知不该因为
+			// 选了新渠道就断掉（迁移是可回退的，两条路并存一段时间）
+			if cfg.Enabled {
+				if _, err := webhook.Send(cfg, fields); err != nil {
+					logrus.WithError(err).Warnf("STUN legacy webhook failed: key=%s", key)
+				}
+			}
+		}()
+		return
 	}
 
 	go func() {
@@ -891,6 +982,23 @@ func (e *serviceEntry) shouldSendWebhook(address string, phaseChanged bool, only
 		return phaseChanged && !onlyWhenChanged
 	}
 	e.lastWebhook = address
+	return true
+}
+
+// allowNotify 通知中心的冷却闸门。放行才记时间，被拒的不刷新时间戳
+// （否则高频事件会一直把自己顶在窗口外，等于永不发送）。
+func (e *serviceEntry) allowNotify(window time.Duration) bool {
+	if window <= 0 {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	now := time.Now()
+	if !e.lastNotifyAt.IsZero() && now.Sub(e.lastNotifyAt) < window {
+		return false
+	}
+	e.lastNotifyAt = now
 	return true
 }
 

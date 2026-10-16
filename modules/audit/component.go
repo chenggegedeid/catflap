@@ -94,6 +94,17 @@ func loadIPStats() error {
 	Runtime.mu.Lock()
 	for i := range payload.Stats {
 		st := payload.Stats[i]
+		// 旧版本落盘时穿透 IP 的 paths/hosts/UA 会是 null（穿透没有这些字段），
+		// 读回来就是 nil —— 这里兜底成空数组，下次落盘文件自动修好。
+		if st.Paths == nil {
+			st.Paths = []string{}
+		}
+		if st.Hosts == nil {
+			st.Hosts = []string{}
+		}
+		if st.UserAgents == nil {
+			st.UserAgents = []string{}
+		}
 		Runtime.ipStats[st.IP] = &st
 	}
 	Runtime.mu.Unlock()

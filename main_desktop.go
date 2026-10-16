@@ -94,6 +94,8 @@ func main() {
 		logrus.Infof("复用已运行的后端 %s", backendURL)
 	}
 
+	postStartup()
+
 	if err := app.Run(); err != nil {
 		logrus.Fatal(err)
 	}

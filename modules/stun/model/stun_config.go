@@ -1,8 +1,10 @@
 package model
 
 import (
-	"github.com/chenggegedeid/catflap/modules/webhook"
 	"time"
+
+	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
+	"github.com/chenggegedeid/catflap/modules/webhook"
 )
 
 type Config struct {
@@ -126,13 +128,25 @@ type Service struct {
 	// 并在日志里说清楚，不会让服务起不来。
 	PunchLocalPort uint16 `json:"punchLocalPort"`
 
-	Enabled     bool   `json:"enabled"`     // 服务是否启用 (默认 true)
-	Description string `json:"description"` // 服务描述信息 (可选)
+	Enabled bool `json:"enabled"` // 服务是否启用 (默认 true)
+	// Access 访问控制（IP 门禁）。和反代站点同一套结构和判断方法
+	// （proxy/model.AccessControl），规则支持单个 IP / CIDR，IPv4 IPv6 都行。
+	//
+	// **默认黑名单**：新建服务时规则为空（谁都能连），但模式记成黑名单 ——
+	// 这样在审计里封了某个 IP 同步过来时，直接就有地方放，不用先去改模式。
+	// 判断发生在洞口 Accept 之后、转发之前（见 stun.go）。
+	Access      proxymodel.AccessControl `json:"access"`
+	Description string                   `json:"description"` // 服务描述信息 (可选)
 
 	WebHookConfig webhook.WebhookConfig `json:"webhookconfig"` // 旧的内联 webhook，已被通知中心取代（保留做回退）
 	Redirect      RedirectConfig        `json:"redirect"`      // 固定域名跟着外部端口走
 	MCEntry       MCEntryConfig         `json:"mcEntry"`       // MC Java 版联机：SRV 记录跟着外部端口走
 
+	// NotifyTemplate 用户自定义的**通知正文**（支持 #{xxx} 占位符）。
+	//
+	// 留空就用默认文案。通知方式和 token 不在这里 —— 那是通知页的全局渠道，
+	// 服务只引用渠道 ID（ChannelIDs），这样改 token 只改一次、所有服务生效。
+	NotifyTemplate string `json:"notifyTemplate,omitempty"`
 	// ChannelIDs 这个服务出事时发到哪些通知渠道。
 	//
 	// 存的是**全局渠道的 ID**，不再把 URL/密钥内联在这里 —— 同一个群机器人

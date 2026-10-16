@@ -226,6 +226,18 @@ func updateIPStats(r Record) {
 	if r.UserAgent != "" {
 		st.UserAgents = addCapped(st.UserAgents, r.UserAgent, maxUAsPerIP)
 	}
+	// **兜底成空数组，绝不能是 nil**：穿透访问（kind=tunnel）没有 path/host/UA，
+	// 第一条就是穿透的话这三个字段全是 nil，落盘成 null ——
+	// 前端取 .length 直接崩（实测：审计页点纯穿透 IP 必崩）。
+	if st.Paths == nil {
+		st.Paths = []string{}
+	}
+	if st.Hosts == nil {
+		st.Hosts = []string{}
+	}
+	if st.UserAgents == nil {
+		st.UserAgents = []string{}
+	}
 	Runtime.ipStatsDirty = true
 }
 
@@ -437,6 +449,12 @@ func ReadDay(day string, ipFilter string, limit int) ([]Record, error) {
 }
 
 // Days 有哪天有访问记录
+// Days 有访问记录的那些日期（新的在前）。
+//
+// **必须排除登录事件文件**：登录记录也存在这个目录里，只是文件名带
+// login- 前缀（见 loginFilePrefix）。以前没排除，结果 days[0] 会是
+// "login-2026-10-16" —— 于是"不看某一天、直接查最近"的请求读到的
+// 是登录事件，不是访问记录（审计页默认视图和服务日志都受影响）。
 func Days() []string {
 	items, err := os.ReadDir(auditDir)
 	if err != nil {
@@ -448,7 +466,34 @@ func Days() []string {
 		if it.IsDir() || !strings.HasSuffix(name, ".jsonl") {
 			continue
 		}
-		days = append(days, strings.TrimSuffix(name, ".jsonl"))
+		day := strings.TrimSuffix(name, ".jsonl")
+		if strings.HasPrefix(day, loginFilePrefix) {
+			continue
+		}
+		days = append(days, day)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(days)))
+	return days
+}
+
+// LoginDays 有登录事件的那些日期（新的在前，已去掉 login- 前缀）。
+// 和 Days() 分开：两者存在同一个目录，用途和字段都不同。
+func LoginDays() []string {
+	items, err := os.ReadDir(auditDir)
+	if err != nil {
+		return []string{}
+	}
+	var days []string
+	for _, it := range items {
+		name := it.Name()
+		if it.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		day := strings.TrimSuffix(name, ".jsonl")
+		if !strings.HasPrefix(day, loginFilePrefix) {
+			continue
+		}
+		days = append(days, strings.TrimPrefix(day, loginFilePrefix))
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(days)))
 	return days
@@ -595,4 +640,90 @@ func SummarizeLogins(day string) LoginSummary {
 	sort.Strings(s.IPs)
 	sort.Strings(s.Usernames)
 	return s
+}
+
+// ReadBySite 某个服务的访问记录（新的在前，最多 limit 条）。
+//
+// **给"每个服务的日志模块"用**：反代站点卡片上点「日志」，要看的是
+// "谁访问过我这个服务" —— 和 Audit 页那个按 IP 展开的视角正好反过来。
+// 数据本来就有（Record.SiteID 一直写着），只是之前没有按这个维度取的接口。
+//
+// 跨天查：只往前翻 maxSiteScanDays 天，够看了（再早的访问对排障没意义），
+// 也不会把整个审计目录翻一遍。
+func ReadBySite(siteID uint, limit int) []Record {
+	if siteID == 0 || limit <= 0 {
+		return nil
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	days := Days()
+	if len(days) > maxSiteScanDays {
+		days = days[:maxSiteScanDays]
+	}
+
+	var out []Record
+	for _, day := range days {
+		list, err := ReadDay(day, "", 0) // 不限条数，按 siteID 过滤后再截断
+		if err != nil {
+			continue
+		}
+		for _, r := range list {
+			if r.SiteID == siteID {
+				out = append(out, r)
+			}
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	// 新的在前
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// 只往前翻多少天找某个服务的记录
+const maxSiteScanDays = 7
+
+// ReadByRef 按引用键取记录（新的在前，最多 limit 条）。
+//
+// **给内网穿透用**：穿透访问记录的 Ref 是 "s<设备ID>-<服务ID>"（和流量统计
+// 同一个键）。反代用 SiteID，穿透没有站点 ID 这个概念，就靠 Ref 认服务。
+// 两边最终都是"这个服务最近谁访问过"，共用同一个弹窗展示。
+func ReadByRef(ref string, limit int) []Record {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || limit <= 0 {
+		return nil
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	days := Days()
+	if len(days) > maxSiteScanDays {
+		days = days[:maxSiteScanDays]
+	}
+
+	var out []Record
+	for _, day := range days {
+		list, err := ReadDay(day, "", 0)
+		if err != nil {
+			continue
+		}
+		for _, r := range list {
+			if r.Ref == ref {
+				out = append(out, r)
+			}
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }

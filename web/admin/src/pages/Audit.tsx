@@ -389,10 +389,10 @@ function IPRow({
             <div>
               <div className="mb-1 font-semibold text-slate-500">访问过的路径（看它在找什么）</div>
               <div className="flex flex-wrap gap-1">
-                {stat.paths.length === 0 ? (
+                {(stat.paths ?? []).length === 0 ? (
                   <span className="text-slate-400">—</span>
                 ) : (
-                  stat.paths.map((p) => (
+                  (stat.paths ?? []).map((p) => (
                     <span key={p} className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 ring-1 ring-slate-200">
                       {p}
                     </span>
@@ -403,10 +403,10 @@ function IPRow({
             <div>
               <div className="mb-1 font-semibold text-slate-500">User-Agent</div>
               <div className="space-y-0.5">
-                {stat.userAgents.length === 0 ? (
+                {(stat.userAgents ?? []).length === 0 ? (
                   <span className="text-slate-400">—</span>
                 ) : (
-                  stat.userAgents.map((u) => (
+                  (stat.userAgents ?? []).map((u) => (
                     <div key={u} className="truncate font-mono text-[10px] text-slate-500">
                       {u}
                     </div>

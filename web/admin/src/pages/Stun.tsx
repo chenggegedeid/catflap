@@ -4,7 +4,6 @@ import {
   ChevronRight,
   ClipboardCopy,
   Computer,
-  Copy,
   CornerUpRight,
   ExternalLink,
   FileText,
@@ -15,8 +14,8 @@ import {
   LoaderCircle,
   Pencil,
   Plus,
-  Power,
   Radar,
+  Power,
   RotateCw,
   Server,
   Send,
@@ -28,6 +27,11 @@ import {
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import { LanScanModal } from '../components/LanScanModal'
+import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
+import { DomainInput } from '../components/DomainInput'
+import { AccessControlEditor, type AccessMode } from '../components/AccessControlEditor'
+import { AccessLogModal } from '../components/AccessLogModal'
+import type { ServiceState } from '../components/ServiceCard'
 import { modalBackdrop } from '../components/modal'
 import * as api from '../lib/api'
 import { hasCapability, loadProviderTypes } from '../lib/providerTypes'
@@ -88,7 +92,11 @@ function useToast() {
   return { toasts, show }
 }
 
-function getDeviceId(d: StunDevice): number {
+function getDeviceId(d?: StunDevice | null): number {
+  // 空值保护：**必须**。设备的 deviceId 可能是悬空引用 ——
+  // 服务/站点记着的 id 指向一台已被删除的设备时，devices.find() 返回 undefined，
+  // 直接取 .DeviceID 会让整个穿透页崩掉（实测：删设备后打开穿透页必崩）。
+  if (!d) return 0
   return d.DeviceID ?? d.deviceId ?? d.id
 }
 
@@ -208,6 +216,9 @@ interface ServiceFormState {
   internalPort: string
   protocol: 'TCP' | 'UDP'
   useUpnp: boolean
+  // 访问控制（IP 门禁）：和反代站点同一个组件、同一套语义
+  accessMode: string
+  accessRules: string
   /** 打洞用的本机端口，'' 表示随机（和 0 一个意思） */
   punchLocalPort: string
   domain: string
@@ -226,6 +237,8 @@ interface ServiceFormState {
   webhookconfig: WebhookConfig
   /** 选用的全局通知渠道 ID（渠道本身在通知页配置） */
   channelIds: string[]
+  /** 自定义通知正文（#{xxx} 占位符）。留空用默认文案 */
+  notifyTemplate: string
   redirect: RedirectConfig
   mcEntry: MCEntryConfig
 }
@@ -275,11 +288,84 @@ const emptyWebhook: WebhookConfig = {
 }
 
 
+/**
+ * 通知正文模板预设。
+ *
+ * 通知**怎么发**（PushPlus / 钉钉 / Bark 各自的格式和 token）在通知页统一配，
+ * 服务里只写"我想说什么" —— 所以这里给的是**内容模板**而不是请求体，
+ * 每个渠道的包装格式由后端按渠道类型处理，用户不用关心。
+ * 占位符沿用 #{xxx}，和 webhook 那套一致，只有一套要记。
+ */
+const NOTIFY_TEMPLATES: { key: string; label: string; hint: string; body: string }[] = [
+  {
+    key: 'plain',
+    label: '纯文本 · 通用',
+    hint: '所有渠道都能用',
+    body: '域名+端口：#{address}\nIP地址+端口：#{ip_addr}\n设备：#{device_name}\n时间：#{time}',
+  },
+  {
+    key: 'pushplus',
+    label: 'PushPlus',
+    hint: 'markdown，信息全',
+    body:
+      '- **域名+端口**：#{address}\n- **IP地址+端口**：#{ip_addr}\n- **设备**：#{device_name}\n- **内网端口**：#{internal_port}\n- **时间**：#{time}',
+  },
+  {
+    key: 'robot',
+    label: '钉钉 / 企微 / 飞书',
+    hint: '群机器人，引用块',
+    body:
+      '> 域名+端口：**#{address}**\n> IP地址+端口：#{ip_addr}\n\n设备：#{device_name}\n内网端口：#{internal_port}\n时间：#{time}',
+  },
+  {
+    key: 'bark',
+    label: 'Bark（iOS）',
+    hint: '手机上越短越好',
+    body: '#{address}',
+  },
+  {
+    key: 'serverchan',
+    label: 'Server 酱',
+    hint: '一行地址 + 分隔线',
+    body: '**#{address}**\n\n---\n\nIP地址+端口：#{ip_addr}\n设备：#{device_name}\n时间：#{time}',
+  },
+]
+
+/** 可用占位符（发的时候自动换成真实值） */
+const NOTIFY_PLACEHOLDERS = [
+  '#{service_name}',
+  '#{address}',
+  '#{ip_addr}',
+  '#{domain}',
+  '#{external_ip}',
+  '#{external_port}',
+  '#{internal_port}',
+  '#{device_name}',
+  '#{target_ip}',
+  '#{protocol}',
+  '#{time}',
+  '#{updated_at}',
+]
+
+// 通知模块的默认渠道：运行时由 effect 拉取并写进来。
+// 模块顶层（emptyService）也引用它，所以必须是模块级的 mutable。
+// 拿当前默认渠道（新服务用）。模块顶层：空服务常量也引用它。
+function defaultChannels(): string[] { return [...defaultChannelIds] }
+
+let defaultChannelIds: string[] = []
+function setDefaultChannelIds(ids: string[]): void { defaultChannelIds = ids }
+
 const emptyService: ServiceFormState = {
   name: '',
   internalPort: '',
   protocol: 'TCP',
-  useUpnp: true,
+  // UPnP 默认**关**：以前默认开，结果每条服务都去路由器上开映射，
+  // 端口开一片自己都不知道。需要的人自己勾（打洞本身够用）。
+  useUpnp: false,
+  // 访问控制默认**黑名单**（规则空 = 谁都能连，但模式是 deny）——
+  // 用户要求：避免每个服务都要去设一遍模式。审计里封 IP 同步过来直接能放。
+  accessMode: 'deny',
+  accessRules: '',
   punchLocalPort: '',
   domain: '',
   tlsTerminate: false,
@@ -289,7 +375,8 @@ const emptyService: ServiceFormState = {
   showOnHome: false,
   description: '',
   webhookconfig: emptyWebhook,
-  channelIds: [],
+  channelIds: defaultChannels(),
+  notifyTemplate: '',
   redirect: emptyRedirect,
   mcEntry: emptyMCEntry,
 }
@@ -355,6 +442,8 @@ function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState 
     internalPort: String(svc.internalPort || ''),
     protocol: (svc.protocol as 'TCP' | 'UDP') || 'TCP',
     useUpnp: !!svc.useUpnp,
+    accessMode: svc.access?.mode ?? 'deny',
+    accessRules: (svc.access?.rules ?? []).join('\n'),
     punchLocalPort: svc.punchLocalPort ? String(svc.punchLocalPort) : '',
     domain: svc.domain || '',
     tlsTerminate: !!svc.tlsTerminate,
@@ -365,6 +454,7 @@ function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState 
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
     channelIds: [...(svc.channelIds ?? [])],  // 后端可能是 null，见 notify 的同类修复
+    notifyTemplate: svc.notifyTemplate ?? '',
     redirect: { ...emptyRedirect, ...(svc.redirect ?? {}) },
     mcEntry: { ...emptyMCEntry, ...(svc.mcEntry ?? {}) },
   }
@@ -393,6 +483,10 @@ function serviceToPayload(deviceId: number, svc: StunService): api.StunServicePa
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
     channelIds: [...(svc.channelIds ?? [])],  // 后端可能是 null，见 notify 的同类修复
+    notifyTemplate: svc.notifyTemplate ?? '',
+    // access 必须带上：更新接口是整体覆盖，后端现在会读这个字段，
+    // 少带就会被写成默认（等于用户配的门禁被抹掉）。
+    access: { mode: svc.access?.mode ?? 'deny', rules: svc.access?.rules ?? [] },
     redirect: { ...emptyRedirect, ...(svc.redirect ?? {}) },
     mcEntry: { ...emptyMCEntry, ...(svc.mcEntry ?? {}) },
   }
@@ -445,6 +539,39 @@ function ServiceModal({
   // 设备列表：服务要挂在某台设备上，和反代的服务表单同一套做法 ——
   // 选设备而不是先去加设备。deviceId 为 0 时用户必须选一台。
   const [devices, setDevices] = useState<Device[]>([])
+  // 主域候选（来自 DDNS 解析记录，去重）—— 域名输入的下拉用
+  const [ddnsZones, setDdnsZones] = useState<string[]>([])
+  useEffect(() => {
+    let alive = true
+    api
+      .getDdnsZones()
+      .then((z) => alive && setDdnsZones(z))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+  // 扫这台设备得到的端口（只探这一台，一两秒）
+  const [hostPorts, setHostPorts] = useState<LanPort[]>([])
+  const [scanning, setScanning] = useState(false)
+
+  /** 扫**这台设备**上开了哪些端口，点结果就填进「内网端口」 */
+  const scanThisDevice = async () => {
+    const d = devices.find((x) => x.id === deviceId)
+    if (!d) return
+    setScanning(true)
+    try {
+      const ports = await api.scanHostPorts(d.ip)
+      setHostPorts(ports)
+      if (ports.length === 0) {
+        onToast(`没探到 ${d.name}（${d.ip}）上开放的端口`)
+      }
+    } catch (e) {
+      onToast('扫描失败: ' + (e instanceof Error ? e.message : ''))
+    } finally {
+      setScanning(false)
+    }
+  }
   useEffect(() => {
     let alive = true
     api
@@ -459,6 +586,10 @@ function ServiceModal({
   // 通知渠道列表：给「通知渠道」那个页签做多选。拉不到不该拦住表单。
   const [channels, setChannels] = useState<NotifyChannel[]>([])
   const [channelsLoading, setChannelsLoading] = useState(false)
+  // 「发一条测试通知」的进行中与结果。结果按渠道逐条列出，
+  // 哪个渠道没通一眼能看到，不用去猜。
+  const [notifyTesting, setNotifyTesting] = useState(false)
+  const [notifyTestResult, setNotifyTestResult] = useState<string>('')
   const [redirectProviders, setRedirectProviders] = useState<DdnsProvider[]>([])
   const [providerTypes, setProviderTypes] = useState<DdnsProviderTypeSpec[]>([])
   const [ddnsHosts, setDdnsHosts] = useState<string[]>([])
@@ -467,6 +598,11 @@ function ServiceModal({
   const [inspecting, setInspecting] = useState(false)
   const [inspectErr, setInspectErr] = useState('')
 
+  // 全局默认渠道：通知模块"启用"了哪些，新服务默认就用哪些
+  const defaultChannelIdsRef = useRef<string[]>([])
+  // 模块顶层常量（emptyService 引用）取不到 ref 当前值 ——
+  // 这里用 ref 的 .current（取不到时是空数组）——
+
   // 通知渠道同理：拉不到就显示"还没有渠道"，用户去通知页建一个
   useEffect(() => {
     let alive = true
@@ -474,7 +610,12 @@ function ServiceModal({
     api
       .getNotifyConfig()
       .then((cfg) => {
-        if (alive) setChannels(cfg.channels ?? [])
+        if (!alive) return
+        setChannels(cfg.channels ?? [])
+        setDefaultChannelIds(cfg.defaultChannelIds ?? [])
+        // 全局默认渠道：新建服务时用它（用户从通知页"启用"了哪些渠道，
+        // 新服务就默认用这些 —— 不用每次都重新选）
+        defaultChannelIdsRef.current = cfg.defaultChannelIds ?? []
       })
       .catch(() => undefined)
       .finally(() => {
@@ -484,6 +625,53 @@ function ServiceModal({
       alive = false
     }
   }, [])
+
+  /**
+   * 发一条测试通知。
+   *
+   * 用户选好渠道、写完模板，最想知道的就是"这样配能不能真的收到"。
+   * 单靠"保存成功"他没法验证 —— 真正的通知要等下一次穿透成功才发，
+   * 而穿透成功什么时候来是不确定的。所以这里给一个立刻能按的按钮，
+   * 走和真实事件完全相同的渲染 + 发送路径。
+   */
+  const testNotify = async () => {
+    const ids = form.channelIds ?? []
+    if (ids.length === 0) {
+      onToast('先勾一个通知渠道再测试')
+      return
+    }
+    setNotifyTesting(true)
+    setNotifyTestResult('')
+    try {
+      const res = await api.testNotifyService({
+        channelIds: ids,
+        template: form.notifyTemplate,
+        fields: {
+          service_name: form.name || '测试服务',
+          internal_port: form.internalPort || '',
+          protocol: form.protocol,
+          // 域名和当前外部端口一起带上，试发出来的地址才和真实通知一样
+          // （不然模板里的 #{address} 是空的，看着像模板写错了）。
+          // 公网 IP 不传 —— 后端会用当前的，前端拿不到这个服务的实时公网 IP。
+          domain: form.domain || '',
+          external_port: status?.externalPort ? String(status.externalPort) : '',
+        },
+      })
+      const failed = (res.results ?? []).filter((r) => !r.ok)
+      if (failed.length === 0) {
+        setNotifyTestResult(`已发往 ${res.sent} 个渠道，去看手机有没有收到`)
+      } else {
+        setNotifyTestResult(
+          `${res.sent}/${res.total} 成功；失败：` +
+            failed.map((f) => `${f.channelName}（${f.error}）`).join('、'),
+        )
+      }
+    } catch (e) {
+      setNotifyTestResult('测试发送失败：' + (e instanceof Error ? e.message : ''))
+    } finally {
+      setNotifyTesting(false)
+    }
+  }
 
   // 证书列表拿不到不该拦住整个服务表单，失败就当没有证书
   useEffect(() => {
@@ -673,9 +861,10 @@ function ServiceModal({
       setErr('请填写服务名称')
       return
     }
+    // 端口必填：留空的话后端地址会拼成 "ip:"，解析不出端口，转发直接失败
     const port = Number(form.internalPort)
     if (!port || port < 1 || port > 65535) {
-      setErr('请填写有效的内网端口(1-65535)')
+      setErr('请填写内网端口(1-65535)。不知道填什么就填 80 —— 内网服务大多数跑在 80 上')
       return
     }
     if (domainRequired && !domainValue) {
@@ -771,18 +960,50 @@ function ServiceModal({
               */}
               <label className="block">
                 <div className={fieldLabelCls}>设备</div>
-                <select
-                  value={deviceId || ''}
-                  onChange={(e) => onDeviceChange(Number(e.target.value) || 0)}
-                  className={fieldInputCls}
-                >
-                  <option value="">选择设备…</option>
-                  {devices.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}（{d.ip}）
-                    </option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={deviceId || ''}
+                    onChange={(e) => onDeviceChange(Number(e.target.value) || 0)}
+                    className={`${fieldInputCls} min-w-0 flex-1`}
+                  >
+                    <option value="">选择设备…</option>
+                    {devices.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}（{d.ip}）
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* 扫**这台设备**上的端口：不用记端口号，点一下就填进「内网端口」。
+                      和反代 / 端口转发的服务表单是同一个交互（后端同为 core/lanscan 的 ScanHostPorts）。 */}
+                  <button
+                    type="button"
+                    onClick={scanThisDevice}
+                    disabled={!deviceId || scanning}
+                    className="flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50 disabled:opacity-40"
+                    title="扫这台机器开了哪些端口"
+                  >
+                    <Radar className={`h-3.5 w-3.5 ${scanning ? 'animate-pulse' : ''}`} />
+                    {scanning ? '扫描中' : '扫这台'}
+                  </button>
+                </div>
+
+                {hostPorts.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-slate-50 p-2">
+                    {hostPorts.map((p) => (
+                      <button
+                        key={p.port}
+                        type="button"
+                        onClick={() => setForm((prev) => ({ ...prev, internalPort: String(p.port) }))}
+                        className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
+                      >
+                        {p.port}
+                        {p.name && <span className="ml-1 opacity-70">{p.name}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="mt-1 text-[11px] text-slate-400">
                   服务会加在这台设备下。机器没在列表里就去「设备」页加一台。
                 </div>
@@ -875,13 +1096,21 @@ function ServiceModal({
 
                 <label className="block">
                   <div className={fieldLabelCls}>对外域名</div>
-                  <input
+                  {/* 子域手填 + 主域从 DDNS 选：打错主域整条规则解析不到，
+                      而你能用哪些主域 DDNS 里本来就有 —— 选比填可靠。
+                      没配 DDNS 时这个控件退化成普通完整域名输入。 */}
+                  <DomainInput
                     value={form.domain}
-                    onChange={(e) => setForm((p) => ({ ...p, domain: e.target.value }))}
-                    placeholder={tlsOn ? '必须是证书覆盖的域名' : '如 mc.example.com，留空用公网 IP'}
+                    zones={ddnsZones}
+                    onChange={(v) => setForm((p) => ({ ...p, domain: v }))}
+                    placeholder={tlsOn ? '必须是证书覆盖的域名' : '留空用公网 IP'}
                     className={fieldInputCls}
                   />
-                  <div className="mt-1 text-[11px] text-slate-400">要在 DDNS 页解析到你的公网 IP</div>
+                  <div className="mt-1 text-[11px] text-slate-400">
+                    {ddnsZones.length > 0
+                      ? '主域来自 DDNS 解析记录；删掉那条解析后这里的主域就没了，服务会回落到公网 IP'
+                      : '要在 DDNS 页解析到你的公网 IP'}
+                  </div>
                 </label>
 
                 {form.protocol === 'TCP' && (
@@ -1065,6 +1294,76 @@ function ServiceModal({
                 </div>
               )}
 
+              {/* 自定义通知正文：怎么发在通知页配好了，这里只写"说什么" */}
+              <div className="mt-4">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-bold text-slate-800">通知内容（可选）</div>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const tpl = NOTIFY_TEMPLATES.find((t) => t.key === e.target.value)
+                      if (tpl) setForm((p) => ({ ...p, notifyTemplate: tpl.body }))
+                      e.target.value = ''
+                    }}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] outline-none focus:border-blue-400"
+                    title="按渠道挑一条模板，填进下面"
+                  >
+                    <option value="">用一条模板…</option>
+                    {NOTIFY_TEMPLATES.map((t) => (
+                      <option key={t.key} value={t.key}>
+                        {t.label} · {t.hint}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <textarea
+                  value={form.notifyTemplate}
+                  onChange={(e) => setForm((p) => ({ ...p, notifyTemplate: e.target.value }))}
+                  rows={5}
+                  placeholder="留空就用默认文案：服务名 + 外部地址 + 内网端口"
+                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-400"
+                />
+                <div className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  可用占位符（发的时候会自动换成真实值）：
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {NOTIFY_PLACEHOLDERS.map((p) => (
+                      <span
+                        key={p}
+                        className="rounded bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 ring-1 ring-slate-200"
+                      >
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 立刻验证：保存成功不等于能收到，得真发一条才知道 */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={testNotify}
+                  disabled={notifyTesting || (form.channelIds ?? []).length === 0}
+                  className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {notifyTesting ? '正在发送…' : '发一条测试通知'}
+                </button>
+                <span className="text-[11px] text-slate-400">
+                  用上面选的渠道和这条模板真发一次，验证能不能收到
+                </span>
+              </div>
+              {notifyTestResult && (
+                <div
+                  className={`mt-2 rounded-xl px-3 py-2 text-[11px] leading-relaxed ${
+                    notifyTestResult.includes('失败')
+                      ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-200'
+                      : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                  }`}
+                >
+                  {notifyTestResult}
+                </div>
+              )}
+
               {form.webhookconfig.url !== '' && (
                 <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-700 ring-1 ring-amber-200">
                   这个服务原来配过内联 Webhook（{form.webhookconfig.url}）。
@@ -1075,6 +1374,20 @@ function ServiceModal({
             </div>
           )}
 
+
+          {/* 访问控制：和反代站点用同一个组件、同一套语义。
+              穿透直接暴露在公网上，门禁比反代更需要 —— 默认就是黑名单。 */}
+          {activeTab === 'basic' && (
+            <div className="mt-4">
+              <AccessControlEditor
+                mode={form.accessMode as AccessMode}
+                rules={form.accessRules}
+                onChange={(next) =>
+                  setForm((p) => ({ ...p, accessMode: next.mode, accessRules: next.rules }))
+                }
+              />
+            </div>
+          )}
 
           {activeTab === 'redirect' && form.protocol === 'TCP' && (
             <div className="mx-auto max-w-2xl">
@@ -2007,6 +2320,8 @@ export function Stun() {
     prefill?: Partial<ServiceFormState>
   }>({ open: false, deviceId: 0 })
   const [logKey, setLogKey] = useState<string | null>(null)
+  // 访问日志弹窗（从审计取，和反代同一个组件）：ref 形如 "s<设备ID>-<服务ID>"
+  const [accessLog, setAccessLog] = useState<{ ref: string; name: string } | null>(null)
   const [natTypeOpen, setNatTypeOpen] = useState(false)
   const [stunServersOpen, setStunServersOpen] = useState(false)
 
@@ -2064,13 +2379,7 @@ export function Stun() {
 
   // 网段列表先取好再开弹窗——这一步只读本机网卡，不发包，几毫秒的事，
   // 放进弹窗里反而要先闪一个空下拉框
-  const openScan = async () => {
-    try {
-      setScanModal({ open: true, subnets: await api.listLanSubnets() })
-    } catch (e) {
-      toast('读不到本机网段: ' + (e instanceof Error ? e.message : ''))
-    }
-  }
+
 
   // 不关扫描弹窗：一次扫描常常要加好几台，关掉就得再等一轮。
   // 添加窗盖在上面，存完退回来，刚加的那台会变成「已加过」
@@ -2121,12 +2430,18 @@ export function Stun() {
   }
 
   const submitService = async (form: ServiceFormState) => {
+    // 成功才走「关闭弹窗 + refresh」；失败要重抛给 ServiceModal ，
+    // 让它内部的 busy 闸门重置（不抛就卡死了）。
     const payload: api.StunServicePayload = {
       deviceId: serviceModal.deviceId,
       name: form.name.trim(),
       internalPort: Number(form.internalPort),
       protocol: form.protocol,
       useUpnp: form.useUpnp,
+      access: {
+        mode: form.accessMode,
+        rules: form.accessRules.split('\n').map((x) => x.trim()).filter(Boolean),
+      },
       punchLocalPort: Number(form.punchLocalPort) || 0,
       domain: form.domain.trim().toLowerCase(),
       ...formToPayloadTLS(form),
@@ -2134,6 +2449,9 @@ export function Stun() {
       description: form.description.trim(),
       // channelIds 是服务自己的字段（渠道 ID 列表），不属于 webhookconfig
       channelIds: form.channelIds,
+      // 自定义通知正文。这两个字段以前没进报文：界面上写好了、点保存，
+      // 落盘里根本没有，于是"保存没生效"。改保存接口时务必同步这里。
+      notifyTemplate: form.notifyTemplate,
       webhookconfig: {
         ...form.webhookconfig,
         url: form.webhookconfig.url.trim(),
@@ -2152,14 +2470,19 @@ export function Stun() {
       },
     }
     let serviceId: number | undefined
-    if (serviceModal.initial) {
-      await api.updateStunService({ ...payload, serviceId: serviceModal.initial.id })
-      serviceId = serviceModal.initial.id
-      toast('服务保存成功')
-    } else {
-      const res = await api.addStunService(payload)
-      serviceId = res?.id
-      toast('服务添加成功')
+    try {
+      if (serviceModal.initial) {
+        await api.updateStunService({ ...payload, serviceId: serviceModal.initial.id })
+        serviceId = serviceModal.initial.id
+        toast('服务保存成功')
+      } else {
+        const res = await api.addStunService(payload)
+        serviceId = res?.id
+        toast('服务添加成功')
+      }
+    } catch (e) {
+      toast('保存失败: ' + (e instanceof Error ? e.message : ''))
+      throw e  // 抛给 ServiceModal 内部，触发 busy=false 和显示错误
     }
     if (serviceId) {
       const key = `${serviceModal.deviceId}-${serviceId}`
@@ -2187,21 +2510,6 @@ export function Stun() {
    * 等用户把 URL 改成新的那条再自己打开；UPnP 固定端口抄过来就是两个服务抢
    * 同一个外部端口；名字一样的话列表上根本分不出谁是谁。
    */
-  const copyService = (deviceId: number, svc: StunService) => {
-    const src = serviceToForm(svc, false)
-    setServiceModal({
-      open: true,
-      deviceId,
-      prefill: {
-        ...src,
-        name: `${svc.name || '未命名服务'} 副本`,
-        redirect: { ...src.redirect, enabled: false, entryHost: '' },
-        // 两个服务抢同一条 SRV 会互相把端口按回去，副本里先关掉
-        mcEntry: { ...src.mcEntry, enabled: false, host: '' },
-        webhookconfig: { ...src.webhookconfig, enabled: false },
-      },
-    })
-  }
 
   /**
    * 列表上直接启停，不用为了勾一个框把整个服务表单打开一遍。
@@ -2298,9 +2606,7 @@ export function Stun() {
     )
   }
 
-  // 拖动排序：设备和设备内的服务都能拖
-  const [dragDev, setDragDev] = useState(0)
-  const [overDev, setOverDev] = useState(0)
+  // 拖动排序：服务之间换顺序
   const [dragSvc, setDragSvc] = useState('')
   const [overSvc, setOverSvc] = useState('')
 
@@ -2309,28 +2615,13 @@ export function Stun() {
   }
 
 
-  /** 设备之间换顺序：把 from 挪到 to 的位置再提交 */
-  const commitDeviceOrder = async (from: number, to: number) => {
-    const list = config?.devices ?? []
-    const ids = list.map((d) => getDeviceId(d))
-    const i = ids.indexOf(from)
-    const j = ids.indexOf(to)
-    if (i < 0 || j < 0 || i === j) return
-    const [moved] = ids.splice(i, 1)
-    ids.splice(j, 0, moved)
-    try {
-      await api.reorderDevices(ids)
-      await refresh()
-    } catch (e) {
-      toast('排序保存失败: ' + (e instanceof Error ? e.message : ''))
-    }
-  }
-
-  /** 某台设备下的服务换顺序（只动这一台设备的） */
+  /** 同一台设备下的服务换顺序（保留设备维度，因为不同设备的 SortOrder 是独立的） */
   const commitServiceOrder = async (deviceId: number, from: number, to: number) => {
-    const dev = (config?.devices ?? []).find((d) => getDeviceId(d) === deviceId)
-    if (!dev?.services) return
-    const ids = dev.services.map((s2) => s2.id)
+    // 数据源用**顶层 services**（和列表渲染一致），按 deviceId 过滤出这一组 ——
+    // 不再读设备树的 services：那样 deviceId=0（"未归到设备"那组）的服务根本不在树里，
+    // 拖它时会静默失效。
+    const group = (config?.services ?? []).filter((s2) => (s2.deviceId ?? 0) === deviceId)
+    const ids = group.map((s2) => s2.id)
     const i = ids.indexOf(from)
     const j = ids.indexOf(to)
     if (i < 0 || j < 0 || i === j) return
@@ -2352,220 +2643,173 @@ export function Stun() {
    * 和反代页的 SiteCard 是同一个套路：卡片逻辑不变，外层换容器。
    */
   const renderServiceCard = (dev: StunDevice, svc: StunService) => {
-                  const key = `${getDeviceId(dev)}-${svc.id}`
-                  const status = statusMap[key]
-                  const phase = status?.phaseStr || 'STOPPED'
-                  const running = phase === 'RUNNING'
-                  const externalPort = status?.externalPort ?? 0
-                  // 配了对外域名就用域名——终结 TLS 时证书是按域名签的，用 IP 访问必然报证书错
-                  const externalHost = svc.domain || config.publicIP
-                  const fullAddr = externalPort > 0 && externalHost ? `${externalHost}:${externalPort}` : ''
-                  const inHome = homeSet.has(key)
-                  const lastError = status?.lastError || ''
-                  const restartCount = status?.restartCount ?? 0
-                  const webhookEnabled = !!svc.webhookconfig?.enabled
-                  const webhookStatus = webhookEnabled ? getWebhookStatus(status) : null
-                  // 停用的服务本来就不该跑，别拿「❌ 已停止」去吓人
-                  const off = svc.enabled === false
-                  const busy = !!toggling[`${getDeviceId(dev)}-${svc.id}`]
-                  return (
-                    <div
-                      key={svc.id}
-                      className={`flex flex-col rounded-xl border p-3 transition hover:border-blue-200 hover:shadow-md ${
-                        off ? 'border-slate-200/80 bg-slate-50/60' : 'border-slate-200/80'
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            off
-                              ? 'bg-slate-300'
-                              : running
-                                ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
-                                : 'bg-rose-400 shadow-[0_0_6px_rgba(248,113,113,0.5)]'
-                          }`}
-                        />
-                        <span
-                          className={`mr-0.5 flex-1 truncate text-sm font-bold ${
-                            off ? 'text-slate-400' : 'text-slate-800'
-                          }`}
-                        >
-                          {svc.name || '未命名服务'}
-                        </span>
-                        <button
-                          onClick={() => toggleServiceEnabled(getDeviceId(dev), svc)}
-                          disabled={busy}
-                          title={busy ? '正在切换，打洞要几秒' : off ? '点一下启用' : '点一下停用'}
-                          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:cursor-wait ${
-                            off
-                              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-                              : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-                          }`}
-                        >
-                          {busy ? (
-                            <LoaderCircle className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Power className="h-3 w-3" />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => toggleHome(getDeviceId(dev), svc.id)}
-                          title={inHome ? '从主页移除' : '添加到主页'}
-                          className={`grid h-6 w-6 place-items-center rounded-md transition ${
-                            inHome ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                          }`}
-                        >
-                          <HomeIcon className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev), initial: svc })}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                          title="编辑"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => copyService(getDeviceId(dev), svc)}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                          title="照着这个再开一个"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => removeService(getDeviceId(dev), svc)}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
-                          title="删除"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
+    // **和反代/转发共用同一张卡**（components/ServiceCard）—— 骨架、拖动、状态点
+    // 都是同一套；穿透特有的两样通过 props 传进去：图标行里多一个"日志"，
+    // 第三行带 HTTPS / UPnP / Webhook 小标签。
+    const key = `${getDeviceId(dev)}-${svc.id}`
+    const status = statusMap[key]
+    const phase = status?.phaseStr || 'STOPPED'
+    const running = phase === 'RUNNING'
+    const externalPort = status?.externalPort ?? 0
+    // 配了对外域名就用域名——终结 TLS 时证书是按域名签的，用 IP 访问必然报证书错
+    const externalHost = svc.domain || config.publicIP
+    const fullAddr = externalPort > 0 && externalHost ? `${externalHost}:${externalPort}` : ''
+    const inHome = homeSet.has(key)
+    const lastError = status?.lastError || ''
+    const restartCount = status?.restartCount ?? 0
+    const off = svc.enabled === false
+    const busy = !!toggling[`${getDeviceId(dev)}-${svc.id}`]
+    const webhookEnabled = !!svc.webhookconfig?.enabled
+    const webhookStatus = webhookEnabled ? getWebhookStatus(status) : null
 
-                      <div className="space-y-1 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">协议类型</span>
-                          <span className="flex items-center gap-1">
-                            <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
-                              {(svc.protocol || 'TCP').toUpperCase()}
-                            </span>
-                            {svc.useUpnp && (
-                              <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">
-                                UPnP
-                              </span>
-                            )}
-                            {/* 和服务表单同一套说法：证书 = 洞口加 HTTPS，内网 HTTPS = 内网服务自己带证书 */}
-                            {svc.tlsTerminate && (
-                              <span
-                                className="rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-600"
-                                title="Catflap 用证书给外面加 HTTPS"
-                              >
-                                证书
-                              </span>
-                            )}
-                            {(svc.backendHttps || svc.https) && (
-                              <span
-                                className="rounded-md bg-teal-50 px-1.5 py-0.5 text-[10px] font-bold text-teal-600"
-                                title="内网服务本身就是 HTTPS"
-                              >
-                                内网 HTTPS
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                        {svc.domain && (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="shrink-0 text-slate-500">对外域名</span>
-                            <span className="truncate font-mono text-slate-700" title={svc.domain}>
-                              {svc.domain}
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">内部端口</span>
-                          <span className="font-mono font-semibold text-slate-700">{svc.internalPort}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">穿透状态</span>
-                          <span
-                            className={`font-semibold ${
-                              off ? 'text-slate-400' : running ? 'text-emerald-600' : 'text-rose-500'
-                            }`}
-                          >
-                            {off ? '已停用' : running ? '✅ 穿透成功' : `❌ ${phaseLabel[phase] || phase}`}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-500">Webhook</span>
-                          {webhookEnabled && webhookStatus ? (
-                            <span
-                              className={`truncate text-right font-semibold ${
-                                webhookStatus.state === 'success'
-                                  ? 'text-emerald-600'
-                                  : webhookStatus.state === 'failed'
-                                    ? 'text-rose-500'
-                                    : 'text-amber-600'
-                              }`}
-                              title={webhookStatus.at ? new Date(webhookStatus.at).toLocaleString() : ''}
-                            >
-                              {webhookStatus.state === 'success' ? '✅ ' : webhookStatus.state === 'failed' ? '❌ ' : '⏳ '}
-                              {webhookStatus.text}
-                            </span>
-                          ) : (
-                            <span className="font-semibold text-slate-400">未启用</span>
-                          )}
-                        </div>
-                      </div>
+    const state: ServiceState = off ? 'off' : running ? 'running' : 'failed'
+    const hint = off
+      ? '已停用'
+      : running
+        ? '穿透成功'
+        : lastError
+          ? `${lastError}${restartCount > 0 ? `（重启 ${restartCount} 次）` : ''}`
+          : phaseLabel[phase] || phase
 
-                      {/* 停用之前那次的报错就别留着了，用户是自己关的，不是出了毛病 */}
-                      {!off && lastError && (
-                        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-600">
-                          ⚠️ <span className="font-semibold">错误:</span> {lastError}
-                          {restartCount > 0 && ` (重启 ${restartCount} 次)`}
-                        </div>
-                      )}
-
-                      {/*
-                        停用之后洞就关了，上一轮那个地址已经连不上。
-                        还摆着「一键直达」的话，用户点进去打不开，只会以为是穿透坏了
-                      */}
-                      {off ? (
-                        <div className="mt-2 rounded-lg bg-slate-100 px-2 py-2 text-center text-xs text-slate-400">
-                          已停用，外部地址不通
-                        </div>
-                      ) : fullAddr ? (
-                        <>
-                          <div className="mt-2 text-[11px] text-slate-400">外部连接地址</div>
-                          <div className="mt-1 break-all rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2 py-1.5 text-center font-mono text-sm font-semibold text-blue-600">
-                            {fullAddr}
-                          </div>
-                          <div className="mt-2 flex gap-1.5">
-                            <button
-                              onClick={() => copy(fullAddr)}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                            >
-                              <ClipboardCopy className="h-3 w-3" /> 复制地址
-                            </button>
-                            <button
-                              onClick={() => openAddress(svc, fullAddr)}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-100"
-                            >
-                              <ExternalLink className="h-3 w-3" /> 一键直达
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="mt-2 rounded-lg bg-slate-100 px-2 py-2 text-center text-xs text-slate-400">
-                          尚未获取外部地址
-                        </div>
-                      )}
-
-                      <button
-                        onClick={() => setLogKey(key)}
-                        className="mt-2 flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
-                      >
-                        <FileText className="h-3 w-3" /> 查看日志 ({(status?.logs ?? []).length})
-                      </button>
-                    </div>
-                  )
+    return (
+      <ServiceCard
+        // "通知已开启"小徽标：用户从服务列表上一眼能看出哪些配了通知、哪些没
+        notifyActive={(svc.channelIds ?? []).length > 0}
+        notifyCount={(svc.channelIds ?? []).length}
+        name={svc.name}
+        state={state}
+        stateHint={hint}
+        dragging={dragSvc === String(svc.id)}
+        dropTarget={overSvc === String(svc.id) && dragSvc !== String(svc.id)}
+        onDragStart={() => setDragSvc(String(svc.id))}
+        onDragEnd={() => {
+          setDragSvc('')
+          setOverSvc('')
+        }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          const k = String(svc.id)
+          if (k !== overSvc) setOverSvc(k)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          if (dragSvc) void commitServiceOrder(svc.deviceId, Number(dragSvc), svc.id)
+        }}
+        icons={
+          <>
+            <button
+              onClick={() => toggleServiceEnabled(getDeviceId(dev), svc)}
+              disabled={busy}
+              title={busy ? '正在切换，打洞要几秒' : off ? '点一下启用' : '点一下停用'}
+              className={`${iconBtn} disabled:cursor-wait ${
+                off ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+              }`}
+            >
+              {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Power className="h-3 w-3" />}
+            </button>
+            <button
+              onClick={() => toggleHome(getDeviceId(dev), svc.id)}
+              title={inHome ? '从主页移除' : '添加到主页'}
+              className={`${iconBtn} ${inHome ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+            >
+              <HomeIcon className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev), initial: svc })}
+              className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`}
+              title="编辑"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+            {/* 访问日志：和反代一样从审计取（按 ref = s<设备>-<服务>）。
+                以前穿透外面谁来过完全没记录，现在洞口 Accept 时会记一笔。 */}
+            <button
+              onClick={() =>
+                setAccessLog({
+                  // ref 必须带 s 前缀：后端记的是 "s<设备ID>-<服务ID>"
+                  //（见 modules/stun/tunnel_access.go）。少了这个 s 就一条都查不到。
+                  ref: 's' + key,
+                  name: svc.name || '未命名服务',
+                })
+              }
+              className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`}
+              title="访问日志（谁访问过它）"
+            >
+              <FileText className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => removeService(getDeviceId(dev), svc)}
+              className={`${iconBtn} bg-rose-50 text-rose-500 hover:bg-rose-100`}
+              title="删除"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </>
+        }
+        subtitle={
+          off ? (
+            <span className="text-slate-400">已停用，外部地址不通</span>
+          ) : fullAddr ? (
+            <div className="flex min-w-0 items-center gap-1">
+              <button
+                onClick={() => copy(fullAddr)}
+                title={`点击复制：${fullAddr}`}
+                className="flex min-w-0 flex-1 items-center gap-1 text-left"
+              >
+                <ClipboardCopy className="h-3 w-3 shrink-0 text-slate-400" />
+                <span className="truncate font-mono text-xs font-semibold text-blue-600">{fullAddr}</span>
+              </button>
+              <button
+                onClick={() => openAddress(svc, fullAddr)}
+                title="一键直达（新标签打开）"
+                className="shrink-0 rounded p-0.5 text-blue-500 transition hover:bg-blue-50"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <span className="text-slate-400">{phaseLabel[phase] || '等待外部地址…'}</span>
+          )
+        }
+        meta={
+          <>
+            <span className="font-mono text-[11px] text-slate-400">: {svc.internalPort}</span>
+            <CardBadge tone="slate" title="协议">
+              {(svc.protocol || 'TCP').toUpperCase()}
+            </CardBadge>
+            {svc.tlsTerminate && (
+              <CardBadge tone="violet" title="Catflap 用证书给外面加 HTTPS">
+                HTTPS
+              </CardBadge>
+            )}
+            {(svc.backendHttps || svc.https) && !svc.tlsTerminate && (
+              <CardBadge tone="teal" title="内网服务本身就是 HTTPS">
+                内网 HTTPS
+              </CardBadge>
+            )}
+            {svc.useUpnp && (
+              <CardBadge tone="amber" title="UPnP 自动端口映射">
+                UPnP
+              </CardBadge>
+            )}
+            {webhookEnabled && webhookStatus && (
+              <CardBadge
+                tone={
+                  webhookStatus.state === 'success'
+                    ? 'emerald'
+                    : webhookStatus.state === 'failed'
+                      ? 'rose'
+                      : 'amber'
+                }
+                title={`Webhook：${webhookStatus.text}${webhookStatus.at ? `（${new Date(webhookStatus.at).toLocaleString()}）` : ''}`}
+              >
+                Webhook
+              </CardBadge>
+            )}
+          </>
+        }
+      />
+    )
   }
 
   return (
@@ -2661,14 +2905,8 @@ export function Stun() {
           穿透服务按设备分组。加服务时选好设备，它会归到那台设备下面。
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {/* 扫描放在前面：不用去路由器后台翻 IP，是更省事的那条路 */}
-          <button
-            onClick={openScan}
-            className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-            title="扫描局域网找机器"
-          >
-            <Radar className="h-3 w-3" /> 扫描
-          </button>
+          {/* 扫描不在这里：集中在「设备」页，穿透页只管服务。
+              设备的增删是设备页的事，两个入口容易让人分不清该去哪加。 */}
           <button
             onClick={() => setServiceModal({ open: true, deviceId: 0 })}
             className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600"
@@ -2679,103 +2917,98 @@ export function Stun() {
       </div>
 
       <div className="space-y-3">
-        {(config?.devices ?? []).length === 0 ? (
+        {(config?.services ?? []).length === 0 ? (
+          // 真正的「服务列表」空态：没建过任何穿透服务。
+          // 设备的增删属于「设备」页，穿透页不再铺开所有设备。
           <Card className="!p-0">
-            <div className="px-5 py-10 text-center">
+            <div className="px-5 py-12 text-center">
               <Server className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-2 text-sm text-slate-500">还没有设备</p>
+              <p className="mt-2 text-sm text-slate-500">还没有内网穿透服务</p>
               <p className="mt-1 text-[11px] text-slate-400">
-                设备是穿透 / 反代 / 端口转发共用的一份，去「设备」页添加
+                点右上角「添加服务」，选设备、填端口就行
               </p>
             </div>
           </Card>
         ) : (
-          (config?.devices ?? []).map((dev: StunDevice) => (
-            // 设备卡本身可拖（拖着换设备顺序）；里面的服务也能拖，
-            // 两者靠 dragDev / dragSvc 分开，互不干扰
-            <Card
-              key={getDeviceId(dev)}
-              className={`!p-0 ${overDev === getDeviceId(dev) && dragDev !== getDeviceId(dev) ? 'ring-2 ring-blue-300' : ''} ${dragDev === getDeviceId(dev) ? 'opacity-40' : ''}`}
-              draggable
-              onDragStart={() => setDragDev(getDeviceId(dev))}
-              onDragEnd={() => {
-                setDragDev(0)
-                setOverDev(0)
-              }}
-              onDragOver={(e) => {
-                e.preventDefault()
-                if (getDeviceId(dev) !== overDev) setOverDev(getDeviceId(dev))
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                if (dragDev) void commitDeviceOrder(dragDev, getDeviceId(dev))
-              }}
-            >
-              {/* 设备头：和「设备」页、反代页同一套样式 */}
-              <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
-                  <Server className="h-3.5 w-3.5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-bold text-slate-800">{dev.name}</p>
-                  <p className="font-mono text-[10px] text-slate-400">{dev.ip}</p>
-                </div>
-                <span className="shrink-0 text-[11px] text-slate-400">
-                  {dev.services?.length ?? 0} 个服务
-                </span>
-                {/* 添加服务统一走页面顶部的按钮 —— 表单里选设备，
-                    和反代一样。这里不再按设备各放一个按钮。 */}
-                <button
-                  onClick={() =>
-                    setServiceModal({ open: true, deviceId: getDeviceId(dev) })
-                  }
-                  className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                  title="给这台设备添加服务"
-                >
-                  <Plus className="h-3 w-3" /> 加服务
-                </button>
-              </div>
+          // **和反代页同一套设计：以设备为主项，服务挂在设备下。**
+          // 数据源是顶层 services（不是设备树）—— 按 svc.deviceId 归到设备，
+          // 改设备 IP 时 deviceId 不变，归属不会掉；设备只是展示分组。
+          (() => {
+            const byDev = new Map<number, StunService[]>()
+            const rest: StunService[] = []
+            for (const svc of config?.services ?? []) {
+              if (svc.deviceId) {
+                const arr = byDev.get(svc.deviceId) ?? []
+                arr.push(svc)
+                byDev.set(svc.deviceId, arr)
+              } else {
+                rest.push(svc)
+              }
+            }
+            const devList = config?.devices ?? []
+            const out: { dev?: (typeof devList)[number]; svcs: StunService[] }[] = []
+            for (const [id, svcs] of byDev) {
+              out.push({ dev: devList.find((d) => getDeviceId(d) === id), svcs })
+            }
+            if (rest.length > 0) out.push({ svcs: rest })
 
-              {!dev.services || dev.services.length === 0 ? (
-                <div className="px-3 py-6 text-center text-[11px] text-slate-400">
-                  这台机器上还没有穿透服务
+            return out.map(({ dev, svcs }, gi) => (
+              <Card key={dev ? getDeviceId(dev) : `rest-${gi}`} className="!p-0">
+                {/* 设备头：和反代页同一套样式 */}
+                <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
+                    <Server className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-bold text-slate-800">
+                      {dev ? dev.name : '未归到设备'}
+                    </p>
+                    {dev && <p className="font-mono text-[10px] text-slate-400">{dev.ip}</p>}
+                  </div>
+                  <span className="shrink-0 text-[11px] text-slate-400">{svcs.length} 个服务</span>
+                  {dev && (
+                    <button
+                      onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev) })}
+                      className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                      title="给这台设备添加服务"
+                    >
+                      <Plus className="h-3 w-3" /> 加服务
+                    </button>
+                  )}
                 </div>
-              ) : (
+
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2.5 p-2.5">
-                  {(dev.services ?? []).map((svc) => (
+                  {svcs.map((svc) => (
                     <div
                       key={svc.id}
                       draggable
-                      onDragStart={() => setDragSvc(`${getDeviceId(dev)}-${svc.id}`)}
+                      onDragStart={() => setDragSvc(String(svc.id))}
                       onDragEnd={() => {
                         setDragSvc('')
                         setOverSvc('')
                       }}
                       onDragOver={(e) => {
                         e.preventDefault()
-                        const k = `${getDeviceId(dev)}-${svc.id}`
+                        const k = String(svc.id)
                         if (k !== overSvc) setOverSvc(k)
                       }}
                       onDrop={(e) => {
                         e.preventDefault()
-                        if (dragSvc.startsWith(`${getDeviceId(dev)}-`)) {
-                          const from = Number(dragSvc.split('-').pop())
-                          void commitServiceOrder(getDeviceId(dev), from, svc.id)
-                        }
+                        if (dragSvc) void commitServiceOrder(svc.deviceId, Number(dragSvc), svc.id)
                       }}
                       className={`cursor-grab transition ${
-                        overSvc === `${getDeviceId(dev)}-${svc.id}` && dragSvc !== `${getDeviceId(dev)}-${svc.id}`
+                        overSvc === String(svc.id) && dragSvc !== String(svc.id)
                           ? 'ring-2 ring-blue-300'
                           : ''
-                      } ${dragSvc === `${getDeviceId(dev)}-${svc.id}` ? 'opacity-40' : ''}`}
+                      } ${dragSvc === String(svc.id) ? 'opacity-40' : ''}`}
                     >
-                      {renderServiceCard(dev, svc)}
+                      {renderServiceCard(dev as StunDevice, svc)}
                     </div>
                   ))}
                 </div>
-              )}
-            </Card>
-          ))
+              </Card>
+            ))
+          })()
         )}
       </div>
 
@@ -2826,6 +3059,13 @@ export function Stun() {
         />
       )}
       {logKey && <LogModal status={logStatus} onClose={() => setLogKey(null)} />}
+      {accessLog && (
+        <AccessLogModal
+          title={accessLog.name}
+          ref={accessLog.ref}
+          onClose={() => setAccessLog(null)}
+        />
+      )}
       {natTypeOpen && <NatTypeModal onClose={() => setNatTypeOpen(false)} />}
       {stunServersOpen && (
         <StunServersModal

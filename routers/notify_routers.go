@@ -24,9 +24,13 @@ func NotifyRouters(g *gin.RouterGroup) {
 		middleware.BindJsonMiddleware[notify_api.ChannelDeleteRequest], app.NotifyChannelDeleteView)
 	g.POST("notify/channel/test",
 		middleware.BindJsonMiddleware[notify_api.ChannelTestRequest], app.NotifyChannelTestView)
+	// 服务里「发一条测试通知」：用服务选的渠道 + 模板试发，逐渠道回结果
+	g.POST("notify/service-test",
+		middleware.BindJsonMiddleware[notify_api.ServiceTestRequest], app.NotifyServiceTestView)
 
 	g.POST("notify/rule",
 		middleware.BindJsonMiddleware[notify_api.RuleSaveRequest], app.NotifyRuleSaveView)
+	g.GET("notify/service-refs", app.NotifyServiceRefsView)
 	g.POST("notify/rule/delete",
 		middleware.BindJsonMiddleware[notify_api.RuleDeleteRequest], app.NotifyRuleDeleteView)
 }

@@ -6,6 +6,8 @@ import (
 	"github.com/chenggegedeid/catflap/utils/utilsFile"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -143,6 +145,19 @@ func UpdateConfig(config model.Config) error {
 		logrus.Error("Config写入失败：", err)
 		return err
 	}
+
+	// 把拆出来的服务列表**同步回运行时**。
+	//
+	// Services 是真相来源，设备树只是派生的（hydrate 从 Services 组装）。
+	// 以前这里写完盘就结束，Runtime.Config.Services 一直是启动时那份旧数据 ——
+	// 新建 / 改过的服务只存在于设备树里，于是：
+	//   · LookupService 查不到 → 选了渠道也不发通知、IP 门禁不生效
+	//   · 拿不到 Domain → 通知里的地址退回 IP
+	//   · 下一次 hydrateDevices（比如在设备页改设备）拿旧表重建设备树，
+	//     新服务直接从界面消失，再落盘一次就永久没了 —— 数据丢失
+	// 这几个症状全都指向"保存没生效"，但根因在这一行。
+	// 所有调用方传的都是 stun.Runtime.Config，写回它是对的。
+	Runtime.Config.Services = config.Services
 
 	logrus.Info("STUN配置文件已更新")
 	return nil
@@ -339,4 +354,40 @@ func ReorderServices(deviceID uint, svcIDs []uint) error {
 // 所以设备页改完设备后，api 层要调一次这个。
 func RefreshDevices() {
 	hydrateDevices(&Runtime.Config)
+}
+
+// DeleteServicesOfDevice 删掉某台设备上的**全部穿透服务**，返回被删的服务名。
+//
+// 给「删设备」用：设备删了，挂在它上面的服务就成了孤儿 ——
+// 配置还在、但 hydrate 时匹配不到设备，于是**静默地不再运行**。
+// 用户只会看到"服务不工作了"却看不出原因，这种静默失效比报错难查得多。
+//
+// 所以要么不让删（老行为），要么连服务一起删（这个函数的用途）。
+func DeleteServicesOfDevice(deviceID uint) ([]string, error) {
+	var kept []model.Service
+	var removed []string
+	for _, s := range Runtime.Config.Services {
+		if s.DeviceID == deviceID {
+			removed = append(removed, nameOrID(s))
+			continue
+		}
+		kept = append(kept, s)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	Runtime.Config.Services = kept
+	// 设备树是派生的，改完要重建一次
+	hydrateDevices(&Runtime.Config)
+	if err := UpdateConfig(Runtime.Config); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+func nameOrID(s model.Service) string {
+	if strings.TrimSpace(s.Name) != "" {
+		return s.Name
+	}
+	return "服务 #" + strconv.FormatUint(uint64(s.ID), 10)
 }

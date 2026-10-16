@@ -51,7 +51,7 @@ func (StunApi) StunDeviceUpdateView(c *gin.Context) {
 
 	// 若 IP 发生变化，重启该设备下所有已启用服务
 	// 修复：原版调用已删除的全局函数 stun.StartService，改为调度器实例方法
-	if oldIP != cr.IP {
+	if oldIP != cr.IP && stun.SchedulerReady() {
 		for j := range dev.Services {
 			svc := &dev.Services[j]
 			stun.Runtime.Scheduler.StartService(dev, svc)
