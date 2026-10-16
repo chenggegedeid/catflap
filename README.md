@@ -157,7 +157,9 @@ curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/
   （**删之前会自动打包备份到 `/opt/catflap.bak-<时间戳>.tar.gz`**）
 - 只看不动手：`sudo bash /tmp/install.sh --status`
 - 指定版本：`--version v2.0.0`；改端口：`--port 8081`
-- 下载慢：加镜像 `sudo bash /tmp/install.sh https://ghfast.top`
+- 下载慢 / 连不上：**脚本会自动换镜像重试**（ghfast.top → gh-proxy → ghproxy），
+  每个源都做 sha256 校验，用哪个源装的会在日志里写清楚。
+  想自己指定就加 `--mirror https://ghfast.top`
 
 ### 飞牛 fnOS
 

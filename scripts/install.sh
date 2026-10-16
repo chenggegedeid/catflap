@@ -51,6 +51,9 @@
 #   - **配置与数据默认不动**：升级只换二进制。--purge 才删，且**删之前先打包备份**。
 #   - **先校验再替换**：下载后比对 sha256，不对就停下，绝不把坏二进制装进去。
 #   - **装过就不闷头下载**：先问你要更新还是卸载，别让人以为只是"查一下"结果被升了级。
+#   - **下载源会自动换**：直连 github.com 失败（国内常见，报错是
+#     `curl: (56) SSL unexpected eof` 或超时）会依次换镜像重试，
+#     每一个源都做 sha256 校验；镜像源拿不到校验和就不收，换下一个。
 
 set -euo pipefail
 
@@ -554,27 +557,93 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-log "下载 ${ASSET}"
-curl -fsSL --retry 2 --max-time 300 -o "${tmpdir}/${ASSET}" "$BIN_URL" \
-  || die "下载失败：${BIN_URL}
-  国内网络可以试试：
+# 候选下载源：直连优先，失败依次换镜像。
+#
+# 为什么要自动换：直连 github.com 在国内经常被掐，报错是
+#   curl: (56) OpenSSL SSL_read: unexpected eof while reading
+# 或干脆超时 —— 用户看不出这是网络问题还是项目没了，只能自己去搜镜像地址。
+# 这些镜像都是「把 github.com 的 URL 整体接在后面」的写法，所以拼法统一。
+candidate_bases() {
+  if [ -n "$MIRROR" ]; then
+    printf '%s\n' "$(base_url)"
+    return 0
+  fi
+  printf '%s\n' "https://github.com"
+  for m in https://ghfast.top https://gh-proxy.com https://ghproxy.net; do
+    printf '%s/https://github.com\n' "$m"
+  done
+}
+
+# 校验下载到的文件。返回：0 校验通过 / 1 对不上（坏文件）/ 2 拿不到校验和。
+#
+# 2 和 1 要分开：拿不到 SHA256SUMS 不等于文件有问题，
+# 但从第三方镜像下东西又验不了的话，宁可换下一个源。
+verify_sum() {
+  local base="$1" want got
+  if ! curl -fsSL --max-time 60 -o "${tmpdir}/SHA256SUMS" \
+       "${base}/${REPO}/releases/download/${TAG}/SHA256SUMS" 2>/dev/null; then
+    return 2
+  fi
+  want="$(awk -v a="$ASSET" '$2==a || $2=="*"a || $2=="./"a {print $1}' "${tmpdir}/SHA256SUMS" | head -n1)"
+  if [ -z "$want" ]; then
+    return 2
+  fi
+  got="$(sha256sum "${tmpdir}/${ASSET}" | awk '{print $1}')"
+  [ "$want" = "$got" ] || return 1
+  return 0
+}
+
+USED_BASE=""
+while IFS= read -r base; do
+  [ -n "$base" ] || continue
+  if [ "$base" = "https://github.com" ]; then
+    log "下载 ${ASSET}（直连 github.com）"
+  else
+    log "换用镜像 ${base%/https://github.com} 重试"
+  fi
+
+  if ! curl -fsSL --retry 2 --max-time 300 -o "${tmpdir}/${ASSET}" \
+       "${base}/${REPO}/releases/download/${TAG}/${ASSET}" 2>/dev/null; then
+    warn "这个源下载失败，换下一个"
+    continue
+  fi
+
+  verify_sum "$base"
+  case "$?" in
+    0)
+      log "sha256 校验通过"
+      USED_BASE="$base"
+      break
+      ;;
+    1)
+      warn "这个源下到的文件 sha256 对不上，换下一个"
+      continue
+      ;;
+    2)
+      if [ "$base" = "https://github.com" ]; then
+        # 官方源拿不到校验和就照旧放行（和历史行为一致）：
+        # 我们至少是从发布者的域名下的。
+        warn "拿不到 SHA256SUMS，跳过校验"
+        USED_BASE="$base"
+        break
+      fi
+      warn "镜像源拿不到 SHA256SUMS，不冒这个险，换下一个"
+      continue
+      ;;
+  esac
+done <<EOF
+$(candidate_bases)
+EOF
+
+[ -n "$USED_BASE" ] || die "所有下载源都失败了。
+  手动指定镜像：
     ${SELF} --version ${TAG} --mirror https://ghfast.top
   或走代理：
-    sudo env http_proxy=http://<代理>:<端口> ${SELF} --version ${TAG}"
+    sudo env http_proxy=http://<代理>:<端口> ${SELF} --version ${TAG}
+  也可以先在本机下好再离线安装（版本号见 https://github.com/${REPO}/releases）。"
 
-# sha256 校验：SHA256SUMS 是给人看的（程序内部的更新校验用的是 GitHub API 的
-# digest），但安装时它是唯一能挡住「下到一半 / 被换成别的东西」的手段。
-if curl -fsSL --max-time 60 -o "${tmpdir}/SHA256SUMS" "$SUM_URL" 2>/dev/null; then
-  want="$(awk -v a="$ASSET" '$2==a || $2=="*"a || $2=="./"a {print $1}' "${tmpdir}/SHA256SUMS" | head -n1)"
-  if [ -n "$want" ]; then
-    got="$(sha256sum "${tmpdir}/${ASSET}" | awk '{print $1}')"
-    [ "$want" = "$got" ] || die "sha256 对不上：期望 ${want}，实际 ${got}。文件没有替换，请重试或换镜像。"
-    log "sha256 校验通过"
-  else
-    warn "SHA256SUMS 里没有 ${ASSET}，跳过校验"
-  fi
-else
-  warn "拿不到 SHA256SUMS，跳过校验"
+if [ "$USED_BASE" != "https://github.com" ]; then
+  log "本次通过镜像 ${USED_BASE%/https://github.com} 下载（已做 sha256 校验）"
 fi
 
 # ── 用户与目录 ──────────────────────────────────────────────────────────────
