@@ -1,6 +1,8 @@
 package stun_api
 
 import (
+	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
+
 	"fmt"
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/stun"
@@ -36,13 +38,22 @@ type StunServiceUpdateViewRequest struct {
 	Enabled     bool   `json:"enabled"`
 	Description string `json:"description"`
 
+	// Access 访问控制（IP 门禁）。
+	// 这个字段以前只在「新增」的请求体里，改服务时界面上传上来的门禁被直接丢掉
+	// —— 用户在「访问控制」里选了黑名单、填了 IP，点保存，落盘还是原样。
+	// 老服务建的时候还没有这个字段（mode 是空字符串），这里补默认：黑名单。
+	Access proxymodel.AccessControl `json:"access"`
+
 	WebHookConfig webhook.WebhookConfig `json:"webhookconfig"` // Webhook 配置文件
 
 	// ChannelIDs 用哪些**全局通知渠道**。渠道在「通知」页里统一配置，
 	// 这里只存 ID —— 同一个群机器人地址不该在每个服务里各存一份。
-	ChannelIDs []string             `json:"channelIds"`
-	Redirect   model.RedirectConfig `json:"redirect"` // 入口域名跟着外部端口走
-	MCEntry    model.MCEntryConfig  `json:"mcEntry"`  // MC Java 版联机的 SRV 记录
+	ChannelIDs []string `json:"channelIds"`
+	// NotifyTemplate 用户自定义的通知正文（#{xxx} 占位符）。
+	// 通知方式/token 在通知页全局配，服务只管内容和模板。
+	NotifyTemplate string               `json:"notifyTemplate"`
+	Redirect       model.RedirectConfig `json:"redirect"` // 入口域名跟着外部端口走
+	MCEntry        model.MCEntryConfig  `json:"mcEntry"`  // MC Java 版联机的 SRV 记录
 }
 
 func (StunApi) StunServiceUpdateView(c *gin.Context) {
@@ -109,6 +120,9 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	svc.Description = cr.Description
 	svc.WebHookConfig = cr.WebHookConfig
 	svc.ChannelIDs = nonNilStrings(cr.ChannelIDs)
+	svc.NotifyTemplate = cr.NotifyTemplate
+	// 老服务建的时候还没有门禁字段，这里第一次保存顺手补上默认（黑名单）
+	svc.Access = defaultTunnelAccess(cr.Access)
 	svc.Redirect = cr.Redirect
 	oldMCEntry := svc.MCEntry
 	svc.MCEntry = normalizeMCEntry(cr.Protocol, cr.MCEntry)
@@ -133,7 +147,9 @@ func (StunApi) StunServiceUpdateView(c *gin.Context) {
 	// 重启该服务的 STUN 穿透（停旧起新）
 	// 修复：原版调用已删除的全局函数 stun.StartService，改为调度器实例方法
 	device := &stun.Runtime.Config.Devices[deviceIndex]
-	stun.Runtime.Scheduler.StartService(device, &device.Services[serviceIndex])
+	if stun.SchedulerReady() {
+		stun.Runtime.Scheduler.StartService(device, &device.Services[serviceIndex])
+	}
 
 	res.OkWithData(*svc, c)
 }

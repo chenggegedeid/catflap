@@ -334,3 +334,102 @@ func HumanBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %s", v, units[i])
 }
+
+// ServiceDayPoint 单个服务单天的流量
+type ServiceDayPoint struct {
+	Date     string `json:"date"`
+	In       int64  `json:"in"`
+	Out      int64  `json:"out"`
+	Requests int64  `json:"requests"`
+}
+
+// AggregateByServiceDay 每个服务**每天的**流量序列。
+//
+// key 和 BySite / ByTunnel 同一套（站点是 ID 字符串、穿透是 "s<设备>-<服务>"），
+// 值是按日期升序的序列 —— 给"点开某个服务看它每天用了多少"用。
+// 之前只有总量汇总，用户想看某个服务最近 30 天的趋势没有数据支撑。
+func AggregateByServiceDay(recs []MinuteRecord) map[string][]ServiceDayPoint {
+	byService := map[string]map[string]*ServiceDayPoint{}
+	for _, r := range recs {
+		day := time.Unix(r.Minute, 0).Format("2006-01-02")
+		for key, st := range r.BySite {
+			m := byService[key]
+			if m == nil {
+				m = map[string]*ServiceDayPoint{}
+				byService[key] = m
+			}
+			p := m[day]
+			if p == nil {
+				p = &ServiceDayPoint{Date: day}
+				m[day] = p
+			}
+			p.In += st.In
+			p.Out += st.Out
+			p.Requests += st.Requests
+		}
+		for key, st := range r.ByTunnel {
+			m := byService[key]
+			if m == nil {
+				m = map[string]*ServiceDayPoint{}
+				byService[key] = m
+			}
+			p := m[day]
+			if p == nil {
+				p = &ServiceDayPoint{Date: day}
+				m[day] = p
+			}
+			p.In += st.In
+			p.Out += st.Out
+			p.Requests += st.Requests
+		}
+	}
+
+	out := make(map[string][]ServiceDayPoint, len(byService))
+	for key, m := range byService {
+		seq := make([]ServiceDayPoint, 0, len(m))
+		for _, p := range m {
+			seq = append(seq, *p)
+		}
+		sort.Slice(seq, func(i, j int) bool { return seq[i].Date < seq[j].Date })
+		out[key] = seq
+	}
+	return out
+}
+
+// SeriesPoint 时间序列的一个桶（速率折线图用）。
+// Time 是桶起点（Unix 秒）；In/Out 是这个桶内的总流量，
+// 速率 = In / bucketSeconds，由前端算（桶长它自己知道）。
+type SeriesPoint struct {
+	Time     int64 `json:"time"`
+	In       int64 `json:"in"`
+	Out      int64 `json:"out"`
+	Requests int64 `json:"requests"`
+}
+
+// AggregateSeries 把分钟记录聚成时间序列（折线图用）。
+//
+// bucket 由调用方按范围定（小时/天），这里不管"自动聚合"的策略 ——
+// 那是接口层的事（看范围多大选粒度），存储层只管按给定粒度归堆。
+// 空桶（没有流量的小时/天）不产生点 —— 折线在两个点之间自然拉平即可，
+// 和飞牛那种"没流量就是贴着 0 的直线"是一个效果。
+func AggregateSeries(recs []MinuteRecord, bucket time.Duration) []SeriesPoint {
+	byBucket := map[int64]*SeriesPoint{}
+	for _, r := range recs {
+		t := time.Unix(r.Minute, 0).Truncate(bucket).Unix()
+		p := byBucket[t]
+		if p == nil {
+			p = &SeriesPoint{Time: t}
+			byBucket[t] = p
+		}
+		p.In += r.In
+		p.Out += r.Out
+		p.Requests += r.Requests
+	}
+
+	out := make([]SeriesPoint, 0, len(byBucket))
+	for _, p := range byBucket {
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Time < out[j].Time })
+	return out
+}

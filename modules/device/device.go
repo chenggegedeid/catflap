@@ -22,6 +22,9 @@ Package device 设备表 —— 内网里那些机器。
 package device
 
 import (
+	"fmt"
+	"net"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -181,9 +184,11 @@ func Update(id uint, name, ip string) (Device, error) {
 		if runtime.Devices[i].DeviceID != id {
 			continue
 		}
-		// IP 换了要查重（排除自己）
+		// IP 换了要查重（排除自己）：新 IP 已被另一台占着时不让改。
+		// 这里返回的 IP 错误格式是固定的，api 层包装成 409 + 提示文案，
+		// 让用户去「设备」页删掉旧的那台再来。
 		if normalizeIP(runtime.Devices[i].IP) != ip && hasIPLocked(ip) {
-			return Device{}, ErrIPExists
+			return Device{}, fmt.Errorf("%s %s: %w", ErrIPExists, ip, ErrIPExists)
 		}
 		old := runtime.Devices[i]
 		runtime.Devices[i].Name = name
@@ -193,6 +198,17 @@ func Update(id uint, name, ip string) (Device, error) {
 		if err := writeConfigLocked(runtime.Devices); err != nil {
 			runtime.Devices[i] = old
 			return Device{}, err
+		}
+		// 落盘成功后才同步三个模块里缓存的 IP —— 设备表里的 IP 是单一真相。
+		// Site.Backend / Forward.Target 形如 ip:port，里面那段 IP 也要跟着换，
+		// 否则下次 hydrate 又用新设备的 IP 去匹配 —— 反而匹配不上、产生"未归设备"。
+		if old.IP != ip {
+			if err := syncIpsLocked(old.IP, ip); err != nil {
+				// 同步失败不致命：设备表里已经是新 IP 了（人不会再进这台设备的旧地址），
+				// 只是站点/转发的旧 IP 还在 → 暂时未归设备 → 用户得去那条规则改 Target/Backend。
+				// 把这个隐患告诉 api 层（以 ip 冲突错误的形式带上原始失败）。
+				return runtime.Devices[i], fmt.Errorf("IP 已改为 %s，但同步旧规则的地址失败：%w", ip, err)
+			}
 		}
 		return runtime.Devices[i], nil
 	}
@@ -288,4 +304,138 @@ func Reorder(ids []uint) error {
 	}
 
 	return writeConfigLocked(runtime.Devices)
+}
+
+// =====================================================================
+// 跨模块联动（仅 IP 变化时）
+// =====================================================================
+
+// syncIpsLocked 改设备 IP 时调用：把三个模块里仍然按旧 IP 写的规则
+// （Site.Backend / Forward.Target）里的那段 IP 替换成新 IP。
+//
+// 必须在 device 写盘**成功后**调：设备表里的 IP 是单一真相，三个模块的
+// 配置只是缓存 / 派生视图。顺序反了的话一边改一边错。
+//
+// 调用者持 device 写锁；这里要拿 proxy/stun 的写锁 ——
+// 锁顺序要先 stun/proxy 再 device 才不会死锁（proxy/stun 拿设备表也是先
+// 设备后业务），所以这里反向拿到锁。
+//
+// 当前实现：仅替换 Site.Backend / Forward.Target 内的 IP 段，Service 不用
+// 改（它用 DeviceID 关联）。stun 的 services 段里没有 IP 字段。
+func syncIpsLocked(oldIP, newIP string) error {
+	if oldIP == "" || oldIP == newIP {
+		return nil
+	}
+	// 设备锁是调用者拿的；proxy / stun 锁在这里拿 —— 不会循环依赖，
+	// 因为 device 不反向调这两个模块。
+	if onIPChanged != nil {
+		if err := onIPChanged(oldIP, newIP); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// onIPChanged 由依赖方注入：设备 IP 变化时同步它们缓存的 IP 字符串。
+//
+// **为什么用回调而不是直接 import**：依赖方向是 stun/proxy → device，device 不能反过来依赖它们
+// （会成环，编译直接报 import cycle）。和 core/lanscan 一样，用注入把"业务知识"留在业务侧。
+var onIPChanged func(oldIP, newIP string) error
+
+// SetIPChangedHook 由上层（routers 或 app 初始化时）注册 IP 同步逻辑。
+// 传 nil 表示不同步（单测 / 只需要设备表的场景）。
+func SetIPChangedHook(fn func(oldIP, newIP string) error) {
+	onIPChanged = fn
+}
+
+// EnsureLocalhost 启动时调：把本机 IP（最有可能的 LAN 网卡那个）加进设备表。
+//
+// 为什么不依赖扫描：扫描是用户主动行为，本机自己部署的 catflap 永远应该
+// 在列表里（哪怕用户没扫过）—— 否则会出现「我装了 catflap，但设备页找不到」。
+//
+// 已存在则不动；扫描到的设备有别的名字，更新名字反而把用户改过的覆盖了。
+func EnsureLocalhost() {
+	ips := localIPs()
+	if len(ips) == 0 {
+		return
+	}
+	// 只加"最像 LAN"的那一个：docker 网桥（172.17/172.18/172.21）也会被
+	// localIPs 枚举到，全加进去会在设备页刷出一堆本机条目。
+	ip := ips[0]
+	if GetByIP(ip) != nil {
+		return
+	}
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "本机"
+	}
+	// 失败不致命（写盘问题等下次重启会再试）
+	_, _ = Add(host, ip)
+}
+
+// GetByIP 按 IP 查一台设备（IP 已规范化）。
+// 老数据按 IP 字符串关联设备的代码路径依赖这个 —— 找不到时调用方
+// 应继续用 IP 字符串匹配，而不是把这条规则标成"未归设备"。
+func GetByIP(ip string) *Device {
+	ip = normalizeIP(ip)
+	if ip == "" {
+		return nil
+	}
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	for i := range runtime.Devices {
+		if runtime.Devices[i].IP == ip {
+			d := runtime.Devices[i]
+			return &d
+		}
+	}
+	return nil
+}
+
+// localIPs 枚举本机所有非回环 IPv4，按"最像 LAN"排序：192.168 > 10 > 172.16 > 其他。
+// EnsureLocalhost 用它来挑本机的首选 IP 自动加进设备表。
+// 只取一个最像 LAN 的就够了：同一台机器被加一次，避免「172.18 也加一台」刷屏。
+func localIPs() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var v4 []string
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.To4() == nil {
+				continue
+			}
+			v4 = append(v4, ip.To4().String())
+		}
+	}
+	// 选最像 LAN 的
+	sort.SliceStable(v4, func(i, j int) bool {
+		return lanScore(v4[i]) > lanScore(v4[j])
+	})
+	return v4
+}
+
+func lanScore(ip string) int {
+	if strings.HasPrefix(ip, "192.168.") {
+		return 4
+	}
+	if strings.HasPrefix(ip, "10.") {
+		return 3
+	}
+	if strings.HasPrefix(ip, "172.") {
+		return 2
+	}
+	return 1
 }

@@ -1,9 +1,11 @@
 package notify
 
 import (
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/modules/webhook"
 
 	"github.com/sirupsen/logrus"
@@ -100,6 +102,14 @@ func (r *runtime) allow(key string, window time.Duration) bool {
 	return true
 }
 
+// sendToChannel 直接发给某一条渠道（不走规则匹配）。
+//
+// 服务上"选了哪几个渠道"是明确的指向，不该被规则再筛一遍 ——
+// 规则是"什么事件发到哪"的全局配置，和这里不是一个语义。
+func sendToChannel(ch Channel, ev Event) {
+	sendTo(ch, ev)
+}
+
 func sendTo(ch Channel, ev Event) {
 	title := ev.Title
 	if title == "" {
@@ -140,4 +150,136 @@ func TestChannel(ch Channel) error {
 		"time":    time.Now().Format("2006-01-02 15:04:05"),
 	})
 	return err
+}
+
+// ScrubChannelSecrets 抹掉消息里出现过的渠道配置值。
+//
+// 导出给 api 层用：通知页的「测试发送」和服务的「发一条测试通知」
+// 都要把发送失败的原因显示给用户，而那些错误里可能带着渠道凭证。
+func ScrubChannelSecrets(msg string, ch Channel) string {
+	return scrubChannelSecrets(msg, ch)
+}
+
+// scrubChannelSecrets 把渠道配置里出现过的敏感值从消息里抹掉。
+//
+// 这是 maskURLError（webhook 包）之外的第二道闸：那边只认 URL 查询串，
+// 而凭证也可能走别的路子回到错误里 —— 比如服务端返回体被拼进错误、
+// 或者某些渠道把 key 放在 path 而不是 query。
+// 凡是这个渠道自己配过的值，一律不许出现在回给界面的错误里。
+func scrubChannelSecrets(msg string, ch Channel) string {
+	for k, v := range ch.Config {
+		// 太短的值拿来全词替换会误伤正文（比如 "1"、"cn" 这种）
+		if len(v) < 8 {
+			continue
+		}
+		if strings.Contains(msg, v) {
+			msg = strings.ReplaceAll(msg, v, "***("+k+")")
+		}
+	}
+	return msg
+}
+
+// joinHostPort 拼 host:port；port 为空就只给 host。
+// 测试发送时外部端口可能还没有（服务刚配、还没打洞成功）。
+func joinHostPort(host, port string) string {
+	if host == "" {
+		return ""
+	}
+	if port == "" {
+		return host
+	}
+	return host + ":" + port
+}
+
+// ServiceTestResult 一次「按服务的配置试发」的结果。
+//
+// 逐渠道给结果，而不是一个总的成功/失败：三个渠道里两个通一个不通时，
+// 只回一句"发送失败"用户根本不知道该去改哪个。
+type ServiceTestResult struct {
+	ChannelID   string `json:"channelId"`
+	ChannelName string `json:"channelName"`
+	OK          bool   `json:"ok"`
+	Error       string `json:"error,omitempty"`
+}
+
+// TestServiceNotify 用**服务自己的配置**（渠道 + 模板）试发一条。
+//
+// 用户在服务里选好渠道、写好模板，最想知道的就是"这样配到底能不能收到"。
+// 走的是和真实事件完全相同的渲染与发送路径，所以测出来通就是真通。
+func TestServiceNotify(channelIDs []string, template string, fields map[string]string) []ServiceTestResult {
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	// 试发也要有像样的内容：真实事件里这些字段都有，测试时不补的话
+	// 模板里的 #{address} 会渲染成空，用户会以为模板写错了。
+	now := time.Now()
+	if fields["updated_at"] == "" {
+		fields["updated_at"] = now.Format(time.RFC3339)
+	}
+	if fields["time"] == "" {
+		fields["time"] = now.Format("2006-01-02 15:04:05")
+	}
+	if fields["address"] == "" {
+		fields["address"] = "（测试）"
+	}
+	if fields["service_name"] == "" {
+		fields["service_name"] = "测试服务"
+	}
+	// 试发也要拼出像样的地址，否则模板里的 #{address} 是空的，
+	// 用户会以为模板写错了。规则跟真实事件一致：域名优先，回落公网 IP。
+	// 公网 IP 前端拿不到（那是运行时探测出来的），这里直接取当前的。
+	if fields["external_ip"] == "" {
+		fields["external_ip"] = stun.Runtime.Network.PublicIP
+	}
+	if host := fields["domain"]; host != "" {
+		fields["ip_addr"] = joinHostPort(fields["external_ip"], fields["external_port"])
+		if p := fields["external_port"]; p != "" {
+			host = host + ":" + p
+		}
+		fields["address"] = host
+	} else if fields["external_ip"] != "" {
+		fields["address"] = joinHostPort(fields["external_ip"], fields["external_port"])
+		fields["ip_addr"] = fields["address"]
+	}
+
+	content := renderTemplate(template, fields)
+	if strings.TrimSpace(content) == "" {
+		content = defaultTunnelContent(fields)
+	}
+	// 标题照真实通知的样子来（服务名:端口），这样用户能预览到"手机锁屏上
+	// 看到的是什么"；加个（测试）后缀，免得过后翻记录时分不清哪条是真的。
+	title := "Catflap 通知测试"
+	if fields["title"] != "" {
+		title = fields["title"]
+	} else if fields["service_name"] != "" {
+		title = fields["service_name"]
+		if fields["external_port"] != "" {
+			title = title + ":" + fields["external_port"]
+		}
+		title = title + "（测试）"
+	}
+
+	out := make([]ServiceTestResult, 0, len(channelIDs))
+	for _, id := range channelIDs {
+		ch, ok := Runtime.FindChannel(id)
+		if !ok {
+			out = append(out, ServiceTestResult{ChannelID: id, ChannelName: id, Error: "渠道不存在（可能已被删除）"})
+			continue
+		}
+		if !ch.Enabled {
+			out = append(out, ServiceTestResult{ChannelID: id, ChannelName: ch.Name, Error: "渠道已停用"})
+			continue
+		}
+		cfg := ch.WebhookConfig(title, content)
+		if _, err := webhook.Send(cfg, fields); err != nil {
+			// 两道闸：webhook 层抹 URL 查询串，这里再抹渠道自己配过的任何值
+			out = append(out, ServiceTestResult{
+				ChannelID: id, ChannelName: ch.Name,
+				Error: scrubChannelSecrets(err.Error(), ch),
+			})
+			continue
+		}
+		out = append(out, ServiceTestResult{ChannelID: id, ChannelName: ch.Name, OK: true})
+	}
+	return out
 }

@@ -1,6 +1,8 @@
 package stun_api
 
 import (
+	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
+
 	"fmt"
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/stun"
@@ -13,11 +15,13 @@ import (
 )
 
 type StunServiceAddViewRequest struct {
-	DeviceID     uint   `json:"deviceId"`     // 设备ID
-	Name         string `json:"name"`         // 服务名称,如 "SSH" / "Web管理" / "照片库"
-	InternalPort uint16 `json:"internalPort"` // 内网端口,如 22
-	Protocol     string `json:"protocol"`     // 传输协议 "TCP"/"UDP" (默认 TCP)
-	Https        bool   `json:"https"`        // 是否是 https 服务（影响前端跳转 scheme）
+	DeviceID uint `json:"deviceId"` // 设备ID
+	// Access 访问控制（IP 门禁）。不传时按默认：黑名单模式 + 空规则。
+	Access       proxymodel.AccessControl `json:"access"`
+	Name         string                   `json:"name"`         // 服务名称,如 "SSH" / "Web管理" / "照片库"
+	InternalPort uint16                   `json:"internalPort"` // 内网端口,如 22
+	Protocol     string                   `json:"protocol"`     // 传输协议 "TCP"/"UDP" (默认 TCP)
+	Https        bool                     `json:"https"`        // 是否是 https 服务（影响前端跳转 scheme）
 
 	// UPnP 相关配置
 	UseUPnP bool `json:"useUpnp"` // 是否启用 UPnP 自动端口映射 (默认 true)
@@ -39,9 +43,12 @@ type StunServiceAddViewRequest struct {
 
 	// ChannelIDs 用哪些**全局通知渠道**。渠道在「通知」页里统一配置，
 	// 这里只存 ID —— 同一个群机器人地址不该在每个服务里各存一份。
-	ChannelIDs []string             `json:"channelIds"`
-	Redirect   model.RedirectConfig `json:"redirect"` // 入口域名跟着外部端口走
-	MCEntry    model.MCEntryConfig  `json:"mcEntry"`  // MC Java 版联机的 SRV 记录
+	ChannelIDs []string `json:"channelIds"`
+	// NotifyTemplate 用户自定义的通知正文（#{xxx} 占位符）。
+	// 通知方式/token 在通知页全局配，服务只管内容和模板。
+	NotifyTemplate string               `json:"notifyTemplate"`
+	Redirect       model.RedirectConfig `json:"redirect"` // 入口域名跟着外部端口走
+	MCEntry        model.MCEntryConfig  `json:"mcEntry"`  // MC Java 版联机的 SRV 记录
 }
 
 func (StunApi) StunServiceAddView(c *gin.Context) {
@@ -103,6 +110,11 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 	}
 
 	newService := model.Service{
+		// DeviceID 必须带上：服务是按 id 关联设备的（和设备表同一套）。
+		// 不设的话落盘时靠 dehydrate 补（它知道服务挂在哪个设备下），
+		// 但**返回给前端的这份** deviceId 就是 0 —— 前端拿它分组，
+		// 新加的服务会立刻掉进「未归到设备」，要刷新才正常。
+		DeviceID:       cr.DeviceID,
 		ID:             maxID + 1,
 		Name:           cr.Name,
 		InternalPort:   cr.InternalPort,
@@ -117,7 +129,12 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 		Enabled:        cr.Enabled,
 		Description:    cr.Description,
 		WebHookConfig:  cr.WebHookConfig,
+		// 访问控制默认**黑名单**（规则为空 = 谁都能连）。
+		// 记成黑名单而不是"不限制"，是为了审计里封 IP 时同步过来直接有地方放，
+		// 不用先去把每个服务的模式改成黑名单 —— 那是用户明确要求的默认行为。
+		Access:         defaultTunnelAccess(cr.Access),
 		ChannelIDs:     nonNilStrings(cr.ChannelIDs),
+		NotifyTemplate: cr.NotifyTemplate,
 		Redirect:       cr.Redirect,
 		MCEntry:        normalizeMCEntry(cr.Protocol, cr.MCEntry),
 		UpdatedAt:      time.Now(),
@@ -140,7 +157,27 @@ func (StunApi) StunServiceAddView(c *gin.Context) {
 	// 注意：必须从 global 切片取指针，不能用局部变量 newService（append 后地址可能已变）
 	device := &stun.Runtime.Config.Devices[deviceIndex]
 	services := device.Services
-	stun.Runtime.Scheduler.StartService(device, &services[len(services)-1])
+	if stun.SchedulerReady() {
+		stun.Runtime.Scheduler.StartService(device, &services[len(services)-1])
+	}
 
 	res.OkWithData(newService, c)
+}
+
+// defaultTunnelAccess 新建穿透服务时的默认门禁。
+//
+// 用户要求"访问控制默认启用黑名单规则，避免每个服务都去设置"：
+// 规则为空时谁都能连（不会一上来就把自己关在外面），但**模式记为黑名单** ——
+// 这样审计里封了某个 IP 同步过来时，往它访问过的服务里追加就有地方放，
+// 不用先去把模式从"不限制"改成"黑名单"。
+func defaultTunnelAccess(in proxymodel.AccessControl) proxymodel.AccessControl {
+	if in.Mode != "" {
+		// Rules 归一成非 nil：Go 把 nil 切片写成 null，前端再 .map 就是 TypeError
+		if in.Rules == nil {
+			in.Rules = []string{}
+		}
+		return in
+	}
+	// 模式空（老服务）按黑名单兜底，但用户已经填过的规则要留着
+	return proxymodel.AccessControl{Mode: proxymodel.AccessModeDeny, Rules: nonNilStrings(in.Rules)}
 }

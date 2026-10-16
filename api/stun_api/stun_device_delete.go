@@ -36,7 +36,11 @@ func (StunApi) StunDeviceDeleteView(c *gin.Context) {
 	redirectCfgs := make(map[uint]model.RedirectConfig, len(stun.Runtime.Config.Devices[deviceIndex].Services))
 	landingHosts := make([]string, 0, len(stun.Runtime.Config.Devices[deviceIndex].Services))
 	for _, svc := range stun.Runtime.Config.Devices[deviceIndex].Services {
-		stun.Runtime.Scheduler.StopService(cr.DeviceID, svc.ID)
+		// 调度器没起来（组件初始化还没完 / 失败）就别调，否则空指针 panic。
+		// 配置已经删掉了，穿透等下次起来自然不会拉起它。
+		if stun.SchedulerReady() {
+			stun.Runtime.Scheduler.StopService(cr.DeviceID, svc.ID)
+		}
 		deletedServiceIDs = append(deletedServiceIDs, svc.ID)
 		redirectCfgs[svc.ID] = svc.Redirect
 		landingHosts = append(landingHosts, svc.Domain)

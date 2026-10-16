@@ -24,6 +24,8 @@ func (notifyComponent) Init(context.Context) error {
 	}
 	// 迁移放在 Init 之后：先把已有渠道读进来，再决定要不要从旧配置补
 	MigrateFromServices()
+	// 接管穿透服务的通知发送（依赖方向是这边 → stun，stun 不动）
+	installStunHook()
 	return nil
 }
 

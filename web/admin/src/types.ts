@@ -123,6 +123,8 @@ export interface UpdateStatus {
 
 export interface StunService {
   id: number
+  /** 该服务所属设备（后端在 StunService struct 上有 DeviceID 字段，序列化时用 deviceId） */
+  deviceId: number
   name: string
   internalPort: number
   protocol: string
@@ -145,6 +147,10 @@ export interface StunService {
   /** 内网服务本身就说 TLS（自签也算），转发时用 tls.Dial */
   backendHttps: boolean
   enabled: boolean
+  /** 访问控制（IP 门禁）：和反代站点同一套结构和语义 */
+  access?: { mode: string; rules?: string[] }
+  /** 自定义通知正文模板（#{xxx} 占位符）。通知方式和 token 在通知页全局配 */
+  notifyTemplate?: string
   description: string
   webhookconfig?: WebhookConfig
   /** 选用的全局通知渠道 ID（渠道在通知页配置） */
@@ -312,6 +318,10 @@ export interface StunConfig {
   stunServerList?: string[]
   natRouterList: NatRouter[]
   devices: StunDevice[]
+  // 顶层 Services：扁平化服务列表（穿透页用它做列表源）。
+  // 后端在 GetStunConfigView 里把所有设备的 services 拼成一个数组。
+  // 这样穿透页不用遍历 devices 树，列表与设备生命周期解耦。
+  services?: StunService[]
 }
 
 /** 网络设置的模式：'' 自动/内置，'system' 跟随系统，'custom' 指定 */
@@ -555,6 +565,12 @@ export interface ProxySite {
   /** 在导航主页上显示这个站点（和穿透服务那个标记是一回事） */
   showOnHome?: boolean
   id: number
+  /**
+   * 站点后端在哪台设备上（和设备表按 id 关联）。
+   * **改设备 IP 时这个值不变** —— 归属跟着设备走，不跟着 IP 字符串走。
+   * 0 表示老数据：界面按 backend 里的 IP 反查（fallback）。
+   */
+  deviceId: number
   /** 域名，分流依据，至少一个。对应 nginx 的 server_name a.com www.a.com */
   hosts: string[]
   pathPrefix: string
@@ -671,9 +687,19 @@ export interface NotifyEventMeta {
   title: string
 }
 
+export interface NotifyServiceRef {
+  deviceId: number
+  serviceId: number
+  serviceName: string
+  channelIds: string[]
+}
 export interface NotifyConfigView {
   channels: NotifyChannel[]
   rules: NotifyRule[]
+  /** 全局默认渠道（新建服务时用） */
+  defaultChannelIds: string[]
+  /** 哪些服务在用哪些渠道（通知页聚合展示） */
+  serviceRefs: NotifyServiceRef[]
   events: NotifyEventMeta[]
   migrated: boolean
   cooldownSeconds: number
@@ -729,6 +755,23 @@ export interface TrafficTrend {
   byTunnel: Record<string, TrafficSiteTraffic>
   /** 服务名映射（后端解析好的「设备名 · 服务名」），键与上面两个一致 */
   names?: Record<string, string>
+  /** 每个服务**按天**的流量序列（键同 bySite/byTunnel）—— 点开服务看历史用 */
+  perServiceDay?: Record<
+    string,
+    { date: string; in: number; out: number; requests: number }[]
+  >
+  /** 均匀时间序列（速率折线图）。bucket 由范围自动决定 */
+  bucket?: 'hour' | 'day'
+  bucketSeconds?: number
+  hours?: number
+  series?: { time: number; in: number; out: number; requests: number }[]
+}
+
+export interface TrafficServiceDayPoint {
+  date: string
+  in: number
+  out: number
+  requests: number
 }
 
 // ===================== 访问审计与 IP 管理 =====================
@@ -844,6 +887,11 @@ export interface Device {
 /** 端口转发：端口 → 端口，不看域名。和站点分开。 */
 export interface ProxyForward {
   id: number
+  /**
+   * 转发目标在哪台设备上（同站点：按 id 关联，改设备 IP 不丢归属）。
+   * 0 = 老数据 / 目标不在设备表里，界面按 target 里的 IP 显示。
+   */
+  deviceId: number
   listenPort: number
   target: string
   protocol: string

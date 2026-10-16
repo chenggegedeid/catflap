@@ -1,6 +1,9 @@
 package device_api
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -9,10 +12,12 @@ import (
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/device"
 	"github.com/chenggegedeid/catflap/modules/proxy"
+	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
 	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/utils/res"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // DeviceApi 设备管理。
@@ -29,6 +34,12 @@ type DeviceSaveRequest struct {
 
 type DeviceDeleteRequest struct {
 	ID uint `json:"id"`
+	// Cascade 连带删掉这台设备上的服务。
+	//
+	// 不带（false）时：如果这台设备上还有服务，直接拒绝并列出它们 ——
+	// 让前端弹确认框给用户看清楚"会一起删掉什么"。
+	// 带 true 时：设备和服务一起删。
+	Cascade bool `json:"cascade"`
 }
 
 // DeviceListView 全部设备
@@ -48,6 +59,28 @@ func (DeviceApi) DeviceSaveView(c *gin.Context) {
 		d, err = device.Update(cr.ID, cr.Name, cr.IP)
 	}
 	if err != nil {
+		// 改 IP 后同步旧规则地址时的**非致命**错误：配置（站点/转发的 backend/target）
+		// 已经写进文件了，失败的是"重新监听端口"那一步（端口被别的程序占着）。
+		// 那属于端口冲突，页面上的监听状态看得到，不该报成"改 IP 失败"。
+		if strings.Contains(err.Error(), "同步旧规则的地址失败") {
+			logrus.Warnf("[device] %v", err)
+			stun.RefreshDevices()
+			res.OkWithData(d, c)
+			return
+		}
+		// IP 已被另一台占着：单独拎出来，给 409 + 明确的指引 ——
+		// 用户看到"IP 已存在"不知道该怎么办，要说清"去删旧的那台"。
+		if errors.Is(err, device.ErrIPExists) {
+			ip := strings.TrimSpace(cr.IP)
+			old := device.GetByIP(ip)
+			hint := ""
+			if old != nil {
+				hint = fmt.Sprintf("（已有设备「%s」在用这个 IP）", old.Name)
+			}
+			res.Fail(http.StatusConflict,
+				fmt.Sprintf("IP %s 已被占用%s。请先到「设备」页删掉使用这个 IP 的那台设备，再改这一台的 IP。", ip, hint), c)
+			return
+		}
 		res.FailWithMsg(err.Error(), c)
 		return
 	}
@@ -71,11 +104,54 @@ func (DeviceApi) DeviceDeleteView(c *gin.Context) {
 		res.FailWithMsg("设备不存在", c)
 		return
 	}
-	if used := servicesOnDevice(d.DeviceID, d.IP); len(used) > 0 {
-		res.FailWithMsg(
-			"这台设备上还有 "+strconv.Itoa(len(used))+" 个服务，先删掉它们再删设备："+
-				strings.Join(used, "、"), c)
+	used := servicesOnDevice(d.DeviceID, d.IP)
+
+	// 有服务且没带 cascade → 拒绝，并把清单交给前端弹确认框
+	if len(used) > 0 && !cr.Cascade {
+		res.Fail(http.StatusConflict,
+			"这台设备上还有 "+strconv.Itoa(len(used))+" 个服务：\n\n  · "+
+				strings.Join(used, "\n  · ")+"\n\n删除设备会**一并删掉**它们，且无法恢复。确认请再点一次删除。", c)
 		return
+	}
+
+	// cascade：先删服务，再删设备（顺序反了会让服务变成孤儿 ——
+	// 设备没了，那些服务还在配置里，但永远匹配不到设备、静默失效）
+	var removed []string
+	if cr.Cascade && len(used) > 0 {
+		if names, err := stun.DeleteServicesOfDevice(d.DeviceID); err != nil {
+			res.FailWithMsg("删除穿透服务失败："+err.Error(), c)
+			return
+		} else {
+			removed = append(removed, names...)
+		}
+
+		cfg := proxy.Runtime.Snapshot()
+		for _, site := range cfg.Sites {
+			if site.DeviceID == d.DeviceID || (site.DeviceID == 0 && hostOfAddr(site.Backend) == d.IP) {
+				if err := proxy.DeleteSite(site.ID); err != nil {
+					// 端口被别的程序占着时 DeleteSite 会报"监听失败"，但**站点数据已经被删掉了**
+					// （SaveConfig 在 Apply 之前）。那是端口冲突，不该中断"删设备"这件正事。
+					if !isPortBusy(err) {
+						res.FailWithMsg("删除站点 #"+strconv.Itoa(int(site.ID))+" 失败："+err.Error(), c)
+						return
+					}
+					logrus.Warnf("[device] 删站点 #%d 后重新监听失败（端口冲突，不影响数据）：%v", site.ID, err)
+				}
+				removed = append(removed, "站点 "+siteLabel(site))
+			}
+		}
+		for _, fwd := range cfg.Forwards {
+			if fwd.DeviceID == d.DeviceID || (fwd.DeviceID == 0 && hostOfAddr(fwd.Target) == d.IP) {
+				if err := proxy.DeleteForward(fwd.ID); err != nil {
+					if !isPortBusy(err) {
+						res.FailWithMsg("删除端口转发 #"+strconv.Itoa(int(fwd.ID))+" 失败："+err.Error(), c)
+						return
+					}
+					logrus.Warnf("[device] 删转发 #%d 后重新监听失败（端口冲突，不影响数据）：%v", fwd.ID, err)
+				}
+				removed = append(removed, "转发 "+fwdLabel(fwd))
+			}
+		}
 	}
 
 	if err := device.Delete(cr.ID); err != nil {
@@ -83,6 +159,11 @@ func (DeviceApi) DeviceDeleteView(c *gin.Context) {
 		return
 	}
 	stun.RefreshDevices()
+
+	if len(removed) > 0 {
+		res.OkWithMsg("已删除设备，并连带删除 "+strconv.Itoa(len(removed))+" 个服务："+strings.Join(removed, "、"), c)
+		return
+	}
 	res.OkWithMsg("已删除", c)
 }
 
@@ -108,7 +189,9 @@ func servicesOnDevice(id uint, ip string) []string {
 	// 反代站点 / 端口转发：按 IP
 	cfg := proxy.Runtime.Snapshot()
 	for _, s := range cfg.Sites {
-		if hostOfAddr(s.Backend) == ip {
+		// deviceId 优先，IP 兜底：改过设备 IP 后 deviceId 才是可靠的归属依据，
+		// 只按 IP 会在"IP 已改但那条规则的 backend 还是旧的"时漏判，让站点变孤儿。
+		if s.DeviceID == id || (s.DeviceID == 0 && hostOfAddr(s.Backend) == ip) {
 			label := s.Description
 			if label == "" && len(s.Hosts) > 0 {
 				label = s.Hosts[0]
@@ -117,7 +200,7 @@ func servicesOnDevice(id uint, ip string) []string {
 		}
 	}
 	for _, f := range cfg.Forwards {
-		if hostOfAddr(f.Target) == ip {
+		if f.DeviceID == id || (f.DeviceID == 0 && hostOfAddr(f.Target) == ip) {
 			out = append(out, "转发："+nameOr(f.Description, "端口 "+itoa(f.ListenPort)))
 		}
 	}
@@ -198,4 +281,32 @@ func (DeviceApi) DeviceReorderView(c *gin.Context) {
 		return
 	}
 	res.OkWithMsg("已保存", c)
+}
+
+func siteLabel(s proxymodel.Site) string {
+	if strings.TrimSpace(s.Description) != "" {
+		return s.Description
+	}
+	if len(s.Hosts) > 0 {
+		return s.Hosts[0]
+	}
+	return "#" + strconv.Itoa(int(s.ID))
+}
+
+func fwdLabel(f proxymodel.Forward) string {
+	if strings.TrimSpace(f.Description) != "" {
+		return f.Description
+	}
+	return "端口 " + strconv.Itoa(f.ListenPort)
+}
+
+// isPortBusy 判断错误是不是"端口被占用"（监听失败）。
+// 这类错误只影响监听，不影响配置数据 —— 删除/修改操作遇到它可以继续。
+func isPortBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := err.Error()
+	return strings.Contains(m, "已被占用") || strings.Contains(m, "address already in use") ||
+		strings.Contains(m, "permission denied")
 }

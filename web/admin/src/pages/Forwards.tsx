@@ -9,10 +9,14 @@
  * 目标同样按 IP 归属到设备，所以每条转发上能看出是转到哪台机器。
  */
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ArrowRight, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
+import { ArrowRight, Pencil, Plus, Power, Radar, Trash2 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
 import type { Device, LanPort, ProxyConfig, ProxyForward } from '../types'
+import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
+
+// 目标端口没填时的默认值（内网服务多在 80）
+const DEFAULT_TARGET_PORT = 80
 
 export function Forwards() {
   const [cfg, setCfg] = useState<ProxyConfig | null>(null)
@@ -150,54 +154,60 @@ function ForwardRow({
   onRemove: () => void
 }) {
   const ip = String(f.target ?? '').split(':')[0]
-  const port = String(f.target ?? '').split(':')[1]
-  const dev = devices.find((d) => d.ip === ip)
+  const port = String(f.target ?? '').split(':')[1] ?? ''
+  // 按 deviceId 找设备（改了 IP 还是同一台），老数据再按 target 里的 IP 兜底
+  const dev = api.deviceOf(f, f.target, devices)
+  const off = f.enabled === false
 
+  // **和穿透/反代共用同一张卡**（components/ServiceCard）。
+  // 转发本来是一行列表，现在和其它两个页面一致 —— 同一套骨架、同一种拖动。
+  // 名字：有备注用备注，没有就用「设备名:目标端口」（转发本身没有名称字段）。
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50/60 px-2.5 py-2 text-xs">
-      {/* 状态点兼启停按钮：和站点/穿透卡片同一套交互 */}
-      <button
-        onClick={onToggle}
-        title={f.enabled ? '点一下停用' : '点一下启用'}
-        className={`h-2 w-2 shrink-0 rounded-full transition ${
-          f.enabled ? 'bg-emerald-500' : 'bg-slate-300'
-        }`}
-      />
-      <span className="font-mono font-semibold text-slate-700">:{f.listenPort}</span>
-      <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
-      <span className="min-w-0 flex-1 truncate text-slate-600">
-        {/* 目标按 IP 归属到设备，有名字就显示名字 */}
-        {dev ? dev.name : ip}
-        <span className="ml-1 font-mono text-slate-400">:{port}</span>
-      </span>
-      <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-500">
-        {f.protocol || 'tcp'}
-      </span>
-      {!f.enabled && (
-        <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
-          已停用
+    <ServiceCard
+      name={f.description || `${dev ? dev.name : ip}:${port}`}
+      state={off ? 'off' : 'running'}
+      stateHint={off ? '已停用' : '监听中'}
+      icons={
+        <>
+          <button
+            onClick={onToggle}
+            title={off ? '点一下启用' : '点一下停用'}
+            className={`${iconBtn} ${
+              off ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+            }`}
+          >
+            <Power className="h-3 w-3" />
+          </button>
+          <button onClick={onEdit} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="编辑">
+            <Pencil className="h-3 w-3" />
+          </button>
+          <button onClick={onRemove} className={`${iconBtn} bg-rose-50 text-rose-500 hover:bg-rose-100`} title="删除">
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </>
+      }
+      subtitle={
+        <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs text-slate-500">
+          <span className="font-semibold text-slate-700">:{f.listenPort}</span>
+          <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
+          <span className="truncate">
+            {dev ? dev.name : ip}
+            {port && <span className="text-slate-400">:{port}</span>}
+          </span>
         </span>
-      )}
-      {f.description && (
-        <span className="shrink-0 text-[11px] text-slate-400">{f.description}</span>
-      )}
-      <button
-        onClick={onEdit}
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-        title="编辑"
-      >
-        <Pencil className="h-3 w-3" />
-      </button>
-      <button
-        onClick={onRemove}
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
-        title="删除"
-      >
-        <Trash2 className="h-3 w-3" />
-      </button>
-    </div>
+      }
+      meta={
+        <>
+          <CardBadge tone="slate" title="协议">
+            {(f.protocol || 'tcp').toUpperCase()}
+          </CardBadge>
+          {off && <CardBadge tone="slate">已停用</CardBadge>}
+        </>
+      }
+    />
   )
 }
+
 
 function ForwardModal({
   initial,
@@ -224,12 +234,12 @@ function ForwardModal({
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // 编辑已有转发时：从 target 的 IP 反查设备，端口填进框
+  // 编辑已有转发时：**优先用这条转发自己记的 deviceId**（改过 IP 也还是同一台），
+  // 没有（老数据）才退回从 target 的 IP 反查 —— 和列表、反代、穿透同一套归属逻辑。
   useEffect(() => {
     if (!initial?.target || devices.length === 0) return
-    const ip = String(initial.target).split(':')[0]
     const port = String(initial.target).split(':')[1] ?? ''
-    const d = devices.find((x) => x.ip === ip)
+    const d = api.deviceOf(initial, initial.target, devices)
     if (d) {
       setDeviceId(d.id)
       setTargetPort(port)
@@ -250,7 +260,8 @@ function ForwardModal({
       if (!window.confirm(`要把这条转发从「${prev.name}」换到「${d.name}」吗？`)) return
     }
     setDeviceId(d.id)
-    setTarget(targetPort ? `${d.ip}:${targetPort}` : `${d.ip}:`)
+    // 端口为空时补默认 80：空端口拼出的 "ip:" 没有端口，转发会失败
+    setTarget(`${d.ip}:${targetPort || DEFAULT_TARGET_PORT}`)
     setHostPorts([])
   }
 
@@ -284,6 +295,7 @@ function ForwardModal({
     try {
       await api.saveForward({
         id: initial?.id,
+        deviceId,
         listenPort: Number(listenPort),
         target,
         protocol,

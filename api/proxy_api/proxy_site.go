@@ -15,6 +15,9 @@ import (
 // SiteSaveRequest 新增 / 修改一个站点，对应 nginx 的一个 server 块。ID 为 0 表示新增。
 type SiteSaveRequest struct {
 	ID uint `json:"id"`
+	// DeviceID 站点后端在哪台设备上。和设备表按 id 关联 —— 改设备 IP 时归属不变。
+	// 前端从 backend 的 IP 推导，也接受显式传（老数据兼容：留 0 时后端按 IP 回填）。
+	DeviceID uint `json:"deviceId"`
 	// Hosts 域名，如 fn.example.com；支持 *.example.com 通配，可以填多个
 	Hosts []string `json:"hosts"`
 
@@ -39,6 +42,7 @@ type SiteSaveRequest struct {
 func (r SiteSaveRequest) toModel() proxymodel.Site {
 	return proxymodel.Site{
 		ID:           r.ID,
+		DeviceID:     r.DeviceID,
 		Hosts:        r.Hosts,
 		PathPrefix:   r.PathPrefix,
 		StripPrefix:  r.StripPrefix,
@@ -167,7 +171,9 @@ func (ProxyApi) ProxySiteFlagView(c *gin.Context) {
 // ===================== 端口转发 =====================
 
 type ForwardSaveRequest struct {
-	ID          uint   `json:"id"` // 0 = 新增
+	ID uint `json:"id"` // 0 = 新增
+	// DeviceID 转发目标在哪台设备上（同站点：按 id 关联，改 IP 不丢归属）。
+	DeviceID    uint   `json:"deviceId"`
 	ListenPort  int    `json:"listenPort"`
 	Target      string `json:"target"`
 	Protocol    string `json:"protocol"`
@@ -184,6 +190,7 @@ func (ProxyApi) ProxyForwardSaveView(c *gin.Context) {
 	cr := middleware.GetBindRequest[ForwardSaveRequest](c)
 	saved, err := proxy.SaveForward(proxymodel.Forward{
 		ID:          cr.ID,
+		DeviceID:    cr.DeviceID,
 		ListenPort:  cr.ListenPort,
 		Target:      cr.Target,
 		Protocol:    cr.Protocol,

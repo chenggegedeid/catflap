@@ -255,6 +255,16 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 					}
 					return
 				}
+
+				// 门禁：先看这个来源能不能连。穿透直接暴露在公网上，
+				// 和反代站点一样需要 IP 门禁（用户在服务上配的黑/白名单，
+				// 加上审计里封的 IP —— 后者是全局的，这里也一并查）。
+				// 被挡下就不建转发，连接直接关掉。
+				if !tunnelAccessAllowed(req, clientConn.RemoteAddr()) {
+					_ = clientConn.Close()
+					continue
+				}
+
 				go ForwardTCP(clientConn, targetAddr, protocol, opt, req.DeviceID, req.ServiceID) //转发到对应的内网服务
 			}
 		} else {
@@ -271,6 +281,13 @@ func (STUNRunner) Run(ctx context.Context, req STUNRequest, onState func(STUNSta
 				}
 				data := make([]byte, n)
 				copy(data, buf[:n])
+
+				// 门禁（UDP 也要查）：UDP 无连接，按每个数据报的源地址判，
+				// 不放行就直接丢掉，不建转发。
+				if !tunnelAccessAllowed(req, remoteAddr) {
+					continue
+				}
+
 				go ForwardUDP(udpListener, remoteAddr, data, targetAddr, req.DeviceID, req.ServiceID)
 			}
 		}

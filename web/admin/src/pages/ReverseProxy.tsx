@@ -3,10 +3,10 @@ import {
   Radar,
   AlertCircle,
   ArrowRight,
-  Copy,
   ExternalLink,
   Globe,
   HardDrive,
+  FileText,
   Pencil,
   Power,
   Home as HomeIcon,
@@ -24,14 +24,16 @@ import * as api from '../lib/api'
 import type {
   Certificate,
   Device,
-  ProxyDomainOption,
-  ProxySiteOptions,
   LanPort,
   ProxyConfig,
   ProxyEntry,
   ProxyListener,
   ProxySite,
 } from '../types'
+import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
+import { DomainInput } from '../components/DomainInput'
+import { AccessControlEditor } from '../components/AccessControlEditor'
+import { AccessLogModal } from '../components/AccessLogModal'
 
 // ===================== 小工具 =====================
 
@@ -50,6 +52,10 @@ function useToast() {
   }, [])
   return { toasts, show }
 }
+
+// 后端端口没填时的默认值：内网服务绝大多数跑在 80 上。
+// 端口不能留空 —— 空端口拼出的 "ip:" 会让后端解析不出端口、转发失败。
+const DEFAULT_BACKEND_PORT = 80
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -367,10 +373,13 @@ function SiteModal({
   initial,
   entry,
   certs,
+  prefillDeviceId = 0,
   onCancel,
   onSubmit,
 }: {
   initial?: ProxySite
+  /** 新建时预选的设备（设备头上的「+ 加服务」带进来） */
+  prefillDeviceId?: number
   entry: ProxyEntry
   certs: Certificate[]
   onCancel: () => void
@@ -380,7 +389,7 @@ function SiteModal({
     hosts: initial?.hosts?.length ? [...initial.hosts] : [''],
     pathPrefix: initial?.pathPrefix ?? '',
     stripPrefix: initial?.stripPrefix ?? false,
-    deviceId: 0,
+    deviceId: initial?.deviceId ?? prefillDeviceId,
     backendPort: '',
     backend: initial?.backend ?? '',
     backendHttps: initial?.backendHttps ?? false,
@@ -399,6 +408,9 @@ function SiteModal({
 
   // 设备列表（服务要挂在某台设备上）+ 扫这台设备得到的端口
   const [devices, setDevices] = useState<Device[]>([])
+  // 主域候选（DDNS 解析记录去重 ∪ 入口 baseDomain）—— 域名输入的下拉用。
+  // 加载逻辑放在下面 baseDomain 声明之后（它依赖 entry）。
+  const [hostZones, setHostZones] = useState<string[]>([])
   const [hostPorts, setHostPorts] = useState<LanPort[]>([])
   const [scanning, setScanning] = useState(false)
 
@@ -429,44 +441,25 @@ function SiteModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?.id])
 
-  // 站点表单的可选项：已配的域名（从 DDNS 来）、本机地址。
-  // 拉不到不该拦住表单 —— 那就退化成手填。
-  const [options, setOptions] = useState<ProxySiteOptions>({
-    domains: [],
-    subnets: [],
-    localIPs: [],
-  })
-  useEffect(() => {
-    api
-      .getProxySiteOptions()
-      .then(setOptions)
-      .catch(() => undefined)
-  }, [])
-
-  // 按服务商分组，域名多的时候好找
-  const groupedDomains = useMemo(() => {
-    const m = new Map<string, ProxyDomainOption[]>()
-    for (const d of options.domains) {
-      const key = d.provider || '其它'
-      const list = m.get(key) ?? []
-      list.push(d)
-      m.set(key, list)
-    }
-    return [...m.entries()]
-  }, [options.domains])
-
-  /** 选了一个已配域名：填进第一个空行，没有空行就加一行 */
-  const pickDomain = (host: string) => {
-    setForm((p) => {
-      const idx = p.hosts.findIndex((h) => !h.trim())
-      if (idx >= 0) {
-        return { ...p, hosts: p.hosts.map((h, k) => (k === idx ? host : h)) }
-      }
-      return { ...p, hosts: [...p.hosts, host] }
-    })
-  }
 
   const baseDomain = entry.baseDomain ?? ''
+
+  // 主域候选：DDNS 解析记录去重 ∪ 入口 baseDomain —— 域名输入的下拉用
+  useEffect(() => {
+    let alive = true
+    api
+      .getDdnsZones()
+      .then((z) => {
+        if (!alive) return
+        const set = new Set(z)
+        if (baseDomain) set.add(baseDomain)
+        setHostZones([...set])
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [baseDomain])
   // 要补的那截主域名，判据和后端 expandHost 一致：没有点才补
   const suffixOf = (h: string) => {
     const t = h.trim()
@@ -492,7 +485,9 @@ function SiteModal({
     setForm((p) => ({
       ...p,
       deviceId: d.id,
-      backend: p.backendPort ? `${d.ip}:${p.backendPort}` : `${d.ip}:`,
+      // 端口没填时补默认 80 —— 不能拼成 "192.168.9.8:"（空冒号会让后端解析不出端口），
+      // 也不能只写 IP（后端拿不到端口）。内网服务绝大多数是 80，填了不对用户自己改。
+      backend: `${d.ip}:${p.backendPort || DEFAULT_BACKEND_PORT}`,
     }))
     setHostPorts([])
   }
@@ -503,7 +498,7 @@ function SiteModal({
     setForm((p) => ({
       ...p,
       backendPort: port,
-      backend: d && port ? `${d.ip}:${port}` : p.backend,
+      backend: d ? `${d.ip}:${port || DEFAULT_BACKEND_PORT}` : p.backend,
     }))
   }
 
@@ -552,6 +547,9 @@ function SiteModal({
         : '留空 = 跟默认入口走'
 
   const payload = (): api.ProxySitePayload => ({
+    // deviceId：让这条站点**按 id 归到设备**，改设备 IP 时归属不会丢。
+    // 后端在没传时会按 backend 的 IP 反查兜底，但前端有准的就直接给。
+    deviceId: form.deviceId,
     hosts: hosts.map(fullHost),
     pathPrefix: form.pathPrefix.trim(),
     stripPrefix: form.stripPrefix,
@@ -649,145 +647,13 @@ function SiteModal({
         </span>
       </div>
 
-      {/* ==== 对外这一侧：域名 + 端口 + 协议 + 证书 ==== */}
-      <div>
-        <div className={labelCls}>域名{customPort > 0 && <span className="font-normal">（可选）</span>}</div>
-        <div className="space-y-2">
-          {form.hosts.map((h, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <div className="flex flex-1 items-center rounded-xl border border-slate-200 bg-white pr-3 focus-within:border-blue-400">
-                <input
-                  autoFocus={i === 0}
-                  value={h}
-                  onChange={(e) => setHost(i, e.target.value)}
-                  placeholder={baseDomain ? 'nas' : 'nas.example.com'}
-                  className="w-full bg-transparent px-3 py-2 font-mono text-sm outline-none"
-                />
-                {suffixOf(h) && <span className="shrink-0 font-mono text-sm text-slate-400">{suffixOf(h)}</span>}
-              </div>
-              {form.hosts.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => dropHost(i)}
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={addHost}
-          className="mt-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-blue-500 transition hover:bg-blue-50"
-        >
-          <Plus className="h-3 w-3" />
-          添加域名
-        </button>
-
-        {/* 从已配的 DDNS 记录里挑：不用手打，也知道它是 v4 / v6 / 双栈 */}
-        {options.domains.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2">
-            <span className="text-[11px] font-semibold text-slate-500">从已配置的域名里选</span>
-            <select
-              value=""
-              onChange={(e) => {
-                if (!e.target.value) return
-                pickDomain(e.target.value)
-                e.target.value = ''
-              }}
-              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400"
-            >
-              <option value="">选择…</option>
-              {groupedDomains.map(([provider, list]) => (
-                <optgroup key={provider} label={provider}>
-                  {list.map((d, i) => (
-                    <option key={`${d.host}-${i}`} value={d.host}>
-                      {d.host}
-                      {d.label ? `（${d.label}）` : ''} — {stackLabel(d.stack)}
-                      {!d.enabled ? ' · 未启用' : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-        )}
-        <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
-          {portForward ? (
-            form.https ? (
-              <>
-                不填域名 = 这个端口上来的请求全收，等于 nginx 里不写{' '}
-                <span className="font-mono">server_name</span> 的 server 块。
-                但别指望敲 IP 能进——HTTPS 要先握手，敲 IP 不发 SNI，证书也对不上 IP，得用域名访问
-              </>
-            ) : (
-              <>
-                不填域名 = 这个端口上来的请求全收，敲 IP 也能进，就是个端口转发。
-                等于 nginx 里不写 <span className="font-mono">server_name</span> 的 server 块
-              </>
-            )
-          ) : (
-            <>
-              几个域名指向同一个后端就写几行，等于 nginx 的{' '}
-              <span className="font-mono">server_name a.com www.a.com</span>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="block">
-          <div className={labelCls}>端口</div>
-          <input
-            value={form.listenPort}
-            onChange={(e) => setForm((p) => ({ ...p, listenPort: e.target.value }))}
-            placeholder={shownPort > 0 ? String(shownPort) : '端口'}
-            className={`${inputCls} font-mono`}
-          />
-        </label>
-        <label className="block">
-          <div className={labelCls}>协议</div>
-          <select
-            value={form.https ? 'https' : 'http'}
-            onChange={(e) => setForm((p) => ({ ...p, https: e.target.value === 'https' }))}
-            className={inputCls}
-          >
-            <option value="http">HTTP</option>
-            <option value="https">HTTPS（含 HTTP/2）</option>
-          </select>
-        </label>
-      </div>
-      <div className="!mt-1.5 text-[11px] leading-relaxed text-slate-400">{portHint}</div>
-
-      {portBlocked(customPort) && <BlockedPortWarn label="端口" port={customPort} />}
-
-      {form.https && (
-        <label className="block">
-          <div className={labelCls}>证书</div>
-          <CertSelect value={form.certId} certs={certs} onChange={(v) => setForm((p) => ({ ...p, certId: v }))} />
-          <div className="mt-1 text-[11px] leading-relaxed text-slate-400">自动匹配就是按访问的域名挑，一般不用动</div>
-        </label>
-      )}
-
-      {noCertWithoutDomain && (
-        <Warn>
-          没填域名，证书又是「自动匹配」——自动匹配是按访问用的域名挑证书的，而这条服务没有域名可挑：
-          现在还没有默认证书，可用证书也不止一张，握手会直接失败，浏览器只报{' '}
-          <span className="font-mono">ERR_SSL_PROTOCOL_ERROR</span>。
-          上面挑一张具体证书，或者去「证书」页把一张设为默认。
-          一张证书都不想管的话，「证书」页可以现签一张自签的——浏览器会拦一道警告，但 HTTPS 能通
-        </Warn>
-      )}
-
-      {orphan && (
-        <Warn>默认入口一个都没开，这条服务存下来也没人监听。去「默认入口」填个端口，或者在上面给它单独填一个</Warn>
-      )}
-
+      {/* ==== 这台服务跑在哪 + 叫什么 ====
+          顺序和内网穿透的添加表单一致：先选设备，再填名称/端口，
+          最后才是对外怎么访问（域名、HTTPS、证书）。
+          "代理地址"其实就是 设备 + 端口，所以并进这一块。 */}
       {/* ==== 后端这一侧 ==== */}
       <div className="!mt-5 border-t border-slate-100 pt-4">
-        <div className={labelCls}>代理地址</div>
+        <div className={labelCls}>设备</div>
         <div className="flex flex-wrap gap-2">
           {/* 设备：只选，不手填 IP */}
           <select
@@ -802,14 +668,6 @@ function SiteModal({
               </option>
             ))}
           </select>
-
-          <input
-            value={form.backendPort}
-            onChange={(e) => setBackendPort(e.target.value)}
-            placeholder="端口"
-            inputMode="numeric"
-            className={`${fieldCls} w-24 shrink-0 font-mono`}
-          />
 
           {/* 扫**这台设备**上的端口（不是全局扫描） */}
           <button
@@ -844,6 +702,143 @@ function SiteModal({
           选设备 + 填端口就好，不用记 IP。机器没在列表里就去「设备」页加一台。
         </div>
       </div>
+
+
+      {/* 服务名称 + 后端端口：和内网穿透表单同一个两列排法 */}
+      <div className="grid grid-cols-2 gap-3">
+        <label className="col-span-2 block sm:col-span-1">
+          {/* 这个字段就是"服务名称"：卡片、仪表盘都优先显示它（穿透的 name 对应物） */}
+          <div className={labelCls}>服务名称</div>
+          <input
+            value={form.description}
+            onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+            placeholder="如 阿里云盘"
+            className={inputCls}
+          />
+        </label>
+        <label className="col-span-2 block sm:col-span-1">
+          <div className={labelCls}>内网端口</div>
+          <input
+            value={form.backendPort}
+            onChange={(e) => setBackendPort(e.target.value)}
+            placeholder="8080"
+            inputMode="numeric"
+            className={`${inputCls} font-mono`}
+          />
+        </label>
+      </div>
+
+      {/* ==== 对外这一侧：域名 + 端口 + 协议 + 证书 ==== */}
+      <div>
+        <div className={labelCls}>域名{customPort > 0 && <span className="font-normal">（可选）</span>}</div>
+        <div className="space-y-2">
+          {form.hosts.map((h, i) => (
+            <div key={i} className="flex items-center gap-2">
+              {/* 子域手填 + 主域从 DDNS 选（和穿透同一个控件）；主域候选里
+                  也带上入口的 baseDomain —— 它本来就是补全用的主域 */}
+              <DomainInput
+                value={h}
+                zones={hostZones}
+                onChange={(v) => setHost(i, v)}
+                placeholder={baseDomain ? 'nas' : 'nas.example.com'}
+                className="flex-1"
+              />
+              {form.hosts.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => dropHost(i)}
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={addHost}
+          className="mt-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-blue-500 transition hover:bg-blue-50"
+        >
+          <Plus className="h-3 w-3" />
+          添加域名
+        </button>
+
+        <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+          {portForward ? (
+            form.https ? (
+              <>
+                不填域名 = 这个端口上来的请求全收，等于 nginx 里不写{' '}
+                <span className="font-mono">server_name</span> 的 server 块。
+                但别指望敲 IP 能进——HTTPS 要先握手，敲 IP 不发 SNI，证书也对不上 IP，得用域名访问
+              </>
+            ) : (
+              <>
+                不填域名 = 这个端口上来的请求全收，敲 IP 也能进，就是个端口转发。
+                等于 nginx 里不写 <span className="font-mono">server_name</span> 的 server 块
+              </>
+            )
+          ) : (
+            <>
+              几个域名指向同一个后端就写几行，等于 nginx 的{' '}
+              <span className="font-mono">server_name a.com www.a.com</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block">
+          <div className={labelCls}>端口</div>
+          <input
+            value={form.listenPort}
+            onChange={(e) => setForm((p) => ({ ...p, listenPort: e.target.value }))}
+            placeholder={shownPort > 0 ? String(shownPort) : '端口'}
+            className={`${inputCls} font-mono`}
+          />
+        </label>
+      </div>
+      {/* 协议不再用下拉选：和内网穿透同一个样子 —— 一个「加 HTTPS 证书」开关。
+          勾上就按域名配证书（自动匹配即可），不勾就是明文 HTTP。 */}
+      <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200">
+        <input
+          type="checkbox"
+          checked={form.https}
+          onChange={(e) => setForm((p) => ({ ...p, https: e.target.checked }))}
+          className="mt-0.5 h-3.5 w-3.5"
+        />
+        <span>
+          <span className="block text-xs font-semibold text-slate-700">HTTPS（加证书）</span>
+          <span className="block text-[11px] text-slate-400">
+            勾了按域名配证书对外走 HTTPS；不勾就是明文 HTTP
+          </span>
+        </span>
+      </label>
+      <div className="!mt-1.5 text-[11px] leading-relaxed text-slate-400">{portHint}</div>
+
+      {portBlocked(customPort) && <BlockedPortWarn label="端口" port={customPort} />}
+
+      {form.https && (
+        <label className="block">
+          <div className={labelCls}>证书</div>
+          <CertSelect value={form.certId} certs={certs} onChange={(v) => setForm((p) => ({ ...p, certId: v }))} />
+          <div className="mt-1 text-[11px] leading-relaxed text-slate-400">自动匹配就是按访问的域名挑，一般不用动</div>
+        </label>
+      )}
+
+      {noCertWithoutDomain && (
+        <Warn>
+          没填域名，证书又是「自动匹配」——自动匹配是按访问用的域名挑证书的，而这条服务没有域名可挑：
+          现在还没有默认证书，可用证书也不止一张，握手会直接失败，浏览器只报{' '}
+          <span className="font-mono">ERR_SSL_PROTOCOL_ERROR</span>。
+          上面挑一张具体证书，或者去「证书」页把一张设为默认。
+          一张证书都不想管的话，「证书」页可以现签一张自签的——浏览器会拦一道警告，但 HTTPS 能通
+        </Warn>
+      )}
+
+      {orphan && (
+        <Warn>默认入口一个都没开，这条服务存下来也没人监听。去「默认入口」填个端口，或者在上面给它单独填一个</Warn>
+      )}
 
       {probe && (
         <div
@@ -885,71 +880,17 @@ function SiteModal({
         </>
       )}
 
-      <label className="block">
-        <div className={labelCls}>备注（可选）</div>
-        <input
-          value={form.description}
-          onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-          className={inputCls}
-        />
-      </label>
 
-      {/* ===================== 访问控制 ===================== */}
-      <div className="rounded-xl ring-1 ring-slate-200">
-        <div className="flex items-center justify-between gap-2 px-3 pt-2.5">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            访问控制（IP 门禁）
-          </div>
-          <select
-            value={form.accessMode}
-            onChange={(e) => setForm((p) => ({ ...p, accessMode: e.target.value as SiteFormState['accessMode'] }))}
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400"
-          >
-            <option value="">所有人可访问</option>
-            <option value="allow">只允许名单内</option>
-            <option value="deny">只拒绝名单内</option>
-          </select>
-        </div>
-
-        {form.accessMode !== '' && (
-          <>
-            <textarea
-              value={form.accessRules}
-              onChange={(e) => setForm((p) => ({ ...p, accessRules: e.target.value }))}
-              rows={3}
-              placeholder={'每行一条，如：\n203.0.113.0/24\n198.51.100.7'}
-              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-400"
-            />
-            <div className="px-3 pb-2.5 pt-1.5 text-[11px] leading-relaxed text-slate-400">
-              {form.accessMode === 'allow' ? '只有' : '被'}
-              名单内的 IP 会被{form.accessMode === 'allow' ? '放行，其余一律拒绝' : '拒绝，其余放行'}。
-              可写单个 IP 或 CIDR 网段——家宽 IP 会变，<span className="font-mono">203.0.113.0/24</span> 这种网段更耐用。
-              判断依据是 TCP 对端地址，<span className="font-semibold">伪造 X-Forwarded-For 无效</span>。
-              {form.accessMode === 'allow' && (
-                <div className="mt-1 text-amber-600">
-                  注意：只填白名单却不填内容等于全放行；反过来把自己关在外面就得去改配置文件了，不确定先别开。
-                </div>
-              )}
-            </div>
-          </>
-        )}
-        {form.accessMode === '' && (
-          <div className="px-3 pb-2.5 pt-1.5 text-[11px] leading-relaxed text-slate-400">
-            服务暴露到公网后，光靠「域名没人知道」不算防护——域名会出现在证书透明日志里，扫描器也在扫整个网段
-          </div>
-        )}
-      </div>
-
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
-        <input
-          type="checkbox"
-          checked={form.enabled}
-          onChange={(e) => setForm((p) => ({ ...p, enabled: e.target.checked }))}
-          className="h-3.5 w-3.5"
-        />
-        启用
-      </label>
+      {/* ===================== 访问控制 =====================
+           用共用组件（components/AccessControlEditor）—— 和穿透同一套模板，
+           并且能从访问审计里抓到的 IP 一键加入名单（IPv4 / IPv6 都支持）。 */}
+      <AccessControlEditor
+        mode={form.accessMode}
+        rules={form.accessRules}
+        onChange={(next) =>
+          setForm((p) => ({ ...p, accessMode: next.mode, accessRules: next.rules }))
+        }
+      />
 
       {err && <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
     </Modal>
@@ -958,12 +899,6 @@ function SiteModal({
   )
 }
 
-/** 栈标记的中文。v4 / v6 / dual 三种 */
-function stackLabel(stack: string): string {
-  if (stack === 'v6') return '仅 IPv6'
-  if (stack === 'dual') return '双栈'
-  return '仅 IPv4'
-}
 
 // ===================== 监听端口一览 =====================
 
@@ -998,10 +933,17 @@ export function ReverseProxy() {
   const [certs, setCerts] = useState<Certificate[]>([])
   const [loadErr, setLoadErr] = useState('')
   const [testingId, setTestingId] = useState<number | null>(null)
+  // 访问日志弹窗：点站点卡片上的「日志」打开，看"谁访问过这个服务"
+  const [logSite, setLogSite] = useState<ProxySite | null>(null)
   const { toasts, show: toast } = useToast()
 
   const [entryModal, setEntryModal] = useState(false)
-  const [siteModal, setSiteModal] = useState<{ open: boolean; initial?: ProxySite }>({ open: false })
+  const [siteModal, setSiteModal] = useState<{
+    open: boolean
+    initial?: ProxySite
+    /** 设备头「+ 加服务」预选的设备（只对新建生效） */
+    preDeviceId?: number
+  }>({ open: false })
 
   const refresh = useCallback(async () => {
     try {
@@ -1061,9 +1003,12 @@ export function ReverseProxy() {
     if (i < 0 || j < 0 || i === j) return
     const [moved] = ids.splice(i, 1)
     ids.splice(j, 0, moved)
+    // 先本地改，界面立刻跟上
     setDevices(devices.slice().sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)))
     try {
       await api.reorderDevices(ids)
+      // 再拉一次：设备顺序是公共的（穿透页也用），以服务端为准
+      await refresh()
     } catch (e) {
       toast('排序保存失败: ' + errText(e))
       void refresh()
@@ -1094,25 +1039,35 @@ export function ReverseProxy() {
    */
   const groups = useMemo(() => {
     type Group = { device?: Device; sites: typeof sites }
-    const byIP = new Map<string, Group>()
+    const byDev = new Map<number, Group>()
     const rest: Group = { sites: [] }
 
     for (const s of sites) {
-      const ip = String(s.backend ?? '').split(':')[0]
-      const d = devices.find((x) => x.ip === ip)
+      // 按 deviceId 找设备（改了 IP 也还是同一台），找不到再按 backend 里的 IP 兜底
+      const d = api.deviceOf(s, s.backend, devices)
       if (!d) {
         rest.sites.push(s)
         continue
       }
-      let g = byIP.get(d.ip)
+      const dev = devices.find((x) => x.id === d.id) ?? d
+      let g = byDev.get(dev.id)
       if (!g) {
-        g = { device: d, sites: [] }
-        byIP.set(d.ip, g)
+        g = { device: dev, sites: [] }
+        byDev.set(dev.id, g)
       }
       g.sites.push(s)
     }
 
-    const out = [...byIP.values()]
+    // **分组顺序要跟着设备表走**，不能按站点在数组里出现的先后 ——
+    // 后者是「站点在配置里的先后」，跟设备拖动毫无关系：设备顺序改了（sortOrder 已存盘），
+    // 界面却还是老样子，表现就是「拖动没反应」。
+    // devices 来自 device.List()，后端已按 sortOrder 排好，直接照它的次序输出。
+    const devOrder = devices.map((d) => d.id)
+    const out = [...byDev.values()].sort((a, b) => {
+      const ia = devOrder.indexOf(a.device?.id ?? -1)
+      const ib = devOrder.indexOf(b.device?.id ?? -1)
+      return (ia < 0 ? devOrder.length : ia) - (ib < 0 ? devOrder.length : ib)
+    })
     // 没归到设备的放在最后，并且只在真有的时候才显示
     if (rest.sites.length > 0) out.push(rest)
     return out
@@ -1194,12 +1149,6 @@ export function ReverseProxy() {
    * 域名要换（同一个域名不能挂两条），所以清掉让用户重填；
    * 其余（证书、门禁、后端、HTTPS 设置）都保留，省得再勾一遍。
    */
-  const duplicateSite = (s: ProxySite) => {
-    setSiteModal({
-      open: true,
-      initial: { ...s, id: 0, hosts: [], showOnHome: false },
-    })
-  }
 
   const removeSite = async (s: ProxySite) => {
     if (!window.confirm(`确认删除服务 ${s.hosts?.[0] ?? `:${s.listenPort}`}？`)) return
@@ -1216,6 +1165,7 @@ export function ReverseProxy() {
     setTestingId(s.id)
     try {
       const probe = await api.testProxySite({
+        deviceId: s.deviceId ?? 0,
         hosts: s.hosts ?? [],
         pathPrefix: s.pathPrefix,
         stripPrefix: s.stripPrefix,
@@ -1471,6 +1421,18 @@ export function ReverseProxy() {
                   <span className="shrink-0 text-[11px] text-slate-400">
                     {g.sites.length} 个服务
                   </span>
+                  {/* 和穿透页设备头同一个按钮：在这台设备下直接加服务，表单里预选好设备 */}
+                  {g.device && (
+                    <button
+                      onClick={() =>
+                        setSiteModal({ open: true, preDeviceId: g.device!.id })
+                      }
+                      className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                      title={`在 ${g.device.name} 上添加服务`}
+                    >
+                      <Plus className="h-3 w-3" /> 加服务
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2.5 p-2.5">
@@ -1498,13 +1460,13 @@ export function ReverseProxy() {
                     <SiteCard
                       key={s.id}
                       site={s}
+                      onLogs={() => setLogSite(s)}
                       entry={entry}
                       testingId={testingId ?? 0}
                       flagBusy={flagBusy}
                       onTest={() => testSite(s)}
                       onToggleFlag={(flag) => toggleSiteFlag(s, flag)}
                       onEdit={() => setSiteModal({ open: true, initial: s })}
-                      onDuplicate={() => duplicateSite(s)}
                       onRemove={() => removeSite(s)}
                     />
                     </div>
@@ -1519,9 +1481,18 @@ export function ReverseProxy() {
       {entryModal && (
         <EntryModal entry={entry} certs={certs} onCancel={() => setEntryModal(false)} onSubmit={saveEntry} />
       )}
+      {logSite && (
+        <AccessLogModal
+          title={logSite.description || logSite.hosts?.[0] || `站点 #${logSite.id}`}
+          siteId={logSite.id}
+          onClose={() => setLogSite(null)}
+        />
+      )}
+
       {siteModal.open && (
         <SiteModal
           initial={siteModal.initial}
+          prefillDeviceId={siteModal.preDeviceId ?? 0}
           entry={entry}
           certs={certs}
           onCancel={() => setSiteModal({ open: false })}
@@ -1554,8 +1525,8 @@ function SiteCard({
   onTest,
   onToggleFlag,
   onEdit,
-  onDuplicate,
   onRemove,
+  onLogs,
 }: {
   site: ProxySite
   entry?: ProxyEntry
@@ -1564,149 +1535,104 @@ function SiteCard({
   onTest: () => void
   onToggleFlag: (flag: 'enabled' | 'showOnHome') => void
   onEdit: () => void
-  onDuplicate: () => void
   onRemove: () => void
+  /** 打开这个站点的访问日志 */
+  onLogs: () => void
 }) {
   const url = siteURL(entry, s)
   const addr = siteAddr(entry, s)
   // 停用的站点本来就不该跑，别拿红色状态去吓人
   const off = s.enabled === false
 
+  // **和穿透/转发共用同一张卡**（components/ServiceCard）。
+  // 反代特有的两样通过 props 传：名字用域名（可点开），第三行放后端端口 + 连通性测试。
   return (
-    <div
-      className={`flex flex-col rounded-xl border p-3 transition hover:border-blue-200 hover:shadow-md ${
-        off ? 'border-slate-200/80 bg-slate-50/60' : 'border-slate-200/80'
-      }`}
-    >
-      {/* 头部：状态点 + 域名 + 按钮组（顺序与穿透页一致） */}
-      <div className="mb-2 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${
-            off ? 'bg-slate-300' : 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
-          }`}
-        />
-        <span
-          className={`mr-0.5 min-w-0 flex-1 truncate text-sm font-bold ${
-            off ? 'text-slate-400' : 'text-slate-800'
-          }`}
-        >
-          {url ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-mono text-[13px] font-semibold text-slate-800 hover:text-blue-600"
-            >
+    <ServiceCard
+      // **服务名称优先**：填了名称显示名称（和穿透一致，仪表盘也用它），
+      // 没填才退回域名 —— 大屏上"设备·名称"比一长串域名好认得多
+      name={s.description || s.hosts?.[0] || '任意域名'}
+      state={off ? 'off' : 'running'}
+      stateHint={off ? '已停用' : '在跑'}
+      draggable={false}
+      icons={
+        <>
+          <button
+            onClick={() => onToggleFlag('enabled')}
+            disabled={flagBusy === s.id}
+            title={off ? '点一下启用' : '点一下停用'}
+            className={`${iconBtn} disabled:opacity-40 ${
+              off ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+            }`}
+          >
+            <Power className="h-3 w-3" />
+          </button>
+          <button
+            onClick={() => onToggleFlag('showOnHome')}
+            title={s.showOnHome ? '从主页移除' : '添加到主页'}
+            className={`${iconBtn} ${s.showOnHome ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+          >
+            <HomeIcon className="h-3 w-3" />
+          </button>
+          <button onClick={onEdit} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="编辑">
+            <Pencil className="h-3 w-3" />
+          </button>
+          {/* 访问日志：谁访问过这个站点。数据来自访问审计，和穿透同一个弹窗 */}
+          <button onClick={onLogs} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="访问日志（谁访问过它）">
+            <FileText className="h-3 w-3" />
+          </button>
+          <button onClick={onRemove} className={`${iconBtn} bg-rose-50 text-rose-500 hover:bg-rose-100`} title="删除">
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </>
+      }
+      subtitle={
+        url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-w-0 items-center gap-1 font-mono text-xs font-semibold text-slate-700 hover:text-blue-600"
+          >
+            <span className="truncate">
               {s.hosts?.[0]}
               {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
               {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
-              <ExternalLink className="h-3 w-3 text-slate-300" />
-            </a>
-          ) : (
-            <span className="font-mono text-[13px] font-semibold">
-              {s.hosts?.[0] ?? <span className="text-slate-400">任意域名</span>}
-              {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
-              {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
             </span>
+            <ExternalLink className="h-3 w-3 shrink-0 text-slate-300" />
+          </a>
+        ) : (
+          <span className="font-mono text-xs font-semibold text-slate-700">
+            {s.hosts?.[0] ?? <span className="text-slate-400">任意域名</span>}
+            {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
+            {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
+          </span>
+        )
+      }
+      meta={
+        <>
+          {/* 后端：只显示端口（IP 已经在设备头上了，不用重复） */}
+          <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-slate-500">
+            <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
+            <span className="truncate">:{String(s.backend ?? '').split(':')[1] ?? s.backend}</span>
+          </span>
+          {s.backendHttps && <CardBadge tone="emerald" title="内网服务本身是 HTTPS">TLS</CardBadge>}
+          {s.https && (
+            <CardBadge tone="violet" title="对外走 HTTPS">HTTPS</CardBadge>
           )}
-        </span>
-
-        {/* 按钮组：启停 / 主页 / 编辑 / 复制 / 删除 */}
-        <button
-          onClick={() => onToggleFlag('enabled')}
-          disabled={flagBusy === s.id}
-          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
-            off
-              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-              : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-          }`}
-          title={off ? '点一下启用' : '点一下停用'}
-        >
-          <Power className="h-3 w-3" />
-        </button>
-        <button
-          onClick={() => onToggleFlag('showOnHome')}
-          disabled={flagBusy === s.id}
-          className={`grid h-6 w-6 place-items-center rounded-md transition disabled:opacity-40 ${
-            s.showOnHome
-              ? 'bg-blue-100 text-blue-600'
-              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-          }`}
-          title={s.showOnHome ? '从主页移除' : '添加到主页'}
-        >
-          <HomeIcon className="h-3 w-3" />
-        </button>
-        <button
-          onClick={onEdit}
-          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-          title="编辑"
-        >
-          <Pencil className="h-3 w-3" />
-        </button>
-        <button
-          onClick={onDuplicate}
-          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-          title="照着这个再开一个"
-        >
-          <Copy className="h-3 w-3" />
-        </button>
-        <button
-          onClick={onRemove}
-          className="grid h-6 w-6 place-items-center rounded-md bg-rose-50 text-rose-500 transition hover:bg-rose-100"
-          title="删除"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      </div>
-
-      {/* 状态徽章 */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {s.https && (
-          <span className="inline-flex items-center gap-0.5 rounded bg-violet-50 px-1 py-0.5 text-[10px] font-bold text-violet-600">
-            <ShieldCheck className="h-2.5 w-2.5" /> HTTPS
-          </span>
-        )}
-        {!s.enabled && (
-          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
-            已停用
-          </span>
-        )}
-        {(s.hosts?.length ?? 0) > 1 && (
-          <span
-            title={s.hosts.slice(1).join('\n')}
-            className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-500"
+          {s.hosts.length > 1 && (
+            <CardBadge tone="slate">+{s.hosts.length - 1} 个域名</CardBadge>
+          )}
+          {s.stripPrefix && <CardBadge tone="amber" title="转发前剥掉路径前缀">剥前缀</CardBadge>}
+          <button
+            onClick={onTest}
+            disabled={testingId === s.id}
+            className="ml-auto grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+            title="测试后端能不能连上"
           >
-            +{s.hosts.length - 1} 个域名
-          </span>
-        )}
-        {s.stripPrefix && (
-          <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-bold text-amber-600">
-            剥前缀
-          </span>
-        )}
-      </div>
-      {s.description && <div className="mt-1 text-[11px] text-slate-400">{s.description}</div>}
-
-      {/* 后端：只显示端口（IP 已经在设备头上了，不用重复） */}
-      <div className="mt-auto flex items-center gap-1 pt-1 font-mono text-xs text-slate-600">
-        <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
-        <span className="min-w-0 flex-1 truncate">
-          :{String(s.backend ?? '').split(':')[1] ?? s.backend}
-        </span>
-        {s.backendHttps && (
-          <span className="rounded bg-emerald-50 px-1 py-0.5 font-sans text-[10px] font-bold text-emerald-600">
-            TLS
-          </span>
-        )}
-        <button
-          onClick={onTest}
-          disabled={testingId === s.id}
-          className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
-          title="测试后端能不能连上"
-        >
-          <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
-        </button>
-      </div>
-    </div>
+            <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />
+          </button>
+        </>
+      }
+    />
   )
 }

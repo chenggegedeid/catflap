@@ -16,6 +16,8 @@ func main() {
 		return
 	}
 
+	postStartup()
+
 	logrus.Infof("管理后台运行在 %s", adminURL)
 	logrus.Infof("导航主页运行在 %s", homeURL)
 	select {}

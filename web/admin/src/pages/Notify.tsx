@@ -54,6 +54,15 @@ export function Notify() {
   const refresh = useCallback(async () => {
     try {
       setCfg(await api.getNotifyConfig())
+    // 兼容老版本：serviceRefs 可能没有
+    if (!cfg?.serviceRefs) {
+      try {
+        const refs = await api.getNotifyServiceRefs()
+        setCfg((c) => (c ? { ...c, serviceRefs: refs } : c))
+      } catch {
+        // 老后端没这个接口也无妨
+      }
+    }
       setErr('')
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败')
@@ -199,6 +208,57 @@ export function Notify() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* 启用通知的服务 —— 通知页要能看到"我配的渠道都被谁用了" */}
+      <Card className="!p-0">
+        <div className="px-5 pt-4">
+          <CardHeader
+            title="启用通知的服务"
+            action={
+              <a
+                href="#/stun"
+                className="text-xs text-blue-500 transition hover:text-blue-600"
+              >
+                去配置服务 ↗
+              </a>
+            }
+          />
+        </div>
+        <div className="px-5 pb-5">
+          {channels.length === 0 ? (
+            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+              先在通知页添加渠道，再去穿透页开启服务通知。
+            </div>
+          ) : !cfg?.serviceRefs || cfg.serviceRefs.length === 0 ? (
+            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+              还没有任何穿透服务。在穿透页添加服务 → 选几个通知渠道 → 这里就会出现。
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {cfg.serviceRefs.map((r) => {
+                // 用 channelIds 的渠道名拼成"发到哪些"
+                const chs = (r.channelIds || []).map((id) => channels.find((c) => c.id === id)?.name ?? id)
+                return (
+                  <div
+                    key={`${r.deviceId}-${r.serviceId}`}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200/70 px-3 py-2 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-700">{r.serviceName || `服务 #${r.serviceId}`}</div>
+                      <div className="text-[11px] text-slate-400">设备 #{r.deviceId}</div>
+                    </div>
+                    {chs.length > 0 ? (
+                      <div className="text-[11px] text-slate-500">发到：{chs.join('、')}</div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400">这个服务没选渠道</div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

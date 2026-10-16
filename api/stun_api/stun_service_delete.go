@@ -45,7 +45,10 @@ func (StunApi) StunServiceDeleteView(c *gin.Context) {
 	// 先停止 STUN 穿透，再从切片删除
 	// 修复1：原版先删切片再 StopService，顺序颠倒（删了之后 StopService 其实无所谓，但语义上应先停再删）
 	// 修复2：原版调用已删除的全局函数 stun.StopService，改为调度器实例方法
-	stun.Runtime.Scheduler.StopService(cr.DeviceID, cr.ServiceID)
+	// 调度器没起来就跳过（配置已经删了，等下次启动自然不会拉起它）
+	if stun.SchedulerReady() {
+		stun.Runtime.Scheduler.StopService(cr.DeviceID, cr.ServiceID)
+	}
 
 	// 入口重定向配置和落地域名都得在摘掉之前留一份：删完就查不到了，
 	// 而 Cloudflare 那条规则还在，继续把人送到一个没了的端口

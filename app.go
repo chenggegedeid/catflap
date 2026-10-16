@@ -15,6 +15,8 @@ import (
 
 	"github.com/chenggegedeid/catflap/core"
 	"github.com/chenggegedeid/catflap/core/component"
+	"github.com/chenggegedeid/catflap/modules/device"
+	"github.com/chenggegedeid/catflap/modules/proxy"
 	// 下面四个是跨模块注入用到的：cert / stun 暴露注册接口，
 	// ddns 与 dns 提供被注入的实现（见 registerCertDNSSolver 的说明）。
 	"github.com/chenggegedeid/catflap/modules/cert"
@@ -60,7 +62,31 @@ func initRuntime() {
 		}
 	}
 
+	// 设备 IP 变化时同步反代/端口转发里缓存的 IP 字符串。
+	// 用回调而不是 device 直接 import proxy：依赖方向是 proxy/stun → device，
+	// 反过来会成环（编译报 import cycle）。和 core/lanscan 同一个套路。
+	// 注册 hook 本身不涉及读写，放在这里没问题。
+	device.SetIPChangedHook(func(oldIP, newIP string) error {
+		return proxy.SyncIPsAfterDeviceChange(oldIP, newIP)
+	})
+
 	core.ListenShutdown()
+}
+
+// postStartup 所有模块 Init 完成后才做的事。
+//
+// **必须在模块初始化之后**：InitProxy 是延迟到启动阶段的（core.OnStart 注册），
+// 在 initRuntime 里调 proxy 的东西会读到**还没加载的空配置** ——
+// 那次就是这样把用户的站点表写成空的（事故：改设备 IP 时同步 IP 那次引入的）。
+// 所以这两件"依赖已加载配置"的事放到后端起来之后做。
+func postStartup() {
+	// 本机自己要在设备表里 —— 部署完就自动加一台（名字用 hostname，IP 用最像 LAN 的那个）。
+	// 之前只能靠用户手动扫描才出现，于是「我装了 catflap，设备页却找不到这台」。
+	device.EnsureLocalhost()
+
+	// deviceId 的回填**不在这里**：要等 proxy 读完配置才有意义
+	// （见 modules/proxy/proxy_init.go 的 InitProxy —— 那时配置刚加载、数据一定在）。
+	// 在这里调会读到空配置，再遇上退出时 OnShutdown 保存快照，就把真实数据写成空表了。
 }
 
 func startBackend(webFS embed.FS) (bool, error) {

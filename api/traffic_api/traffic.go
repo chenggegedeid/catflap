@@ -58,31 +58,67 @@ type TrendView struct {
 	// 也少一处"前后端各自解析 ID"的重复。
 	// 解析不到（比如站点已删）就没有对应项，前端回落到显示编号。
 	Names map[string]string `json:"names,omitempty"`
+	// PerServiceDay 每个服务按天的流量序列（key 同 BySite/ByTunnel）。
+	// 站点和穿透混在一张 map 里 —— 前端按 names 里的键展示就行。
+	PerServiceDay map[string][]traffic.ServiceDayPoint `json:"perServiceDay,omitempty"`
+	// Series 均匀时间序列（速率折线图用）。bucket 由范围自动决定：
+	// ≤48 小时按小时，更大按天。速率 = 流量 / BucketSeconds。
+	Bucket        string                `json:"bucket,omitempty"`
+	BucketSeconds int64                 `json:"bucketSeconds,omitempty"`
+	Hours         int                   `json:"hours,omitempty"`
+	Series        []traffic.SeriesPoint `json:"series,omitempty"`
 }
 
 // TrafficTrendView 近 N 天趋势（默认 7 天，最多 90）
 func (TrafficApi) TrafficTrendView(c *gin.Context) {
-	days := 7
-	if v := c.Query("days"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 90 {
-			days = n
+	// hours 优先：范围按小时算（近 1 小时 / 近 24 小时这类）。
+	// 没传就退回旧的 days 参数（兼容 + 近 7/30 天仍然好用）。
+	hours := 0
+	if v := c.Query("hours"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 24*90 {
+			hours = n
 		}
+	}
+	days := 0
+	if hours == 0 {
+		days = 7
+		if v := c.Query("days"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 90 {
+				days = n
+			}
+		}
+		hours = days * 24
 	}
 
 	to := time.Now()
-	from := to.AddDate(0, 0, -days+1).Truncate(24 * time.Hour)
+	from := to.Add(-time.Duration(hours) * time.Hour)
 
-	recs, err := traffic.ReadRange(from, to)
+	// **自动聚合**：范围小按小时，范围大按天 —— 30 天按小时看就是一坨密不透风的毛刺，
+	// 1 小时按天看就一个点。和飞牛的"自动聚合"同一个思路。
+	bucket := time.Hour
+	bucketName := "hour"
+	if hours > 48 {
+		bucket = 24 * time.Hour
+		bucketName = "day"
+	}
+
+	recs, err := traffic.ReadRange(from.Truncate(bucket), to)
 	if err != nil {
 		res.FailWithMsg("读取流量记录失败："+err.Error(), c)
 		return
 	}
 
 	res.OkWithData(TrendView{
-		Days:     traffic.AggregateByDay(recs),
-		BySite:   traffic.AggregateBySite(recs),
-		ByTunnel: traffic.AggregateByTunnel(recs),
-		Names:    buildServiceNames(),
+		Bucket:        bucketName,
+		BucketSeconds: int64(bucket.Seconds()),
+		Hours:         hours,
+		Series:        traffic.AggregateSeries(recs, bucket),
+		Days:          traffic.AggregateByDay(recs),
+		BySite:        traffic.AggregateBySite(recs),
+		ByTunnel:      traffic.AggregateByTunnel(recs),
+		Names:         buildServiceNames(),
+		// 每个服务**按天**的流量序列 —— "点开某个服务看它最近每天用了多少"
+		PerServiceDay: traffic.AggregateByServiceDay(recs),
 	}, c)
 }
 

@@ -1,12 +1,14 @@
 package notify_api
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/notify"
+	"github.com/chenggegedeid/catflap/modules/stun"
 	"github.com/chenggegedeid/catflap/utils/res"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +37,21 @@ type ConfigViewResponse struct {
 	CooldownSeconds int `json:"cooldownSeconds"`
 	// LegacyWebhookFallback 回退开关状态
 	LegacyWebhookFallback bool `json:"legacyWebhookFallback"`
+	// DefaultChannelIDs 新建服务时**默认用**的渠道列表 —— 通知模块的全局默认。
+	// 服务表单把它作为"新服务默认 channelIds"，免得每个新建都要去选一遍。
+	// 默认取所有启用的渠道（让用户去通知页"启用"哪些，新服务就用哪些） ——
+	// 比专门存一个 default 配置简单，且和"通知页看到的可用渠道"同步。
+	DefaultChannelIDs []string `json:"defaultChannelIds"`
+	// ServiceRefs 哪些穿透服务在用哪些渠道（通知页要展示，避免"我配了却没生效"）。
+	ServiceRefs []ServiceRefView `json:"serviceRefs"`
+}
+
+// ServiceRefView 一个穿透服务对通知渠道的引用（通知页里聚合展示用）
+type ServiceRefView struct {
+	DeviceID    uint     `json:"deviceId"`
+	ServiceID   uint     `json:"serviceId"`
+	ServiceName string   `json:"serviceName"`
+	ChannelIDs  []string `json:"channelIds"`
 }
 
 // NotifyConfigView 通知中心页要的全部数据
@@ -74,7 +91,38 @@ func (NotifyApi) NotifyConfigView(c *gin.Context) {
 		Migrated:              notify.IsMigrated(),
 		CooldownSeconds:       cfg.CooldownSeconds,
 		LegacyWebhookFallback: cfg.LegacyWebhookFallback,
+		DefaultChannelIDs:     enabledChannelIDs(cfg.Channels),
+		ServiceRefs:           toServiceRefViews(stun.ServiceChannelRefs()),
 	}, c)
+}
+
+// toServiceRefViews 透传 stun 的引用结构到 api 层的视图结构（两者形状一致但不同包）
+func toServiceRefViews(in []stun.ServiceChannelRef) []ServiceRefView {
+	out := make([]ServiceRefView, 0, len(in))
+	for _, r := range in {
+		out = append(out, ServiceRefView{
+			DeviceID:    r.DeviceID,
+			ServiceID:   r.ServiceID,
+			ServiceName: r.ServiceName,
+			ChannelIDs:  r.ChannelIDs,
+		})
+	}
+	return out
+}
+
+// enabledChannelIDs 收集所有启用的渠道 ID（按配置顺序）。
+//
+// 作为"通知模块默认渠道"：服务新建时不传 channelIds 就用这个。
+// 跟"通知页里看到的可用渠道"一致 —— 通知页关了某个渠道，新服务
+// 自然就不会用上它。
+func enabledChannelIDs(chs []notify.Channel) []string {
+	out := make([]string, 0, len(chs))
+	for _, ch := range chs {
+		if ch.Enabled {
+			out = append(out, ch.ID)
+		}
+	}
+	return out
 }
 
 // secretKeys 各渠道里属于密钥的键。读接口要掩码，写接口要"留空=不改动"。
@@ -255,6 +303,15 @@ func (NotifyApi) NotifyChannelDeleteView(c *gin.Context) {
 			}
 			cfg.Rules[i].ChannelIDs = ids
 		}
+		// **穿透服务的 channelIds 也要一起清**：服务里也引用了渠道 ID，
+		// 不清的话会留下指向不存在渠道的悬空 ID，发通知时 nil 报错。
+		// （渠道在"通知"页全局 —— 服务只是引用它，删渠道 = 通知配置没了，
+		// 服务不应该再继续用这个 ID。）
+		// 失败要往上抛：不然界面上渠道已经没了，服务里还留着悬空 ID，
+		// 用户看到的是"删干净了"，实际两边不一致且没有任何提示。
+		if err := stun.CleanupDeletedChannel(cr.ID); err != nil {
+			return fmt.Errorf("清理服务里的渠道引用失败：%w", err)
+		}
 		return nil
 	})
 	if err != nil {
@@ -269,6 +326,12 @@ type ChannelTestRequest struct {
 	// 带配置直接测（还没保存时也能测通不通）
 	Type   notify.ChannelType `json:"type"`
 	Config map[string]string  `json:"config"`
+}
+
+// NotifyServiceRefsView 通知页要的"哪些服务在用哪些渠道"。
+// （channelRefs 是 stun 侧从每个服务的 channelIds 聚出来的）
+func (NotifyApi) NotifyServiceRefsView(c *gin.Context) {
+	res.OkWithData(stun.ServiceChannelRefs(), c)
 }
 
 // NotifyChannelTestView 测试发送。同步等结果 —— 用户点了就该立刻知道通不通。
@@ -293,10 +356,49 @@ func (NotifyApi) NotifyChannelTestView(c *gin.Context) {
 	}
 
 	if err := notify.TestChannel(ch); err != nil {
-		res.FailWithMsg("发送失败："+err.Error(), c)
+		// 不能把 err.Error() 原样回给界面：渠道凭证（token / sendkey）
+		// 大多拼在 URL 上，Go 的 http 报错会把整条 URL 带出来。
+		// notify.ScrubChannelSecrets 抹掉这个渠道自己配过的所有值。
+		res.FailWithMsg("发送失败："+notify.ScrubChannelSecrets(err.Error(), ch), c)
 		return
 	}
 	res.OkWithMsg("已发送，请查看是否收到", c)
+}
+
+// ServiceTestRequest 按服务自己的配置试发一条通知。
+//
+// 界面上「发一条测试通知」按钮用它：把服务选的渠道和写的模板原样送来，
+// 服务端走真实事件那条路径渲染 + 发送，逐渠道回结果。
+type ServiceTestRequest struct {
+	ChannelIDs []string          `json:"channelIds"`
+	Template   string            `json:"template"`
+	Fields     map[string]string `json:"fields"`
+}
+
+// NotifyServiceTestView 试发通知，逐渠道返回成功/失败
+func (NotifyApi) NotifyServiceTestView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ServiceTestRequest](c)
+	if len(cr.ChannelIDs) == 0 {
+		res.FailWithMsg("还没有选通知渠道，先在上面勾一个", c)
+		return
+	}
+	results := notify.TestServiceNotify(cr.ChannelIDs, cr.Template, cr.Fields)
+
+	ok := 0
+	for _, r := range results {
+		if r.OK {
+			ok++
+		}
+	}
+	if ok == 0 && len(results) > 0 {
+		res.FailWithMsg("全部发送失败："+results[0].Error, c)
+		return
+	}
+	res.OkWithData(map[string]any{
+		"results": results,
+		"sent":    ok,
+		"total":   len(results),
+	}, c)
 }
 
 // ===================== 规则 =====================

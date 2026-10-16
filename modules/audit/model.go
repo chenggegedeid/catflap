@@ -29,6 +29,12 @@ type Record struct {
 	DurationMs int64  `json:"durationMs"`
 	UserAgent  string `json:"userAgent"`
 	SiteID     uint   `json:"siteId"`
+	// Kind 记录来源："http"（反代，默认）/"tunnel"（内网穿透）。
+	// 穿透不是 HTTP，Method/Host/Path 没有意义，靠 Ref 认服务。
+	Kind string `json:"kind,omitempty"`
+	// Ref 穿透服务标识："s<设备ID>-<服务ID>"（和流量统计同一个键）。
+	// 反代用 SiteID 就够了，这个是给穿透用的。
+	Ref string `json:"ref,omitempty"`
 }
 
 // LoginEvent 一次登录尝试。

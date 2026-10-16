@@ -1,6 +1,9 @@
 package model
 
 import (
+	"net"
+	"strings"
+
 	"sort"
 	"strconv"
 	"time"
@@ -72,6 +75,12 @@ type ProxyConfig struct {
 // 和 nginx 里每个 server 块可以写自己的 listen / ssl_certificate 一样。
 type Site struct {
 	ID uint `json:"id"`
+	// DeviceID 这个站点在哪台设备上。和设备表的 DeviceID 对应 —— 按 deviceId
+	// 找设备（与穿透的 Service 同一套机制），不再按 Backend 里的 IP 字符串匹配。
+	// 改设备 IP 时 DeviceID 不变（设备还是同一台），归属不会丢；
+	// 改 Backend 里的 IP 时后端会同步改 IP 字符串，但 deviceId 不动。
+	// 留 0 = 老数据：按 IP 字符串回填（fallback）。
+	DeviceID uint `json:"deviceId"`
 	// Hosts 域名，分流依据。
 	//
 	// 对应 nginx 的 server_name a.com www.a.com——一个站点挂多个域名是常事
@@ -296,6 +305,12 @@ func (s Site) WantsHTTPS() bool {
 // 站点靠 hosts 分流，端口转发收到什么转什么。
 type Forward struct {
 	ID uint `json:"id"`
+	// DeviceID 这个转发目标在哪台设备上（同 Site 的 DeviceID 机制 —— 按 id 关联，
+	// IP 变化不影响归属）。留 0 表示老数据或临时未选设备。
+	DeviceID uint `json:"deviceId"`
+	// SortOrder 界面上的排列顺序，小的在前（和站点、穿透服务同一套规则）。
+	// 0 表示没排过，按 (SortOrder, ID) 排，老配置升级后顺序不变。
+	SortOrder int `json:"sortOrder,omitempty"`
 	// ListenPort 本机监听端口，必填（没有域名可分流，只能自己占一个）
 	ListenPort int `json:"listenPort"`
 	// Target 目标地址，形如 192.168.1.20:80
@@ -309,4 +324,46 @@ type Forward struct {
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Allows 这条访问控制放不放行这个来源 IP。
+//
+// **放在 model 里**：反向代理和内网穿透都要用同一套门禁语义和匹配规则
+// （CIDR、单个 IP、空规则的处理），放在任一方模块里另一方都得绕过去引，
+// 而这里只有结构和对它的判断，不掺任何业务。
+//
+// 判断依据是 TCP/UDP 对端地址 —— 不读 X-Forwarded-For 之类的头：
+// 那些头客户端想写什么就写什么，拿它做准入等于把门禁钥匙交给来访的人。
+func (a AccessControl) Allows(ipStr string) bool {
+	if a.Mode == AccessModeAllowAll || len(a.Rules) == 0 {
+		// 没配就全放行。空规则配了模式也按放行处理 —— 否则手滑勾了白名单
+		// 却没填内容，会把所有人都关在外面，包括自己。
+		return true
+	}
+
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		// 解析不出来：白名单拒绝、黑名单放行。拿不准时宁可挡住，
+		// 但黑名单的语义是"只挡列出来的"，不该把看不懂的也挡了。
+		return a.Mode == AccessModeDeny
+	}
+
+	for _, rule := range a.Rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		if _, cidr, err := net.ParseCIDR(rule); err == nil {
+			if cidr.Contains(ip) {
+				return a.Mode == AccessModeAllow
+			}
+			continue
+		}
+		if single := net.ParseIP(rule); single != nil && single.Equal(ip) {
+			return a.Mode == AccessModeAllow
+		}
+	}
+
+	// 一条都没匹配上：白名单 → 拒；黑名单 → 放行
+	return a.Mode != AccessModeAllow
 }
