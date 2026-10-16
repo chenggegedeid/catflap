@@ -1,5 +1,5 @@
 appname               = Catflap
-version               = 1.9.3
+version               = 1.9.4
 display_name          = Catflap
 desc                  = Catflap（猫洞）面向家庭服务器 / NAS / 软路由的网络入口管理工具——无需公网 IP，也能把内网服务稳定地暴露到外网。
 platform              = x86
