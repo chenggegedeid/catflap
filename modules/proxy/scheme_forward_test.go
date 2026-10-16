@@ -182,8 +182,11 @@ func TestSaveSiteKeepsShowOnHome(t *testing.T) {
 	}
 
 	cfg := model.ProxyConfig{
+		// 端口用高位：SaveSite 会真的起监听，1024 以下要 root ——
+		// CI 的 runner 不是 root，绑 80 会直接失败（"没权限监听端口 80"）。
+		// 这个用例只关心 showOnHome 会不会被冲掉，端口是多少无所谓。
 		Enabled:   true,
-		HTTPPorts: []int{80},
+		HTTPPorts: []int{18080},
 		Sites: []model.Site{
 			{
 				ID:         1,
