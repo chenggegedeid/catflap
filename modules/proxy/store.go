@@ -20,6 +20,9 @@ func (r *ProxyRuntime) Update(fn func(cfg *model.ProxyConfig) error) error {
 		return err
 	}
 	snapshot := cloneConfig(r.Config)
+	// 错误页配置同步到读取缓存（见 errorPageCache 的说明）：
+	// 保存后下一次错误响应就用上新设置，不用重启。
+	setErrorPageCache(snapshot.ErrorPage)
 	// 站点表改了要立刻对新连接生效，所以在锁内换掉 Router 指针；
 	// 请求侧读到的永远是某个完整版本，不会读到改了一半的表。
 	r.Router = NewRouter(snapshot.Sites)

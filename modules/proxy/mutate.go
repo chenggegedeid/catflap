@@ -721,3 +721,37 @@ func joinAddr(ip, port string) string {
 	}
 	return ip + ":" + port
 }
+
+// SetErrorPage 保存错误页设置（外网访客看到的 404 / 502）。
+//
+// 校验放在这里而不是接口层：模式就两个值，写错了页面会整个变成空白，
+// 宁可在保存时就挡住。
+func SetErrorPage(in model.ErrorPage) error {
+	mode := strings.TrimSpace(in.Mode)
+	switch mode {
+	case "", "simple":
+		mode = "simple"
+	case "custom":
+	default:
+		return fmt.Errorf("错误页模式只能是 simple 或 custom，收到的是 %q", in.Mode)
+	}
+
+	html := in.CustomHTML
+	if mode == "custom" {
+		if strings.TrimSpace(html) == "" {
+			return errors.New("选了自定义就要填页面内容（HTML）")
+		}
+		if len(html) > model.MaxErrorPageLen {
+			return fmt.Errorf("页面内容太长（%d 字节，上限 %d）", len(html), model.MaxErrorPageLen)
+		}
+	} else {
+		// 切回默认时把内容清掉：留着的话下次切回自定义会突然冒出旧内容，
+		// 而用户在界面上看到的是空框 —— 对不上。
+		html = ""
+	}
+
+	return Runtime.Update(func(cfg *model.ProxyConfig) error {
+		cfg.ErrorPage = model.ErrorPage{Mode: mode, CustomHTML: html}
+		return nil
+	})
+}

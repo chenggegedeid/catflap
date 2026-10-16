@@ -33,6 +33,13 @@ func ProxyRouters(g *gin.RouterGroup) {
 	g.POST("device/scan-ports",
 		middleware.BindJsonMiddleware[device_api.ScanHostRequest], dev.DeviceScanHostView)
 
+	// 外网错误页（404 / 502）的显示方式：默认脱敏，可换成自定义 HTML
+	g.POST(
+		"proxy/errorpage",
+		middleware.BindJsonMiddleware[proxy_api.ErrorPageSaveRequest],
+		app.ProxyErrorPageSaveView,
+	)
+
 	// 入口设置 + 监听状态 + 站点表，一次给全
 	g.GET(
 		"proxy/config",

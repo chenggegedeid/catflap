@@ -2,10 +2,39 @@ package proxy
 
 import (
 	"fmt"
-	"html"
+	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
+
+	"github.com/chenggegedeid/catflap/modules/proxy/model"
+	"github.com/sirupsen/logrus"
 )
+
+// errorPageCache 错误页配置的读取缓存。
+//
+// 为什么要有缓存而不是每次读 Runtime.Snapshot()：**不能在包级初始化里引用 Runtime**。
+// 链路是 Runtime = NewRouter(...) → newReverseProxy → writeOriginUnreachable，
+// 而 writeOriginUnreachable 要读配置 —— 直接写 Runtime.Snapshot() 就成了一个
+// 包级变量的初始化环（Go 直接拒绝编译：initialization cycle for Runtime）。
+//
+// 用一个不带初始化依赖的原子变量绕开：写入方是 Runtime.Update 与 InitProxy
+// （都是方法/函数，运行时才跑），读取方是错误页，两边不再有初始化顺序关系。
+var errorPageCache atomic.Value
+
+// currentErrorPage 当前错误页配置
+func currentErrorPage() model.ErrorPage {
+	v := errorPageCache.Load()
+	if v == nil {
+		return model.ErrorPage{}
+	}
+	return v.(model.ErrorPage)
+}
+
+// setErrorPageCache 配置变动时同步缓存（见 errorPageCache 的说明）
+func setErrorPageCache(p model.ErrorPage) {
+	errorPageCache.Store(p)
+}
 
 // 本文件的内容协商与缓存头处理借鉴 GoDoxy
 // (github.com/yusing/godoxy, MIT License) 的 origin_unreachable_page.go，
@@ -37,77 +66,89 @@ func wantsHTML(req *http.Request) bool {
 
 // writeOriginUnreachable 后端连不上时的 502。
 //
-// 比浏览器自带的 ERR_CONNECTION_REFUSED 强的地方只有一点：
-// 它能说出到底是哪个站点、哪个后端地址连不上。这正是用户当下唯一需要知道的信息。
+// ⚠️ **不写后端地址**。以前这里会把 `site.Backend`（形如 192.168.9.6:5000）
+// 明文打给外网访客 —— 那是内网拓扑，比域名清单更敏感：
+// 谁都能看到你哪台机器在哪个端口跑着什么。后端地址去管理后台看，那里要登录。
 func writeOriginUnreachable(w http.ResponseWriter, req *http.Request, host, backend string, err error) {
 	setNoStoreHeaders(w.Header())
 
-	detail := ""
+	// 错误原因只**进日志**，不给访客：
+	// "connection refused" / "i/o timeout" 这类字眼会告诉对方后端在内网、
+	// 是活的还是死的，配合别的信息就能判断拓扑。
 	if err != nil {
-		detail = describeBackendError(err)
+		detail := describeBackendError(err)
+		if detail != "" {
+			logrus.Warnf("[proxy] 后端连不上（不对外显示）：%s → %s：%s", host, backend, detail)
+		}
+	}
+
+	page := currentErrorPage()
+	if page.UseCustom() {
+		writeCustomPage(w, http.StatusBadGateway, page.CustomHTML, "502", "服务暂时不可用")
+		return
 	}
 
 	if !wantsHTML(req) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, "502 后端连不上\n\n站点: %s\n后端: %s\n", host, backend)
-		if detail != "" {
-			fmt.Fprintf(w, "原因: %s\n", detail)
-		}
+		fmt.Fprint(w, "502 后端连不上\n")
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusBadGateway)
-
-	detailHTML := ""
-	if detail != "" {
-		detailHTML = `<p class="err">` + html.EscapeString(detail) + `</p>`
-	}
-	fmt.Fprintf(w, originUnreachableTmpl,
-		html.EscapeString(host),
-		html.EscapeString(backend),
-		detailHTML,
-	)
+	fmt.Fprint(w, originUnreachableTmpl)
 }
 
 // writeNoSite 收到了一个没有任何站点认领的 Host。
 //
-// 把已配置的域名列出来——用户十有八九是把域名拼错了，或者忘了那个站点没启用。
+// ⚠️ **不列出已配置的域名**。以前这里会把全部域名打给任意来访者
+// （handler 传进来的 hosts），等于任何人都能源源不断地枚举出这台机器上的站点。
+// 域名拼没拼错是**自己**要知道的事，去管理后台看，或者看运行日志 ——
+// 日志里每一次未匹配的 Host 都记着。
 func writeNoSite(w http.ResponseWriter, req *http.Request, hostHeader string, hosts []string) {
 	// 没匹配到站点也是"门禁拒绝"：扫描器常拿不存在的域名来试。
 	// 这类响应不该计入访问统计（否则光扫域名就能把错误数刷上去）
 	markDenied(w)
 	setNoStoreHeaders(w.Header())
+	// hosts 参数还在，只是不再往外显示 —— 留着是因为调用方传得顺手，
+	// 而且将来要做"仅本站域名时给详细提示"时能用上。
+	_ = hosts
+
+	page := currentErrorPage()
+	if page.UseCustom() {
+		writeCustomPage(w, http.StatusNotFound, page.CustomHTML, "404", "没有找到请求的内容")
+		return
+	}
 
 	if !wantsHTML(req) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, "404 没有匹配的站点\n\n请求的 Host: %s\n", hostHeader)
-		if len(hosts) > 0 {
-			fmt.Fprintf(w, "已配置: %s\n", strings.Join(hosts, ", "))
-		} else {
-			fmt.Fprint(w, "反向代理还没有配置任何站点。\n")
-		}
+		// 不回显 Host：那是来访者自己填的，回显没有意义，
+		// 还会给"反射型"玩法留下空间（虽然这里已经转义过）。
+		fmt.Fprint(w, "404 没有匹配的站点\n")
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprint(w, noSiteTmpl)
+}
 
-	var list string
-	if len(hosts) == 0 {
-		list = `<p class="err">反向代理还没有配置任何站点。请到管理后台的「反向代理」页添加。</p>`
-	} else {
-		var b strings.Builder
-		b.WriteString(`<p class="hint">已配置的域名：</p><ul>`)
-		for _, h := range hosts {
-			b.WriteString("<li><code>" + html.EscapeString(h) + "</code></li>")
-		}
-		b.WriteString("</ul>")
-		list = b.String()
-	}
-	fmt.Fprintf(w, noSiteTmpl, html.EscapeString(hostHeader), list)
+// writeCustomPage 发用户自定义的错误页。
+//
+// 原样输出：这是管理员自己写的页面，转义了反而把他的 <style>/<script> 变成
+// 可见文本。占位符替换只做字面替换，不做 HTML 转义 —— 值都是内部常量。
+func writeCustomPage(w http.ResponseWriter, status int, tmpl, statusText, message string) {
+	body := strings.NewReplacer(
+		"{{status}}", statusText,
+		"{{message}}", message,
+	).Replace(tmpl)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
 }
 
 const pageStyle = `<style>
@@ -127,24 +168,23 @@ ul{margin:.5rem 0;padding-left:1.25rem;line-height:1.9}
 .foot{margin-top:1.75rem;font-size:.75rem;color:#5c636e}
 </style>`
 
+// 默认（脱敏）的两个页面刻意做成"什么也不说"：
+// 不列已配置域名、不说后端地址、不回显来访者的 Host、不出现产品名。
+// 页面样式是中性的深色卡片，看不出是谁家的反代。
 const originUnreachableTmpl = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>502 后端连不上</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>502 服务暂时不可用</title>
 ` + pageStyle + `</head><body><div class="card">
-<p class="code">502 BAD GATEWAY</p>
-<h1>后端连不上</h1>
-<p>Catflap 收到了对 <code>%s</code> 的请求，但后端 <code>%s</code> 没有响应。</p>
-%s
-<p class="hint">通常是这台内网机器关机了、服务没启动，或者后端地址填错了。服务恢复后直接刷新本页即可。</p>
-<p class="foot">Catflap 反向代理</p>
+<p class="code">502 SERVICE UNAVAILABLE</p>
+<h1>服务暂时不可用</h1>
+<p>请求已收到，但对应的服务这会儿没有响应。</p>
+<p class="hint">通常是那台机器没开机、服务没启动，或者正在重启。稍后直接刷新本页即可。</p>
 </div></body></html>`
 
 const noSiteTmpl = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>404 没有匹配的站点</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>404 没有找到</title>
 ` + pageStyle + `</head><body><div class="card">
 <p class="code">404 NOT FOUND</p>
-<h1>没有匹配的站点</h1>
-<p>没有任何一个站点认领 <code>%s</code>。</p>
-%s
-<p class="hint">检查一下域名是否拼错、这个站点是否被禁用，以及该域名的 DNS 是否解析到了本机。</p>
-<p class="foot">Catflap 反向代理</p>
+<h1>没有找到</h1>
+<p>这个地址上没有可以提供的内容。</p>
+<p class="hint">如果这是你自己的站点，请确认域名拼写、站点是否已启用，以及 DNS 是否解析到了这台机器。</p>
 </div></body></html>`

@@ -55,6 +55,11 @@ type ProxyConfig struct {
 
 	Sites []Site `json:"sites"`
 
+	// ErrorPage 外网看到的错误页怎么显示（404 没匹配到站点、502 后端连不上）。
+	//
+	// 见 ErrorPage 的说明 —— 默认不暴露任何内部信息。
+	ErrorPage ErrorPage `json:"errorPage"`
+
 	// Forwards 端口转发。**和站点分开**：站点是"域名 → 服务"，
 	// 端口转发是"端口 → 端口"，不看域名。混在一起时站点这个概念要同时
 	// 表达两件事，界面也说不清楚（像 lucky / 爱快那样分开更清楚）。
@@ -67,6 +72,40 @@ type ProxyConfig struct {
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ErrorPage 外网访客看到的错误页（404 没匹配到站点 / 502 后端连不上）。
+//
+// **默认是脱敏的**（Mode 为空或 "simple"）：不列已配置的域名、不说后端地址、
+// 不出现产品名、也不回显来访者给的 Host。
+//
+// 为什么必须默认脱敏：以前的页面会把「已配置的域名」整列打给任何带着任意
+// Host 头发来的请求 —— 不需要登录，一次请求就能拿到这台机器上所有站点的域名。
+// 那是替攻击者做了一遍子域名枚举（本该只有知道的人才访问得到的域名被列成清单），
+// 502 页面还会把内网后端地址（192.168.x.x:端口）一起送出去。属于信息泄露。
+//
+// Mode = "custom" 时改用 CustomHTML（整页），支持两个占位符：
+//
+//	{{status}}   状态码，404 或 502
+//	{{message}}  一句简短说明
+//
+// 自定义内容是管理员自己写的，原样发出（不做转义）—— 那是他的页面。
+type ErrorPage struct {
+	// Mode ""（= simple，默认）| "simple" | "custom"
+	Mode string `json:"mode"`
+	// CustomHTML Mode=custom 时的整页 HTML
+	CustomHTML string `json:"customHtml,omitempty"`
+}
+
+// MaxErrorPageLen 自定义错误页的长度上限。
+//
+// 它是随每个错误响应现读现发的，太大既拖慢响应也容易被人拿去当放大攻击的材料。
+// 64 KB 足够写一个完整的落地页。
+const MaxErrorPageLen = 64 * 1024
+
+// UseCustom 是否走自定义页
+func (e ErrorPage) UseCustom() bool {
+	return e.Mode == "custom" && len(e.CustomHTML) > 0
 }
 
 // Site 一个站点，对应 nginx 的一个 server 块。
