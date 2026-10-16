@@ -1,0 +1,21 @@
+{
+  "enabled": false,
+  "keepDays": 0,
+  "maxFileMB": 0,
+  "autoBlock": false,
+  "autoBlockThreshold": 0,
+  "autoBlockMinutes": 0,
+  "whitelist": [],
+  "trustedProxies": [],
+  "blocks": [
+    {
+      "ip": "203.0.113.7",
+      "reason": "自动拉黑：登录失败 13 次",
+      "addedAt": "2026-10-16T22:18:06.4132204+08:00",
+      "expiresAt": "2026-10-16T23:18:06.4132204+08:00",
+      "auto": true
+    }
+  ],
+  "createdAt": "0001-01-01T00:00:00Z",
+  "updatedAt": "2026-10-16T22:18:06.4132204+08:00"
+}

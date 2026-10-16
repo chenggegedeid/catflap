@@ -1,6 +1,14 @@
 package proxy
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/chenggegedeid/catflap/core"
+	"github.com/chenggegedeid/catflap/modules/proxy/model"
+)
 
 // 后端地址指向 Catflap 自己的后台端口必须被拦住。
 //
@@ -48,5 +56,69 @@ func TestBackendHitsAdminPortMalformed(t *testing.T) {
 	// 管理端口没取到（0）时不做判断
 	if backendHitsAdminPort("127.0.0.1:3791", 0) {
 		t.Error("管理端口为 0 时不应拦截")
+	}
+}
+
+// prepConfigDir 切到临时目录并建好 config/。
+//
+// SaveSite 会落盘到 config/proxyConfig.json（见 modules/stun 那边踩过的坑：
+// 不切目录会在源码树里留下 modules/proxy/config/，已经误提交过两次）。
+func prepConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	if err := os.MkdirAll("config", 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 开关关着：后端指向后台端口必须被拦（这是默认行为，也是升级后的行为）
+func TestSaveSiteBlocksAdminPortByDefault(t *testing.T) {
+	prepConfigDir(t)
+	// 默认配置（ExposeAdmin 零值 = false）
+	_, err := SaveSite(model.Site{
+		Hosts:   []string{"panel.example.com"},
+		Backend: fmt.Sprintf("127.0.0.1:%d", core.ListenPort()),
+	})
+	if err == nil {
+		t.Fatal("默认应当拦住把后台挂出去的站点")
+	}
+	if !strings.Contains(err.Error(), "允许通过反代暴露管理后台") {
+		t.Errorf("报错里要告诉用户怎么合法地开，实际是：%v", err)
+	}
+}
+
+// 开关打开：放行，但要真的能保存成功
+func TestSaveSiteAllowsAdminPortWhenExposeEnabled(t *testing.T) {
+	prepConfigDir(t)
+	if err := Runtime.Update(func(cfg *model.ProxyConfig) error {
+		cfg.ExposeAdmin = true
+		return nil
+	}); err != nil {
+		t.Fatalf("打开开关失败：%v", err)
+	}
+	t.Cleanup(func() {
+		_ = Runtime.Update(func(cfg *model.ProxyConfig) error {
+			cfg.ExposeAdmin = false
+			return nil
+		})
+	})
+
+	out, err := SaveSite(model.Site{
+		Hosts:   []string{"panel.example.com"},
+		Backend: fmt.Sprintf("127.0.0.1:%d", core.ListenPort()),
+	})
+	if err != nil {
+		t.Fatalf("开关打开后应当放行，实际报错：%v", err)
+	}
+	if out.Backend == "" {
+		t.Error("保存结果里后端地址不该为空")
 	}
 }

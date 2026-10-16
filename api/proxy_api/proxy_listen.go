@@ -96,3 +96,24 @@ func (ProxyApi) ProxyErrorPageSaveView(c *gin.Context) {
 	}
 	res.OkWithMsg("已保存，下一次错误响应就生效", c)
 }
+
+// ExposeAdminRequest 是否允许把管理后台通过反代挂出去
+type ExposeAdminRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ProxyExposeAdminView 开关「允许通过反代暴露管理后台」。
+//
+// 打开后，站点后端才可以填 127.0.0.1:<后台端口> —— 那是远程管理的唯一途径。
+func (ProxyApi) ProxyExposeAdminView(c *gin.Context) {
+	cr := middleware.GetBindRequest[ExposeAdminRequest](c)
+	if err := proxy.SetExposeAdmin(cr.Enabled); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	if cr.Enabled {
+		res.OkWithMsg("已允许通过反代暴露管理后台。请确认审计页「永不封禁」名单里有你自己的出口 IP，否则别人故意输错几次就能把你关在门外", c)
+		return
+	}
+	res.OkWithMsg("已关闭", c)
+}

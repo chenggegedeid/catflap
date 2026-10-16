@@ -138,19 +138,30 @@ func normalizeSite(in model.Site, base string) (model.Site, error) {
 		return out, errors.New("后端地址里有空格，请检查")
 	case strings.HasPrefix(out.Backend, "/"):
 		return out, errors.New("后端地址要填主机和端口，形如 192.168.1.20:8080")
-	case backendHitsAdminPort(out.Backend, adminPort()):
+	case backendHitsAdminPort(out.Backend, adminPort()) && !allowExposeAdmin():
 		// 后端指向 Catflap 自己的后台端口 = 把管理后台挂到公网。
 		//
 		// 这一条看着像"用户不会这么填"，但反而是很容易犯的错：想在外网访问
 		// 管理页面时，最顺手的做法就是建个站点指向 127.0.0.1:<管理端口>，
 		// 心想"反正还要登录"。结果是把登录页和 /api/auth/login 一起挂到
-		// 公网，谁都能来爆破密码，猜中就完全接管。
+		// 公网，谁都能来爆破密码。
 		//
-		// 要在外网管 Catflap，正确做法是让它监听的地址本身可达（或走
-		// 你自己的 VPN），而不是通过本程序的反代转发给自己。
+		// **默认仍然拦**，但留了开关（见 allowExposeAdmin）：
+		// 远程管理是正当需求，不能因为怕手滑就彻底堵死 ——
+		// 那样只会逼着人绕过这道校验。开开关时会在下面打一条醒目的日志。
 		return out, fmt.Errorf(
-			"后端不能填 Catflap 自己的后台端口 %d——那等于把管理后台挂到公网上，任何人都能来试密码",
+			"后端不能填 Catflap 自己的后台端口 %d——那等于把管理后台挂到公网上，任何人都能来试密码。"+
+				"确实要远程管理的话，先在「系统设置」里打开「允许通过反代暴露管理后台」",
 			adminPort())
+	case backendHitsAdminPort(out.Backend, adminPort()):
+		// 开关打开了：放行，但代价要说清楚，并且必须留下痕迹。
+		//
+		// 记 WARN 而不是 INFO：这条配置意味着登录页对该站点可见。
+		// 事后排查「后台是不是被暴露过」时，这条日志是唯一的凭据。
+		logrus.Warnf("[proxy] 站点（%s）的后端指向管理后台端口 %d —— 登录页已对它可见，"+
+			"公网任何人都能来试密码。请确保审计页的「永不封禁」名单配置正确，"+
+			"并且知道：登录失败达到阈值会自动封禁来源（含反向的 DoS 风险）。",
+			strings.Join(out.Hosts, " / "), adminPort())
 	}
 
 	if out.ListenPort != 0 {
@@ -271,6 +282,16 @@ func prefixLabel(prefix string) string {
 // 跟监听端口走同一个来源（core.ListenPort）：端口改成环境变量指定的值时，
 // 这里也得跟着变，否则「反代不能抢后台端口」这条保护就会保护错端口。
 func adminPort() int { return core.ListenPort() }
+
+// allowExposeAdmin 是否允许把管理后台通过反代挂出去。
+//
+// **默认关**。这不是洁癖：挂出去意味着 /api/auth/login 对任何人可见，
+// 猜中密码就完全接管。但远程管理是真实需求（要在外面加服务、调穿透），
+// 一刀切堵死只会逼着人绕过这道校验 —— 所以留一个显式开关，
+// 打开时校验会放行，但记一条 WARN 留下痕迹（见上面那条 case）。
+func allowExposeAdmin() bool {
+	return Runtime.Snapshot().ExposeAdmin
+}
 
 // EntrySettings 两个默认入口：HTTP 若干端口，HTTPS 若干端口。
 //
@@ -752,6 +773,21 @@ func SetErrorPage(in model.ErrorPage) error {
 
 	return Runtime.Update(func(cfg *model.ProxyConfig) error {
 		cfg.ErrorPage = model.ErrorPage{Mode: mode, CustomHTML: html}
+		return nil
+	})
+}
+
+// SetExposeAdmin 开关「允许把管理后台通过反代挂出去」。
+//
+// 打开时记一条 WARN：这条配置的后果是登录页对公网可见，
+// 得在日志里留痕，事后才查得出「后台曾经被挂出去过」。
+func SetExposeAdmin(enabled bool) error {
+	if enabled {
+		logrus.Warnf("[proxy] 已允许通过反代暴露管理后台（端口 %d）。登录页将对对应站点可见，"+
+			"请确认审计页「永不封禁」名单已包含管理员自己的出口 IP", adminPort())
+	}
+	return Runtime.Update(func(cfg *model.ProxyConfig) error {
+		cfg.ExposeAdmin = enabled
 		return nil
 	})
 }

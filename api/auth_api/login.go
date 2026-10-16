@@ -2,6 +2,7 @@ package auth_api
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -33,6 +34,18 @@ func (AuthApi) LoginView(c *gin.Context) {
 		// 失败也要记：这正是"有没有人在试我的密码"的答案
 		recordLogin(c, cr.Username, false, err.Error())
 		if errors.Is(err, auth.ErrLoginLimited) {
+			// 说清还剩多久：一句"请稍后再试"会让人反复刷新，
+			// 而反复刷新在我们这边看起来和爆破没有区别。
+			if left := auth.LoginBlockRemaining(c.Request.RemoteAddr); left > 0 {
+				mins := int(left.Minutes())
+				if mins < 1 {
+					res.FailRateLimitedWith("登录失败次数过多，该来源已被临时封禁，请稍后再试", c)
+				} else {
+					res.FailRateLimitedWith(
+						fmt.Sprintf("登录失败次数过多，该来源已被封禁，还需等待约 %d 分钟", mins), c)
+				}
+				return
+			}
 			res.FailRateLimited(c)
 			return
 		}

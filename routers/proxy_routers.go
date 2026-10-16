@@ -53,6 +53,13 @@ func ProxyRouters(g *gin.RouterGroup) {
 		app.ProxyEntrySaveView,
 	)
 
+	// 是否允许把管理后台通过反代挂出去（远程管理用，默认关）
+	g.POST(
+		"proxy/expose-admin",
+		middleware.BindJsonMiddleware[proxy_api.ExposeAdminRequest],
+		app.ProxyExposeAdminView,
+	)
+
 	// 访问日志单独一个开关，不碰监听
 	g.POST(
 		"proxy/accesslog",
