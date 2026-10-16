@@ -38,6 +38,10 @@ node_modules/
 #   2. 上游也是这么做的，保持一致的目的是让 `git merge upstream` 干净。
 # 改前端后必须重新构建并提交 dist（Taskfile: task build:frontend）。
 
+# 根目录 dist/ 是**打包产物**（pack_fpk.py 出的 .fpk 和临时工作目录），不入库。
+# 写 /dist/ 而不是 dist/ —— 后者会连上面那两个要入库的 web/*/dist 一起忽略掉。
+/dist/
+
 # ── 编辑器与系统 ───────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
