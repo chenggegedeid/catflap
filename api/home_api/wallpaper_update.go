@@ -42,10 +42,14 @@ func (HomeApi) WallpaperUpdateView(c *gin.Context) {
 		res.FailWithMsg("壁纸路径不合法，请重新上传", c)
 		return
 	}
-	if cr.Mode == "custom" && cr.Custom == "" {
-		res.FailWithMsg("请先上传一张壁纸", c)
-		return
-	}
+	/**
+	 * custom 模式没图时**不再报错**。
+	 *
+	 * 前端选中"自己上传"这个模式时图还没传，这条校验会先把他拦下来，
+	 * 弹一句"请先上传一张壁纸" —— 可用户还没机会选文件。
+	 * 没有图就用默认底图兜着（Background 里 custom 为空自然不渲染 <img>），
+	 * 等上传成功再一起更新，比拦住他合理。
+	 */
 	if len(cr.CSS) > maxWallpaperCSS {
 		res.FailWithMsg("背景样式太长了，最多 2 万个字符", c)
 		return
