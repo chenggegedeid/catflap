@@ -147,3 +147,24 @@ type AppAddresses struct {
 // 新应用一律从 1×1 开始 —— 尺寸是用户**主动**想放大时才改的，
 // 系统不该替他决定"这个服务看起来重要，给个 2×2"。
 func DefaultCardSize() string { return defaultCardSize }
+
+// ValidCardSize 合法的卡片尺寸（宽×高）
+func ValidCardSize(s string) bool {
+	switch s {
+	case "1x1", "1x2", "2x1", "2x2", "2x4":
+		return true
+	}
+	return false
+}
+
+// SetAppSize 设置应用尺寸。
+//
+// 尺寸不对要报错而不是默默改成 1×1 —— 用户在右键菜单里选了 2×2，
+// 存成了 1×1，界面上看不出哪里错了，只会觉得"点了没反应"。
+func SetAppSize(a *App, size string) error {
+	if !ValidCardSize(size) {
+		return ErrBadCardSize
+	}
+	a.Size = size
+	return nil
+}

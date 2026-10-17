@@ -29,11 +29,17 @@ export function AppCard({
   prefer,
   placement,
   onOpenMenu,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: {
   app: AppView
   prefer: NetworkPrefer
   placement: Placement
   onOpenMenu?: (app: AppView, x: number, y: number) => void
+  selectable?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const entries = entriesOf(app.addresses)
@@ -45,12 +51,21 @@ export function AppCard({
 
   return (
     <div
-      className="relative"
+      className={`relative rounded-2xl ${selected ? 'ring-2 ring-blue-400' : ''}`}
+      aria-selected={selectable ? selected : undefined}
       style={{
         gridColumnStart: placement.col + 1,
         gridColumnEnd: `span ${placement.w}`,
         gridRowStart: placement.row + 1,
         gridRowEnd: `span ${placement.h}`,
+      }}
+      onClickCapture={(e) => {
+        // 批量删除模式下，点卡片 = 选中/取消，不打开链接
+        if (selectable) {
+          e.preventDefault()
+          e.stopPropagation()
+          onToggleSelect?.(app.id)
+        }
       }}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -59,13 +74,29 @@ export function AppCard({
         e.preventDefault()
         onOpenMenu(app, e.clientX, e.clientY)
       }}
+      // 键盘用户的菜单入口：Shift+F10（Windows 惯例）或 Menu 键。
+      // 没有这条的话，不用鼠标的人连删除/改大小都够不着。
+      onKeyDown={(e) => {
+        if (!onOpenMenu) return
+        // Shift+F10 / Menu 键是 Windows 惯例；m 是好记的补充（卡片上没有输入框，不冲突）
+        const isMenuKey =
+          e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey) || e.key === 'm'
+        if (!isMenuKey) return
+        e.preventDefault()
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        onOpenMenu(app, r.left + r.width / 2, r.bottom)
+      }}
     >
       <button
         type="button"
-        disabled={!url}
+        aria-disabled={!url}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        onClick={() => url && openEntry(url)}
+        onClick={() => {
+          // 没有 url 就什么都不做，但按钮必须保持"活着" ——
+          // disabled 会让整个元素收不到事件（包括右键），那样连菜单都出不来
+          if (url) openEntry(url)
+        }}
         title={
           url
             ? `${app.name}（${titleOf(prefer)}）`
@@ -75,6 +106,14 @@ export function AppCard({
           url ? 'hover:-translate-y-0.5 hover:bg-white/15' : 'cursor-not-allowed opacity-60'
         }`}
       >
+        {selectable && selected && (
+          <span
+            aria-hidden
+            className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-blue-500 text-[10px] font-bold text-white"
+          >
+            ✓
+          </span>
+        )}
         <span className="aspect-square w-full max-w-[4.5rem] overflow-hidden rounded-[22%] shadow-sm ring-1 ring-black/5">
           <AppIcon name={app.name} icon={app.icon} />
         </span>
