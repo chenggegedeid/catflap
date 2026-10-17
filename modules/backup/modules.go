@@ -6,6 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chenggegedeid/catflap/modules/audit"
+	"github.com/chenggegedeid/catflap/modules/auth"
+	"github.com/chenggegedeid/catflap/modules/cert"
+	"github.com/chenggegedeid/catflap/modules/ddns"
+	"github.com/chenggegedeid/catflap/modules/device"
+	"github.com/chenggegedeid/catflap/modules/home"
+	"github.com/chenggegedeid/catflap/modules/notify"
+	"github.com/chenggegedeid/catflap/modules/proxy"
+	"github.com/chenggegedeid/catflap/modules/stun"
+	"github.com/chenggegedeid/catflap/modules/task"
+	"github.com/chenggegedeid/catflap/modules/tunnel"
+	"github.com/chenggegedeid/catflap/modules/update"
+	"github.com/chenggegedeid/catflap/modules/webhook"
+	"github.com/chenggegedeid/catflap/modules/wol"
 )
 
 /**
@@ -17,18 +32,39 @@ import (
  * 只列**配置文件**，不列运行期数据（data/access、data/traffic 那些日志类
  * 不该进备份，它们随时能重建，只会让包变大）。
  */
+/**
+ * 模块注册表：备份要处理哪些配置。
+ *
+ * **路径一律引用各模块自己的 ConfigPath 常量，不在这里重写字符串。**
+ *
+ * 这不是洁癖：今天我第一版手写了路径，漏掉 6 个模块（devices/task/update/
+ * webhook/wol…），于是"备份"其实不完整而我看不出来。
+ * 引用常量之后，路径的真相只有一份（各模块自己那份），
+ * 就算这里漏了一个模块，也不会出现"路径写错导致备份到空文件"这种更隐蔽的错。
+ *
+ * 只列**配置文件**，不列运行期数据（data/access、data/traffic 那些日志类
+ * 不该进备份，它们随时能重建，只会让包变大）。
+ */
 var MODULES = []struct {
 	Name  string
 	Label string
 	File  string
 }{
-	{"home", "导航页", "config/homeConfig.json"},
-	{"auth", "账号与登录", "config/authConfig.json"},
-	{"proxy", "反向代理", "config/proxyConfig.json"},
-	{"stun", "穿透", "config/stunConfig.json"},
-	{"ddns", "动态域名", "config/ddnsConfig.json"},
-	{"notify", "通知", "config/notify.json"},
-	{"cert", "证书", "config/certConfig.json"},
+	{"home", "导航页", home.ConfigPath},
+	{"auth", "账号与登录", auth.ConfigPath},
+	{"proxy", "反向代理", proxy.ConfigPath},
+	{"stun", "穿透", stun.ConfigPath},
+	{"ddns", "动态域名", ddns.ConfigPath},
+	{"tunnel", "隧道", tunnel.ConfigPath},
+	{"legacyProxy", "旧版反代配置", tunnel.LegacyProxyConfigPath},
+	{"device", "设备", device.ConfigPath},
+	{"audit", "审计", audit.ConfigPath},
+	{"notify", "通知", notify.ConfigPath},
+	{"cert", "证书", cert.ConfigPath},
+	{"task", "定时任务", task.ConfigPath},
+	{"update", "更新设置", update.ConfigPath},
+	{"webhook", "Webhook", webhook.ConfigPath},
+	{"wol", "网络唤醒", wol.ConfigPath},
 }
 
 // 上传资产目录（图标、壁纸）。日志/统计类不在此列。
