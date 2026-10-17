@@ -6,9 +6,16 @@
  * 这是老版本就做对的一点，这里保持。
  */
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Check, Upload } from 'lucide-react'
-import { updateNetworkPrefer, updateWallpaper, uploadWallpaper } from '../../api/home'
+import {
+  deleteWallpaper,
+  listWallpapers,
+  updateNetworkPrefer,
+  updateWallpaper,
+  uploadWallpaper,
+  type WallpaperFile,
+} from '../../api/home'
 import { PRESET_WALLPAPERS } from '../../lib/wallpaperLibrary'
 import { useHome } from '../../state/HomeProvider'
 import type { NetworkPrefer, Wallpaper, WallpaperMode } from '../../types'
@@ -26,10 +33,29 @@ const PREFERS: { value: NetworkPrefer; label: string; hint: string }[] = [
 ]
 
 export function AppearanceTab() {
-  const { state, mutate, notify } = useHome()
+  const { state, mutate, notify, reload } = useHome()
   const cfg = state.config
   const wp: Wallpaper = cfg?.wallpaper ?? { mode: 'default', resolution: '1080', blur: 0, custom: '', css: '' }
   const [uploading, setUploading] = useState(false)
+  // 「我的壁纸」：上传过的都在这儿，能反复切换、能删
+  const [mine, setMine] = useState<WallpaperFile[]>([])
+  const [loadingMine, setLoadingMine] = useState(false)
+
+  const loadMine = useCallback(async () => {
+    setLoadingMine(true)
+    try {
+      setMine(await listWallpapers())
+    } catch {
+      setMine([])
+    } finally {
+      setLoadingMine(false)
+    }
+  }, [])
+
+  // 切到"自己上传"这个模式时才拉列表（平时没必要请求）
+  useEffect(() => {
+    if (wp.mode === 'custom') void loadMine()
+  }, [wp.mode, loadMine])
 
   const save = (patch: Partial<Wallpaper>) => {
     void mutate({
@@ -142,6 +168,63 @@ export function AppearanceTab() {
             ))}
             </div>
           </div>
+        )}
+
+        {/**
+         * 我的壁纸：把上传过的都列出来。
+         *
+         * Sun-Panel 那类是做成"壁纸库"的 —— 上传过的都是资产，
+         * 应该看得见、能换回来。之前传一张覆盖一张，
+         * 想换回上一张只能重新上传。
+         */}
+        {wp.mode === 'custom' && mine.length > 0 && (
+          <div className="mt-2">
+            <p className="mb-1.5 text-[11px] text-slate-400">我的壁纸（点一下切换，叉号删除）：</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {mine.map((f) => (
+                <div key={f.path} className="group relative">
+                  <button
+                    type="button"
+                    title={f.path}
+                    onClick={() => save({ mode: 'custom', custom: f.path })}
+                    className={`block h-14 w-full overflow-hidden rounded-lg bg-slate-100 transition ${
+                      wp.custom === f.path ? 'ring-2 ring-blue-500' : 'ring-1 ring-slate-200 hover:ring-slate-400'
+                    }`}
+                  >
+                    <img
+                      src={f.url}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`删除 ${f.path}`}
+                    title="删除这张壁纸"
+                    onClick={async () => {
+                      try {
+                        await deleteWallpaper(f.path)
+                        // 删的正好是正在用的 → 后端已回退到内置库，前端跟着刷
+                        reload()
+                        void loadMine()
+                        notify('ok', '已删除')
+                      } catch (e) {
+                        notify('error', e instanceof Error ? e.message : '删除失败')
+                      }
+                    }}
+                    className="absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-rose-500 text-[9px] font-bold text-white group-hover:grid"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {wp.mode === 'custom' && loadingMine && (
+          <p className="mt-2 text-[11px] text-slate-400">正在读取我的壁纸…</p>
         )}
 
         {wp.mode === 'custom' && (
