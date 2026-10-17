@@ -12,7 +12,7 @@
  * 不用先关掉一个对话框再打开另一个。
  */
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Check, Upload, X } from 'lucide-react'
 import { addApp, fetchIconFromURL, updateApp, uploadIcon } from '../../api/home'
 import { IconPicker } from './IconPicker'
@@ -45,7 +45,6 @@ export function AppFormModal({
   const [busy, setBusy] = useState(false)
   const [fetchUrl, setFetchUrl] = useState('')
   const [libOpen, setLibOpen] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const submit = async () => {
     const n = name.trim()
@@ -87,7 +86,6 @@ export function AppFormModal({
       onNotify('error', e instanceof Error ? e.message : '上传失败')
     } finally {
       setBusy(false)
-      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
@@ -224,15 +222,26 @@ export function AppFormModal({
                 >
                   图标库
                 </button>
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={busy}
-                  className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+                {/* 上传用 label 原生触发 —— 隐藏 input 的编程式 click 在部分
+                    浏览器（尤其移动端 WebView）不弹文件选择器，表现为"点了没反应" */}
+                <label
+                  className={`flex cursor-pointer items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 ${
+                    busy ? 'pointer-events-none opacity-50' : ''
+                  }`}
                 >
                   <Upload className="h-3 w-3" />
                   上传
-                </button>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ''
+                      if (f) void onUpload(f)
+                    }}
+                  />
+                </label>
                 <button
                   type="button"
                   onClick={() => void onFetch()}
@@ -244,17 +253,6 @@ export function AppFormModal({
                 </button>
               </div>
             </div>
-
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) void onUpload(f)
-              }}
-            />
 
             {/*
               手输地址只在**没有任何已填地址**时出现 —— 有地址还让人重打一遍
