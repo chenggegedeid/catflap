@@ -57,7 +57,7 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 			Title:                 cfg.Title,
 			ShowTime:              cfg.ShowTime,
 			Wallpaper:             cfg.Wallpaper,
-			LayoutMode:            cfg.LayoutMode,
+			LayoutMode:            cfg.LegacyLayoutMode, // TODO(M4)：新前端不再需要，删
 			NetworkPrefer:         cfg.NetworkPrefer,
 			DefaultSearchEngineID: cfg.DefaultSearchEngineID,
 			SearchEngines:         append([]home.SearchEngine{}, cfg.SearchEngines...),
