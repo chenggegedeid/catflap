@@ -28,7 +28,7 @@ func InitHome() error {
 	//
 	// 要落盘，否则迁移只在内存里生效 —— 下次启动又迁一遍，
 	// 而且用户每次看到的顺序还可能不一样（排序依据已被清掉）。
-	if migrateLayout(&cfg) {
+	if Migrate(&cfg) {
 		Runtime.mu.Lock()
 		Runtime.Config = cfg
 		Runtime.mu.Unlock()

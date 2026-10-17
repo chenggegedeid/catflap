@@ -20,8 +20,11 @@ type Config struct {
 	// （和 proxy 的 LegacyHTTPPort 一个套路）。
 	LegacyLayoutMode string `json:"layoutMode,omitempty"`
 
-	// SchemaVersion 配置结构版本。1 = 老布局（pagedOrder / scrollOrder），
-	// 2 = 流式网格（order / size）。ReadConfig 靠它判断要不要跑迁移。
+	// SchemaVersion 配置结构版本。
+	//   1 = 老布局（pagedOrder / scrollOrder）
+	//   2 = 流式网格（order / size）
+	//   3 = 三级可见性（visibility + 分组口令）
+	// ReadConfig 靠它判断要不要跑迁移。
 	//
 	// **为什么要有版本号而不是"看字段有没有值"**：老配置里 pagedOrder 可能全是 0
 	// （比如用户从来没拖过），光看值分不清"没迁移"和"迁移过但用户没排"。
@@ -71,6 +74,23 @@ type Category struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Order int    `json:"order"`
+
+	/**
+	 * Visibility 这个分组谁能看。
+	 *
+	 *   public 任何人（未登录也行）
+	 *   login  登录后
+	 *   lock   即使登录了，也要再输一次**这个分组自己的口令**
+	 *
+	 * lock 解决的是什么：同一个浏览器上，家人打开就能看到你的私密分组。
+	 * 登录态解决不了这个 —— 你登着，别人坐过来就能看。
+	 */
+	Visibility string `json:"visibility"`
+
+	// PasswordHash lock 分组的口令哈希（pwd.HashPassword 产物）。
+	// 只有 Visibility=lock 才有值；改成别的可见性时一并清掉，
+	// 免得留一份没用的哈希在配置文件里。
+	PasswordHash string `json:"passwordHash,omitempty"`
 
 	// RequireAuth 这个分组要登录后才看得见。
 	//
@@ -168,3 +188,29 @@ func SetAppSize(a *App, size string) error {
 	a.Size = size
 	return nil
 }
+
+// VisibilityPublic / VisibilityLogin / VisibilityLock 分组的三种可见性
+const (
+	VisibilityPublic = "public"
+	VisibilityLogin  = "login"
+	VisibilityLock   = "lock"
+)
+
+// NormalizeVisibility 把任意输入收敛成合法可见性。
+//
+// 不认识的（空串、老配置里没这个字段）一律按 public ——
+// 这是**最保守**的方向吗？不是，但它是对的：老用户的分组本来就是公开的，
+// 升级后突然把人家的分组藏起来，比什么都难受。真要藏，用户自己改。
+func NormalizeVisibility(v string) string {
+	switch v {
+	case VisibilityPublic, VisibilityLogin, VisibilityLock:
+		return v
+	}
+	return VisibilityPublic
+}
+
+// NeedsAuth 这个分组是否需要登录态
+func (c Category) NeedsAuth() bool { return c.Visibility == VisibilityLogin }
+
+// NeedsUnlock 这个分组是否需要**再验一次口令**（登录了也要验）
+func (c Category) NeedsUnlock() bool { return c.Visibility == VisibilityLock }
