@@ -118,6 +118,8 @@ export function AppearanceTab() {
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
+                  // 置空 value：否则同一个文件第二次选不中
+                  e.target.value = ''
                   if (f) void onUpload(f)
                 }}
               />

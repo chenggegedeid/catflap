@@ -98,10 +98,29 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 			 */
 			unlocked := home.VerifyUnlockToken(home.ReadUnlockToken(c))
 			locked := make(map[string]bool)
-			for _, cat := range resp.Categories {
+			for i := range resp.Categories {
+				cat := resp.Categories[i]
 				if cat.Visibility == home.VisibilityLock && !unlocked[cat.ID] {
 					locked[cat.ID] = true
 				}
+
+				/**
+				 * ① 把"这个锁着的组现在能不能看"写回每一项。
+				 *
+				 * 前端要靠它决定：翻页要不要跳过、左栏该显示图标还是锁。
+				 * 之前只算了没写回 —— 前端拿到的永远是 undefined，
+				 * 表现是"已经解锁的分组，翻页还是跳过、图标还是锁"。
+				 */
+				resp.Categories[i].Unlocked = unlocked[cat.ID]
+
+				/**
+				 * ② **口令哈希绝不下发**。
+				 *
+				 * 它是 pwd.HashPassword 的产物，只该存在于服务端。
+				 * 模型上用了 omitempty，非空就跟着响应走了 —— 等于把哈希
+				 * 发给浏览器。这里显式清空（不能改模型的 json tag，配置还要靠它存盘）。
+				 */
+				resp.Categories[i].PasswordHash = ""
 			}
 			if len(locked) > 0 {
 				apps := make([]home.AppView, 0, len(resp.Apps))

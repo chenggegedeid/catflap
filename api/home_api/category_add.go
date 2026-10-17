@@ -42,12 +42,22 @@ func (HomeApi) CategoryAddView(c *gin.Context) {
 			}
 		}
 		now := time.Now()
+		/**
+		 * Visibility **必须显式写**，不能留空。
+		 *
+		 * 留空的话：后端过滤访客用的是 `Visibility == "public"`，空串不等于
+		 * "public" —— 于是"新建的分组"和"迁移过的分组"在数据上不是一回事，
+		 * 靠迁移那一次兜底根本兜不住（迁移只在启动时跑，新建的永远补不上）。
+		 *
+		 * 原则：**写入时就归一化**，别指望读取端到处防御。
+		 */
 		created = home.Category{
-			ID:        id,
-			Name:      name,
-			Order:     maxOrder + 1,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:         id,
+			Name:       name,
+			Order:      maxOrder + 1,
+			Visibility: home.VisibilityPublic,
+			CreatedAt:  now,
+			UpdatedAt:  now,
 		}
 		cfg.Categories = append(cfg.Categories, created)
 		return nil

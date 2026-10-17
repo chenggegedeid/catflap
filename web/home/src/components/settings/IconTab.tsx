@@ -12,7 +12,7 @@
  * 散在"编辑应用"里的话，得一个一个点进去才发现哪个坏了。
  */
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Upload } from 'lucide-react'
 import { fetchIconFromURL, updateApp, uploadIcon } from '../../api/home'
 import { useHome, visibleApps } from '../../state/HomeProvider'
@@ -38,8 +38,6 @@ export function IconTab() {
   const [url, setUrl] = useState('')
   // 哪个应用正在展开图标库
   const [libFor, setLibFor] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-  const uploadTarget = useRef<string>('')
 
   const missing = apps.filter((a) => !a.icon).length
 
@@ -51,16 +49,18 @@ export function IconTab() {
     })
   }
 
-  const onPickFile = (app: AppView) => {
-    uploadTarget.current = app.id
-    fileRef.current?.click()
-  }
-
-  const onFile = async (file: File) => {
-    const id = uploadTarget.current
-    const app = apps.find((a) => a.id === id)
+  /**
+   * 上传用 **label 包裹 input** 的原生方式触发，不用 JS 调 click()。
+   *
+   * 之前是 `fileRef.current?.click()`：在某些浏览器（尤其是移动端
+   * 和部分 WebView）里，隐藏 input 的编程式 click 不弹文件选择器，
+   * 用户看到的就是"点了上传没反应"。label + input 是浏览器原生行为，
+   * 最可靠 —— 而且天然支持键盘（label 可聚焦）。
+   */
+  const onFile = async (appId: string, file: File) => {
+    const app = apps.find((a) => a.id === appId)
     if (!app) return
-    setBusyId(id)
+    setBusyId(app.id)
     try {
       const { data } = await uploadIcon(file)
       if (data?.path) await setIcon(app, data.path)
@@ -68,7 +68,6 @@ export function IconTab() {
       notify('error', e instanceof Error ? e.message : '上传失败')
     } finally {
       setBusyId('')
-      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
@@ -115,17 +114,6 @@ export function IconTab() {
         )}
       </div>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f) void onFile(f)
-        }}
-      />
-
       <ul className="grid grid-cols-2 gap-2">
         {apps.map((a) => (
           <li key={a.id} className="rounded-xl border border-slate-200 p-2">
@@ -140,15 +128,25 @@ export function IconTab() {
             </div>
 
             <div className="mt-2 flex gap-1">
-              <button
-                type="button"
-                disabled={busyId === a.id}
-                onClick={() => onPickFile(a)}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-slate-100 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+              <label
+                className={`flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg bg-slate-100 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 ${
+                  busyId === a.id ? 'pointer-events-none opacity-50' : ''
+                }`}
               >
                 <Upload className="h-3 w-3" />
-                上传
-              </button>
+                {busyId === a.id ? '上传中…' : '上传'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    // 置空 value：否则同一个文件第二次选不中（change 不触发）
+                    e.target.value = ''
+                    if (f) void onFile(a.id, f)
+                  }}
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => void onFetchURL(a)}

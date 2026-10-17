@@ -111,7 +111,19 @@ type Category struct {
 	// PasswordHash lock 分组的口令哈希（pwd.HashPassword 产物）。
 	// 只有 Visibility=lock 才有值；改成别的可见性时一并清掉，
 	// 免得留一份没用的哈希在配置文件里。
+	//
+	// ⚠️ **下发响应前必须清空**（见 get_home_config.go）—— 它不该离开服务端。
+	// 不能在这里写 `json:"-"`，那样配置存盘时会把哈希一起丢掉。
 	PasswordHash string `json:"passwordHash,omitempty"`
+
+	/**
+	 * Unlocked 这个 lock 分组在**本次请求**里是否已解锁。
+	 *
+	 * 纯运行时字段：由 get_home_config 按解锁 token 算出来填进去，
+	 * 不落盘（配置里存的是口令本身，解锁状态是每次请求现算的 ——
+	 * 存下来就会变成"解锁一次永久有效"，那不是分组锁的语义）。
+	 */
+	Unlocked bool `json:"unlocked,omitempty"`
 
 	// RequireAuth 这个分组要登录后才看得见。
 	//

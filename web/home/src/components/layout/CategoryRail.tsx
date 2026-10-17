@@ -46,6 +46,8 @@ export interface RailEntry {
   id: string
   name: string
   vis: Visibility
+  /** lock 分组在本次会话里是否已解锁（后端按解锁 token 算好下发） */
+  unlocked?: boolean
   icon?: string
 }
 
@@ -75,6 +77,7 @@ export function CategoryRail({
     id: c.id,
     name: c.name,
     vis: visibilityOf(c),
+    unlocked: c.unlocked,
     icon: c.icon,
   }))
 
@@ -100,7 +103,13 @@ export function CategoryRail({
     >
       {entries.map((e, idx) => {
         const selected = e.id === active
-        const locked = e.vis === 'login' || e.vis === 'lock'
+        /**
+         * "显示锁"= 需要口令**且还没解锁**。
+         *
+         * 之前写成 `vis === 'login' || vis === 'lock'`，于是已经解锁的分组
+         * 图标还是一把锁 —— 配上后端没下发 unlocked，就一直显示锁。
+         */
+        const locked = e.vis === 'lock' && !e.unlocked
         const btn = (
           <button
             key={e.id}
