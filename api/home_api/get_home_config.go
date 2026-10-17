@@ -31,6 +31,14 @@ type HomeConfigViewResponse struct {
 	// 选一个站点，条目就指向它，不用手打地址。
 	Sites []SiteOption `json:"sites,omitempty"`
 
+	/**
+	 * HiddenCategoryCount 因为权限被藏起来的分组**数量**。
+	 *
+	 * 只给数量，不给名单、不给名字 —— 让访客知道"这儿有个上锁的分组"
+	 * 本身就是信息，等于告诉他值得来试。前端据此渲染一个不带名字的锁形占位。
+	 */
+	HiddenCategoryCount int `json:"hiddenCategoryCount,omitempty"`
+
 	// Authed 这次请求带没带有效登录态。前端据此决定右上角显示「登录」还是
 	// 「设置 / 后台 / 退出」。
 	//
@@ -69,34 +77,72 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 		// 站点列表只给登录的人（见 Sites 字段的注释）
 		if authed {
 			resp.Sites = proxySiteOptions()
+
+			/**
+			 * 已登录：lock 分组还要再看**这次会话有没有解锁过**。
+			 *
+			 * 登录态挡不住"家人打开你电脑"这个场景 —— 你登着，
+			 * 别人坐过来就能看。lock 是为此单独加的一道。
+			 */
+			unlocked := home.VerifyUnlockToken(home.ReadUnlockToken(c))
+			locked := make(map[string]bool)
+			for _, cat := range resp.Categories {
+				if cat.Visibility == home.VisibilityLock && !unlocked[cat.ID] {
+					locked[cat.ID] = true
+				}
+			}
+			if len(locked) > 0 {
+				apps := make([]home.AppView, 0, len(resp.Apps))
+				for _, a := range resp.Apps {
+					if !locked[a.CategoryID] {
+						apps = append(apps, a)
+					}
+				}
+				resp.Apps = apps
+				// 主人在场时给出数量，让他知道这儿还有锁着的东西（他自己的分组，不算泄密）
+				resp.HiddenCategoryCount = len(locked)
+			}
 			return
 		}
 		resp.Sites = nil
 
-		// 未登录：摘掉要求登录的分组，以及挂在这些分组下的应用。
-		locked := make(map[string]bool)
+		/**
+		 * 未登录：只留 public 分组。
+		 *
+		 * login 和 lock 都不下发（lock 连口令提示都不给 —— 让访客知道
+		 * "这儿有个上锁的分组"本身就是信息，等于告诉他值得来试）。
+		 *
+		 * 顺带把内网地址清掉：见下面的 stripLAN。
+		 */
 		kept := make([]home.Category, 0, len(resp.Categories))
 		for _, cat := range resp.Categories {
-			if cat.RequireAuth {
-				locked[cat.ID] = true
-				continue
+			if cat.Visibility == home.VisibilityPublic {
+				kept = append(kept, cat)
 			}
-			kept = append(kept, cat)
 		}
-		if len(locked) == 0 {
-			return
+		if len(kept) != len(resp.Categories) {
+			// 只回**数量**，不回名单、也不回占位 —— "你藏了几个"同样是信息。
+			// 前端据此渲染一个不带名字的锁形占位，让主人自己知道这儿有东西。
+			resp.HiddenCategoryCount = len(resp.Categories) - len(kept)
+			resp.Categories = kept
+
+			allowed := make(map[string]bool, len(kept))
+			for _, c := range kept {
+				allowed[c.ID] = true
+			}
+			apps := make([]home.AppView, 0, len(resp.Apps))
+			for _, a := range resp.Apps {
+				if allowed[a.CategoryID] {
+					apps = append(apps, a)
+				}
+			}
+			resp.Apps = apps
 		}
 
-		resp.Categories = kept
+		// 访客拿不到内网地址。公网入口对外网访客本来就用不上，
+		// 给出去只是白送一份内网拓扑。
+		stripLAN(resp.Apps)
 
-		apps := make([]home.AppView, 0, len(resp.Apps))
-		for _, a := range resp.Apps {
-			if locked[a.CategoryID] {
-				continue
-			}
-			apps = append(apps, a)
-		}
-		resp.Apps = apps
 	})
 	res.OkWithData(resp, c)
 }
@@ -139,4 +185,14 @@ func proxySiteOptions() []SiteOption {
 		})
 	}
 	return out
+}
+
+// stripLAN 把应用的内网入口清掉（只作用于本次下发的视图，不动配置）。
+//
+// 为什么只在未登录时做：主人自己看的时候，内网地址是他要用的东西。
+// 而外网访客既连不上（不在同一个局域网），也不该知道 —— 那是内网拓扑。
+func stripLAN(apps []home.AppView) {
+	for i := range apps {
+		apps[i].Addresses.LAN = ""
+	}
 }

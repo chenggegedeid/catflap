@@ -55,5 +55,6 @@ func (r *HomeRuntime) HasStunApp(deviceID, serviceID uint) bool {
 var (
 	ErrNotFound    = errors.New("not found")
 	ErrBadCardSize = errors.New("卡片尺寸不合法")
+	ErrBadPassword = errors.New("口令不对")
 	ErrConflict    = errors.New("conflict")
 )

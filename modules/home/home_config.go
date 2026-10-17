@@ -185,3 +185,60 @@ func defaultCategories(now time.Time) []Category {
 		{ID: "entertainment", Name: "娱乐", Order: 3, CreatedAt: now, UpdatedAt: now},
 	}
 }
+
+// VisibilitySchemaV3 三级可见性的结构版本
+const VisibilitySchemaV3 = 3
+
+// migrateVisibility 老字段 requireAuth → 新的 visibility。
+//
+// requireAuth=true 就是现在的 login；没勾过的一律 public。
+// **不做反向猜测**：老配置里"没勾"到底是"忘了勾"还是"故意公开"无从得知，
+// 按公开处理 —— 升级后把人家本来能看的分组藏起来，比什么都难受。
+func migrateVisibility(cfg *Config) bool {
+	if cfg.SchemaVersion >= VisibilitySchemaV3 {
+		return false
+	}
+	changed := false
+	for i := range cfg.Categories {
+		c := &cfg.Categories[i]
+		// **顺序不能反**：先按老字段推导，再对已有值做归一化。
+		// 反过来的话 NormalizeVisibility("") 会先把它变成 public，
+		// requireAuth 那一段就永远走不到了 —— 老配置里勾过"需要登录"的分组
+		// 会在升级后变成公开。这是真会出事的顺序问题，不是洁癖。
+		if c.Visibility == "" {
+			if c.RequireAuth {
+				c.Visibility = VisibilityLogin
+			} else {
+				c.Visibility = VisibilityPublic
+			}
+			changed = true
+			continue
+		}
+		if v := NormalizeVisibility(c.Visibility); v != c.Visibility {
+			c.Visibility = v
+			changed = true
+		}
+	}
+	if cfg.SchemaVersion < VisibilitySchemaV3 {
+		cfg.SchemaVersion = VisibilitySchemaV3
+		changed = true
+	}
+	if changed {
+		cfg.UpdatedAt = time.Now()
+		logrus.Infof("[home] 分组可见性已迁移到三级模型（%d 个分组）", len(cfg.Categories))
+	}
+	return changed
+}
+
+// Migrate 跑一遍全部迁移。返回 true 表示改了东西，调用方要落盘。
+//
+// 为什么要一次性跑完而不是分两处：迁移之间可能有隐含顺序
+// （比如可见性迁移要读到已经排好序的应用）。分两处调，
+// 将来加第三条迁移的人很容易漏掉其中一处。
+func Migrate(cfg *Config) bool {
+	changed := migrateLayout(cfg)
+	if migrateVisibility(cfg) {
+		changed = true
+	}
+	return changed
+}

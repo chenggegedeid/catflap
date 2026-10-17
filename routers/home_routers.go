@@ -48,6 +48,12 @@ func HomeRoutersProtected(g *gin.RouterGroup) {
 	g.DELETE("home/search-history/clear", app.SearchHistoryClearView)
 
 	// 分类
+	// 用分组口令解锁（lock 分组：即使登录了也要再验一次）
+	g.POST("home/category/unlock",
+		middleware.BindJsonMiddleware[home_api.CategoryUnlockRequest],
+		app.CategoryUnlockView,
+	)
+
 	g.POST("home/category/add",
 		middleware.BindJsonMiddleware[home_api.CategoryAddRequest], app.CategoryAddView)
 	g.PUT("home/category/update",
