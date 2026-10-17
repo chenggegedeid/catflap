@@ -57,6 +57,14 @@ export function Background({ wallpaper }: { wallpaper?: Wallpaper }) {
         {/* 兜底渐变：任何模式下都垫在底下，图没出来时页面不会是黑的 */}
         <div className="default-wallpaper absolute inset-0" />
 
+        {/**
+         * 内置壁纸库：纯 CSS 渐变，不发请求、秒加载、4K 不糊。
+         * 盖在兜底渐变之上（找不到 key 时兜底仍在，页面不会黑）。
+         */}
+        {mode === 'preset' && userCss && (
+          <div className="absolute inset-0" style={{ background: userCss }} />
+        )}
+
         {mode === 'custom' && custom && (
           <img
             src={custom.startsWith('/') ? custom : `/${custom}`}

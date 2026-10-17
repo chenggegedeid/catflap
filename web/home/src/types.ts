@@ -4,7 +4,7 @@
 // 反过来也一样 —— 两边字段名对不上时不会报错，只会静默变成 undefined。
 
 export type NetworkPrefer = 'wanV4' | 'wanV6' | 'lan'
-export type WallpaperMode = 'default' | 'bing' | 'custom'
+export type WallpaperMode = 'default' | 'preset' | 'bing' | 'custom'
 export type WallpaperResolution = '1080' | 'uhd'
 export type AppType = 'stun' | 'static'
 

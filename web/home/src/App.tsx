@@ -24,7 +24,6 @@ import { ContextMenu, type MenuState } from './components/grid/ContextMenu'
 import { UnlockModal } from './components/grid/UnlockModal'
 import { AppFormModal } from './components/settings/AppFormModal'
 import { BlankContextMenu, type BlankMenuState } from './components/grid/BlankContextMenu'
-import { Section, useScrollSpy } from './components/grid/SectionedFeed'
 import { useWheelPaging } from './components/layout/useWheelPaging'
 import { HomeDnd, type DragInfo } from './components/dnd/HomeDnd'
 import { Dock, useDockDroppable } from './components/dock/Dock'
@@ -92,25 +91,8 @@ function HomePage() {
    * 手动点左栏时会临时把它设成点的那组（否则滚过去的动画期间高亮会一直跳），
    * 滚完由 scrollspy 接管。
    */
-  const [spyActive, setSpyActive] = useState('')
   const cats = visibleCategories(state.config)
   const catIds = cats.map((c) => c.id)
-  const { registerRef } = useScrollSpy(catIds, setSpyActive)
-
-  // 配置到位后，第一屏默认落在第一个分组
-  useEffect(() => {
-    if (catIds.length > 0 && !catIds.includes(spyActive)) setSpyActive(catIds[0])
-  }, [catIds, spyActive])
-
-  /** 点左栏：平滑滚到那一组 */
-  const scrollToCategory = useCallback((id: string) => {
-    const el = document.getElementById(`cat-${id}`)
-    if (!el) return
-    // 用 scrollIntoView 而不是自己算 scrollTop：它能正确处理
-    // 图片没加载完、字体替换导致的布局偏移
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setSpyActive(id)
-  }, [])
 
   /**
    * 滚轮翻分组。
@@ -127,12 +109,14 @@ function HomePage() {
   const [dragInfo, setDragInfo] = useState<DragInfo | null>(null)
 
   /**
-   * "当前在哪个分组"的唯一答案。
-   * stream 跟滚动走（spyActive），paged 跟点击走（state.activeCategory）。
-   * **翻页、内容渲染都必须用它** —— 之前翻页不生效就是因为这里
-   * 还在读 spyActive，而 paged 下没有滚动事件，它永远停在旧值。
+   * "当前在哪个分组"的唯一答案：点击态。
+   *
+   * **为什么没有"跟着滚动走"的模式了**：用户实测反馈，把所有分组堆在
+   * 一页里（我之前理解的"流式"）根本不是他要的 —— 他要的是**以组为界面**，
+   * 滚一下翻一组。那就只有一个真相：点击/翻页选中的那一组。
+   * scrollspy、scrollIntoView 那一整套都删了。
    */
-  const currentCatId = cfg?.pageMode === 'stream' ? spyActive : state.activeCategory
+  const currentCatId = state.activeCategory
 
   const pageByWheel = useCallback(
     (dir: 1 | -1) => {
@@ -154,15 +138,11 @@ function HomePage() {
       if (next === i) return
       const nextId = targets[next]
       setPageDir(dir)
-      // paged 下没有"滚动到位置"这回事，直接切（内容替换就是反馈）
-      if (cfg?.pageMode !== 'stream') {
-        setPageDir(dir)
-        setActiveCategory(nextId)
-        return
-      }
-      scrollToCategory(nextId)
+      // 内容替换就是反馈，不需要滚动
+      setPageDir(dir)
+      setActiveCategory(nextId)
     },
-    [catIds, currentCatId, scrollToCategory, cfg, setActiveCategory],
+    [catIds, currentCatId, cfg, setActiveCategory],
   )
 
   /**
@@ -190,15 +170,6 @@ function HomePage() {
     window.addEventListener('keydown', onPageKey)
     return () => window.removeEventListener('keydown', onPageKey)
   }, [onPageKey])
-
-  /**
-   * 当前分组那一节的 DOM。翻页判据要靠它 —— 见 useWheelPaging 的说明。
-   * Section 的 id 是 `cat-<分组id>`，和 scrollToCategory 用的一致。
-   */
-  const currentSection = useCallback(
-    () => (spyActive ? document.getElementById(`cat-${spyActive}`) : null),
-    [spyActive],
-  )
 
 
 
@@ -298,7 +269,7 @@ function HomePage() {
   // hover: none 表示触屏设备 —— 那里不要滚轮翻页（触屏直接滑就行）
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
   // 拖动中禁用翻页：拖拽本身就在用指针，滚轮这时翻页只会捣乱
-  useWheelPaging(!isTouch && catIds.length > 1 && !dragInfo, currentSection, pageByWheel, cfg?.pageMode !== 'stream')
+  useWheelPaging(!isTouch && catIds.length > 1 && !dragInfo, () => null, pageByWheel, true)
 
   return (
     /**
@@ -357,15 +328,15 @@ function HomePage() {
           <div className="sticky top-0 z-20 -mx-1 bg-gradient-to-b from-slate-900/10 to-transparent px-1 py-1 backdrop-blur-sm sm:top-6 sm:mx-0 sm:bg-none sm:px-0 sm:py-0 sm:pt-1 sm:backdrop-blur-none">
             <CategoryRail
               categories={visibleCategories(cfg)}
-              active={spyActive}
+              active={currentCatId}
               onSelect={(id) => {
                 const cat = visibleCategories(cfg).find((c) => c.id === id)
                 if (cat && cat.visibility === 'lock') {
                   setUnlocking(cat)
                   return
                 }
+                // 点击 = 直接切换内容（paged），即时反馈
                 setActiveCategory(id)
-                scrollToCategory(id)
               }}
               onAdd={() => setSettingsOpen(true)}
               canManage={!!cfg?.authed}
@@ -382,20 +353,11 @@ function HomePage() {
             {state.load === 'ready' && cfg && (
               <Feed
                 canManage={!!cfg.authed}
-                pageMode={cfg.pageMode === 'stream' ? 'stream' : 'paged'}
-                /**
-                 * **两种模式的高亮来源不同，这不是可以统一的细节：**
-                 *   paged  → state.activeCategory（点击即切换，内容替换就是反馈）
-                 *   stream → spyActive（跟着滚动走，点了只是滚动过去）
-                 * paged 如果也用 spyActive，点击后没有滚动事件、spyActive 不更新，
-                 * 内容区就永远停在第一组 —— 这就是"点击分组进不去"的真正原因。
-                 */
                 activeId={currentCatId}
                 pageDir={pageDir}
                 onOpenMenu={(app, x, y) => setMenu({ app, x, y })}
                 onAddApp={openAddApp}
                 onBlankContextMenu={(x, y) => setBlankMenu({ x, y })}
-                registerRef={registerRef}
               />
             )}
           </main>
@@ -489,24 +451,19 @@ function HomePage() {
  */
 function Feed({
   canManage,
-  pageMode,
   activeId,
   pageDir,
   onOpenMenu,
   onAddApp,
   onBlankContextMenu,
-  registerRef,
 }: {
   canManage: boolean
-  /** stream = 一条长流；paged = 一屏一组（卡片少的时候流式没有可滚的余地） */
-  pageMode: 'stream' | 'paged'
   activeId: string
   /** 翻页方向，决定滑动动画从哪边进来 */
   pageDir: 1 | -1
   onOpenMenu: (app: AppView, x: number, y: number) => void
   onAddApp: () => void
   onBlankContextMenu: (x: number, y: number) => void
-  registerRef: (id: string, el: HTMLElement | null) => void
 }) {
   const { state } = useHome()
   const cfg = state.config!
@@ -533,7 +490,7 @@ function Feed({
    * key 用 activeId：React 按 key 重建节点，动画每次都从头播；
    * 不换 key 的话同一组内翻页动画不会触发。
    */
-  if (pageMode === 'paged') {
+  {
     const cat = cats.find((c) => c.id === activeId) ?? cats[0]
     const apps = cat ? visibleApps(cfg, cat.id) : []
     return (
@@ -568,47 +525,5 @@ function Feed({
     )
   }
 
-  return (
-    /**
-     * 右键挂在整条流上（不只是网格）：分组之间的间距、流末尾的空白也算"空白处"。
-     * 网格自己的 onContextMenu 已去掉 —— 两层都接的话会弹两次菜单。
-     */
-    <div
-      className="min-h-[60vh] space-y-3 pb-12"
-      onContextMenu={
-        canManage
-          ? (e) => {
-              e.preventDefault()
-              onBlankContextMenu(e.clientX, e.clientY)
-            }
-          : undefined
-      }
-    >
-      {cats.map((cat) => {
-        const apps = visibleApps(cfg, cat.id)
-        /**
-         * 空分组**必须渲染标题和一个可见的空态**。
-         *
-         * 有一版这里直接 return 了不渲染 —— 结果点击分组滚动到那个
-         * 0 高度的空 div，视口毫无变化，用户以为"进不去"。
-         * 滚动定位需要落点，落点必须可见。这个教训记住了。
-         */
-        if (apps.length === 0) {
-          return (
-            <Section key={cat.id} id={cat.id} title={cat.name} registerRef={registerRef}>
-              <p className="rounded-xl border border-dashed border-white/20 px-3 py-4 text-center text-[11px] text-white/45">
-                这个分组还没有应用
-                {canManage ? '，右键这里可以新建' : ''}
-              </p>
-            </Section>
-          )
-        }
-        return (
-          <Section key={cat.id} id={cat.id} title={cat.name} registerRef={registerRef}>
-            <AppGrid apps={apps} prefer={cfg.networkPrefer} onOpenMenu={canManage ? onOpenMenu : undefined} />
-          </Section>
-        )
-      })}
-    </div>
-  )
+
 }
