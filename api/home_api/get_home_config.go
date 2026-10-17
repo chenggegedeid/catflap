@@ -39,6 +39,14 @@ type HomeConfigViewResponse struct {
 	 */
 	HiddenCategoryCount int `json:"hiddenCategoryCount,omitempty"`
 
+	// PageMode 分类切换方式：stream（一条长流）或 paged（一屏一组）。
+	// 空串按 stream 处理 —— 老配置没有这个字段。
+	PageMode string `json:"pageMode,omitempty"`
+
+	// Dock 底部托盘的应用（按配置顺序，已过滤掉不存在的 id）。
+	// 访客也拿得到 —— 托盘里放什么本来就该跟着权限走，见下。
+	Dock []home.AppView `json:"dock"`
+
 	// Authed 这次请求带没带有效登录态。前端据此决定右上角显示「登录」还是
 	// 「设置 / 后台 / 退出」。
 	//
@@ -72,9 +80,13 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 			Categories:            append([]home.Category{}, cfg.Categories...),
 			Apps:                  home.HydrateApps(cfg.Apps),
 			Authed:                authed,
+			PageMode:              cfg.PageMode,
 		}
 
-		// 站点列表只给登录的人（见 Sites 字段的注释）
+		// 托盘跟着"这次能看到的应用"走：访客的托盘里不该出现私密分组的应用。
+		// 做法是拿过滤后的 resp.Apps 去匹配 DockIDs —— 不用单独再算一遍权限。
+		resp.Dock = hydrateDock(cfg.DockIDs, resp.Apps)
+
 		if authed {
 			resp.Sites = proxySiteOptions()
 
@@ -195,4 +207,30 @@ func stripLAN(apps []home.AppView) {
 	for i := range apps {
 		apps[i].Addresses.LAN = ""
 	}
+}
+
+/**
+ * hydrateDock 把托盘 id 列表展开成应用视图。
+ *
+ * 关键点：**只从 visible 里取**。visible 是这次请求过滤后的应用列表
+ * （访客看不到私密分组的），所以托盘的可见性自动和分组权限一致，
+ * 不需要在这里重算一遍 —— 权限判断只有一处，就不会有第二种口径。
+ *
+ * 应用被删了、或者没权限看，就直接跳过（前端拿到的托盘是干净的）。
+ */
+func hydrateDock(ids []string, visible []home.AppView) []home.AppView {
+	if len(ids) == 0 {
+		return []home.AppView{}
+	}
+	byID := make(map[string]home.AppView, len(visible))
+	for _, a := range visible {
+		byID[a.ID] = a
+	}
+	out := make([]home.AppView, 0, len(ids))
+	for _, id := range ids {
+		if a, ok := byID[id]; ok {
+			out = append(out, a)
+		}
+	}
+	return out
 }

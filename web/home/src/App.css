@@ -168,3 +168,49 @@
 .app-slide-out-to-right { animation: app-slide-out-to-right 360ms cubic-bezier(0.4, 0, 0.2, 1) both; }
 .app-slide-out-to-top { animation: app-slide-out-to-top 360ms cubic-bezier(0.4, 0, 0.2, 1) both; }
 .app-slide-out-to-bottom { animation: app-slide-out-to-bottom 360ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+/*
+ * 翻页模式的滑动动画。
+ *
+ * 为什么要按方向分开：往下翻时新内容该从下方滑入（符合"页面往下走"的直觉），
+ * 往上翻则相反。用一个动画会让一半的方向看起来是"倒着来的"。
+ *
+ * prefers-reduced-motion 下直接关掉动画 —— 有人会因为动画头晕，
+ * 那不是可选项，是无障碍要求。
+ */
+@keyframes slide-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page-next {
+  animation: slide-in-up 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-page-prev {
+  animation: slide-in-down 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-next,
+  .animate-page-prev {
+    animation: none;
+  }
+}

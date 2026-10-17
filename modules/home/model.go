@@ -36,11 +36,32 @@ type Config struct {
 	// 搜索
 	DefaultSearchEngineID string         `json:"defaultSearchEngineId"`
 	SearchEngines         []SearchEngine `json:"searchEngines"`
-	SearchHistory         []string       `json:"searchHistory"` // 最多 24 条
+	/**
+	 * PageMode 分类切换方式。
+	 *
+	 *   stream 一条长流，所有分组连着排，滚到哪高亮哪（默认）
+	 *   paged  一屏一组，滚轮/按钮翻到相邻组，带滑动动画
+	 *
+	 * 为什么两种都要：分组少、卡片少的时候，一屏就放完了 —— 那时"流式滚动"
+	 * 没有可滚的余地，滚轮毫无反应（这就是"翻页不行"的根因）。
+	 * paged 模式下每次只显示一组，翻页就真的在翻。
+	 */
+	PageMode      string   `json:"pageMode,omitempty"`
+	SearchHistory []string `json:"searchHistory"` // 最多 24 条
 
 	// 应用 & 分类
 	Categories []Category `json:"categories"`
-	Apps       []App      `json:"apps"`
+
+	/**
+	 * DockIDs 底部托盘里固定的应用（存 id，不存副本）。
+	 *
+	 * **为什么存 id 而不是整个应用**：Dock 只是"快捷方式"，条目本身还是
+	 * Apps 里那一条。存副本的话，改了名字/地址之后 Dock 里还是旧的，
+	 * 删了应用 Dock 里还会留一个点不开的幽灵。
+	 * 读的时候按 id 去 Apps 里找，找不到就自动过滤（见 HydrateDock）。
+	 */
+	DockIDs []string `json:"dockIds,omitempty"`
+	Apps    []App    `json:"apps"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

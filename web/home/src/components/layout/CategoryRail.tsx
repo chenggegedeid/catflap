@@ -9,9 +9,32 @@
  * 键盘 ↑↓ 可切换（整栏是一个 listbox）。
  */
 
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Lock, Plus } from 'lucide-react'
 import type { Category, Visibility } from '../../types'
+import { DragList, SortableListItem } from '../grid/DragGrid'
+import { useDroppable } from '@dnd-kit/core'
+
+/**
+ * 分组按钮作为"放入目标"。
+ *
+ * 拖一张卡到某个分组按钮上 = 把应用移到那个分组。
+ *
+ * 和排序落点的区分：over.id 会是分组 id，而 kind 是 'app' ——
+ * HomeDnd 里就是靠这两条判断"跨类型 = 移动分组"而不是"排序"。
+ * 卡片拖到自己所在的分组按钮上 → 不做任何事（id 相同会先被拦）。
+ */
+export function CategoryDropTarget({ id, children }: { id: string; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id, data: { kind: 'category', drop: true } })
+  return (
+    <div
+      ref={setNodeRef}
+      className={`rounded-xl transition ${isOver ? 'ring-2 ring-emerald-300' : ''}`}
+    >
+      {children}
+    </div>
+  )
+}
 
 function visibilityOf(c: Category): Visibility {
   if (c.visibility) return c.visibility
@@ -31,17 +54,21 @@ export function CategoryRail({
   onAdd,
   canManage,
   hiddenCount,
+  onReorder,
 }: {
   categories: Category[]
   active: string
   onSelect: (id: string) => void
   onAdd?: () => void
   canManage: boolean
+  /** 有值才可拖动排序（只给登录的人） */
+  onReorder?: (ids: string[]) => void
   /** 被后端藏起来的分组数量：只有数量，没有名单 */
   hiddenCount?: number
 }) {
   const railRef = useRef<HTMLDivElement>(null)
 
+  const catIdList = categories.map((c) => c.id)
   const entries: RailEntry[] = categories.map((c) => ({
     id: c.id,
     name: c.name,
@@ -59,7 +86,7 @@ export function CategoryRail({
     btns?.[next]?.focus()
   }
 
-  return (
+  const rail = (
     <div
       ref={railRef}
       role="listbox"
@@ -68,10 +95,10 @@ export function CategoryRail({
       onKeyDown={onKeyDown}
       className="flex shrink-0 flex-row gap-2 overflow-x-auto pb-1 sm:flex-col sm:overflow-visible sm:pb-0"
     >
-      {entries.map((e) => {
+      {entries.map((e, idx) => {
         const selected = e.id === active
         const locked = e.vis === 'login' || e.vis === 'lock'
-        return (
+        const btn = (
           <button
             key={e.id}
             data-cat={e.id}
@@ -80,7 +107,7 @@ export function CategoryRail({
             aria-selected={selected}
             title={e.name}
             onClick={() => onSelect(e.id)}
-            className={`group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[11px] font-semibold leading-tight transition ${
+            className={`group relative flex h-11 w-11 shrink-0 touch-none items-center justify-center rounded-xl text-[11px] font-semibold leading-tight transition ${
               selected ? 'bg-white/95 text-slate-800 shadow-md' : 'bg-white/20 text-white/85 hover:bg-white/35'
             }`}
           >
@@ -96,6 +123,13 @@ export function CategoryRail({
               {locked && <span className="ml-1 text-white/60">（需解锁）</span>}
             </span>
           </button>
+        )
+        // 只在可管理时包成"可拖 + 可放入"：访客拖着没地方存，徒增困惑
+        if (!onReorder) return <div key={e.id}>{btn}</div>
+        return (
+          <SortableListItem key={e.id} id={e.id} index={idx} ids={catIdList}>
+            <CategoryDropTarget id={e.id}>{btn}</CategoryDropTarget>
+          </SortableListItem>
         )
       })}
 
@@ -122,6 +156,9 @@ export function CategoryRail({
       ) : null}
     </div>
   )
+
+  if (!onReorder) return rail
+  return <DragList ids={catIdList}>{rail}</DragList>
 }
 
 /** 名字取前两个字做图标占位（图标是可选的，很多分组没图标） */

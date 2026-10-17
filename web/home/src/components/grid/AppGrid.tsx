@@ -36,13 +36,10 @@ export function AppGrid({
   apps,
   prefer = 'wanV4',
   onOpenMenu,
-  onReorder,
 }: {
   apps: AppView[]
   prefer?: NetworkPrefer
   onOpenMenu?: (app: AppView, x: number, y: number) => void
-  /** 有值才可拖拽 —— 只给登录的人，访客拖了也没地方存 */
-  onReorder?: (ids: string[]) => void
 }) {
   const cols = useColumns()
 
@@ -63,6 +60,7 @@ export function AppGrid({
   )
   const sizeById = new Map(placed.map((p) => [p.id, { w: p.w, h: p.h }]))
 
+  const idList = apps.map((a) => a.id)
   const grid = (
     <div
       // gap-2 而不是 gap-3：8 列时列间距要乘 7 遍，gap-3 加起来就吃掉半张卡片
@@ -83,7 +81,7 @@ export function AppGrid({
         gridAutoFlow: 'row',
       }}
     >
-      {apps.map((app) => {
+      {apps.map((app, idx) => {
         const sz = sizeById.get(app.id) ?? { w: 1, h: 1 }
         const span = {
           gridColumn: `span ${Math.min(sz.w, cols)}`,
@@ -93,16 +91,8 @@ export function AppGrid({
           <AppCard app={app} prefer={prefer} placement={{ col: 0, row: 0, w: sz.w, h: sz.h }} onOpenMenu={onOpenMenu} />
         )
 
-        // 不可拖时少一层 DOM：访客不该看到"可拖动"的暗示
-        if (!onReorder) {
-          return (
-            <div key={app.id} style={span}>
-              {card}
-            </div>
-          )
-        }
         return (
-          <SortableCard key={app.id} id={app.id}>
+          <SortableCard key={app.id} id={app.id} index={idx} ids={idList}>
             <div style={span}>{card}</div>
           </SortableCard>
         )
@@ -110,10 +100,6 @@ export function AppGrid({
     </div>
   )
 
-  if (!onReorder) return grid
-  return (
-    <DragGrid ids={apps.map((a) => a.id)} onReorder={onReorder}>
-      {grid}
-    </DragGrid>
-  )
+  // 总是包 SortableContext：能不能拖由外层 HomeDnd 决定（访客没有 DndContext）
+  return <DragGrid ids={idList}>{grid}</DragGrid>
 }

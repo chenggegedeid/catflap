@@ -118,8 +118,9 @@ export function AppCard({
         )}
 
         <span
+          // 手机上列窄，图标要跟着收小 —— 否则 4 列时图标顶到格子边上
           className={`aspect-square w-full overflow-hidden rounded-[22%] shadow-sm ring-1 ring-black/5 ${
-            big ? 'max-w-[7rem]' : 'max-w-[4.5rem]'
+            big ? 'max-w-[7rem]' : 'max-w-[3.25rem] sm:max-w-[4.5rem]'
           }`}
         >
           <AppIcon name={app.name} icon={app.icon} />

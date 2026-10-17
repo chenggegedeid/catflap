@@ -3,7 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      viewport-fit=cover：iPhone 刘海屏下让内容铺到安全区后面，
+      再用 env(safe-area-inset-*) 把关键内容推回来（见 index.css）。
+      不加的话刘海附近会被裁掉一条。
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#eaf0fa" />
+    <!-- iOS 加到主屏后按应用打开，不要带浏览器地址栏 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Catflap Home</title>
   </head>
   <body>
