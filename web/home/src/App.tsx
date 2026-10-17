@@ -317,13 +317,11 @@ function HomePage() {
         </div>
 
         {/**
-         * 左栏固定在视口左侧，内容区是一条滚动的分组流。
+         * 一屏一组：内容区只渲染当前分组，左栏点击/滚轮翻页切换。
          *
-         * 以前是"点分组 → 只显示那一组"，现在改成所有分组连着排、滚到哪
-         * 左栏就高亮哪 —— 这是极光那种上下翻的手感。改动原因：
-         * 一次只显示一组时，短分组下面全是空白，而且跨组找东西要点两次。
+         * 手机上左栏变成**横向一排贴在顶部**（纵向排会吃掉太多宽度，
+         * 卡片就挤得没法点了）；宽屏才是左侧竖栏。
          */}
-        {/* 手机上是纵向（左栏变成横向一排在上面），≥sm 才左右分栏 */}
         <div className="mt-5 flex flex-1 flex-col gap-3 sm:mt-8 sm:flex-row sm:gap-4">
           <div className="sticky top-0 z-20 -mx-1 bg-gradient-to-b from-slate-900/10 to-transparent px-1 py-1 backdrop-blur-sm sm:top-6 sm:mx-0 sm:bg-none sm:px-0 sm:py-0 sm:pt-1 sm:backdrop-blur-none">
             <CategoryRail
