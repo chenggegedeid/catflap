@@ -22,6 +22,11 @@ func HomeRoutersProtected(g *gin.RouterGroup) {
 	var app = home_api.HomeApi{}
 
 	// 主页装饰
+	// "我的壁纸"：列出上传过的、删除
+	g.GET("home/wallpaper/list", app.WallpaperListView)
+	g.DELETE("home/wallpaper/file",
+		middleware.BindJsonMiddleware[home_api.WallpaperDeleteRequest], app.WallpaperDeleteView)
+
 	g.PUT("home/wallpaper",
 		middleware.BindJsonMiddleware[home_api.WallpaperUpdateRequest], app.WallpaperUpdateView)
 	g.POST("home/wallpaper/upload", app.WallpaperUploadView)

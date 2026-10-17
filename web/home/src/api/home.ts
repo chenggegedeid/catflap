@@ -84,6 +84,21 @@ export const uploadWallpaper = (file: File) => apiUpload<{ path: string }>('/api
 export const updateNetworkPrefer = (networkPrefer: NetworkPrefer) =>
   apiSend<unknown>('PUT', '/api/home/network', { networkPrefer })
 
+/* ============ 我的壁纸 ============ */
+
+export interface WallpaperFile {
+  path: string
+  url: string
+  size: number
+  modTime: string
+}
+
+/** 列出上传过的壁纸（新传的在前） */
+export const listWallpapers = (): Promise<WallpaperFile[]> => apiGet<WallpaperFile[]>('/api/home/wallpaper/list')
+/** 删掉一张上传的壁纸。删的正好是正在用的那张时，后端会回退到内置壁纸库 */
+export const deleteWallpaper = (path: string) =>
+  apiSend<unknown>('DELETE', '/api/home/wallpaper/file', { path })
+
 /* ============ 图标 ============ */
 
 export const uploadIcon = (file: File) => apiUpload<{ path: string }>('/api/home/icon/upload', file)
