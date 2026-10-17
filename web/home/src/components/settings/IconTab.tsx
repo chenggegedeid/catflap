@@ -17,6 +17,7 @@ import { Upload } from 'lucide-react'
 import { fetchIconFromURL, updateApp, uploadIcon } from '../../api/home'
 import { useHome, visibleApps } from '../../state/HomeProvider'
 import { AppIcon } from '../card/AppIcon'
+import { IconPicker } from './IconPicker'
 import type { AppView } from '../../types'
 
 /** 抓 favicon 的候选地址：公网 v4 → 内网 → v6（应用里填了的才算） */
@@ -25,9 +26,18 @@ const fetchSourcesOf = (app: AppView): string[] =>
 
 export function IconTab() {
   const { state, mutate, notify } = useHome()
-  const apps = visibleApps(state.config, '')
+  /**
+   * 图标管理要的是**全部**应用，用 '*'。
+   *
+   * 这里踩过：之前传空串，而 visibleApps 的语义早就改了
+   * （空串 = 空数组，因为首页不再有"全部"这一页），
+   * 结果图标管理一片空白 —— 一个静默的回归，编译器不会报错。
+   */
+  const apps = visibleApps(state.config, '*')
   const [busyId, setBusyId] = useState('')
   const [url, setUrl] = useState('')
+  // 哪个应用正在展开图标库
+  const [libFor, setLibFor] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadTarget = useRef<string>('')
 
@@ -148,8 +158,28 @@ export function IconTab() {
               >
                 {busyId === a.id ? '抓取中…' : '抓取图标'}
               </button>
+              <button
+                type="button"
+                onClick={() => setLibFor(libFor === a.id ? '' : a.id)}
+                className={`flex-1 rounded-lg py-1 text-[11px] font-semibold transition ${
+                  libFor === a.id ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                图标库
+              </button>
             </div>
 
+            {libFor === a.id && (
+              <div className="mt-1.5 rounded-lg border border-slate-200 p-1.5">
+                <IconPicker
+                  value={a.icon ?? ''}
+                  onPick={(v) => {
+                    void setIcon(a, v)
+                    setLibFor('')
+                  }}
+                />
+              </div>
+            )}
           </li>
         ))}
       </ul>

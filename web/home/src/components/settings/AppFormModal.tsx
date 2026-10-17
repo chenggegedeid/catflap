@@ -15,6 +15,7 @@
 import { useRef, useState } from 'react'
 import { Check, Upload, X } from 'lucide-react'
 import { addApp, fetchIconFromURL, updateApp, uploadIcon } from '../../api/home'
+import { IconPicker } from './IconPicker'
 import { DEFAULT_PRESETS } from '../../lib/icons'
 import { AppIcon } from '../card/AppIcon'
 import type { AppView, Category } from '../../types'
@@ -43,6 +44,7 @@ export function AppFormModal({
 
   const [busy, setBusy] = useState(false)
   const [fetchUrl, setFetchUrl] = useState('')
+  const [libOpen, setLibOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const submit = async () => {
@@ -215,6 +217,15 @@ export function AppFormModal({
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
+                  onClick={() => setLibOpen((v) => !v)}
+                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                    libOpen ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  图标库
+                </button>
+                <button
+                  type="button"
                   onClick={() => fileRef.current?.click()}
                   disabled={busy}
                   className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
@@ -260,9 +271,15 @@ export function AppFormModal({
               </div>
             )}
 
+            {libOpen && (
+              <div className="mt-2 rounded-xl border border-slate-200 p-2">
+                <IconPicker value={icon} onPick={setIcon} />
+              </div>
+            )}
+
             <p className="mt-1.5 text-[11px] text-slate-400">
               {canAutoFetch
-                ? '会从上面填的地址抓取图标'
+                ? '可以从图标库挑，或用上面的地址抓取'
                 : '留空就用名字首字当图标，不会白板。'}
             </p>
           </div>

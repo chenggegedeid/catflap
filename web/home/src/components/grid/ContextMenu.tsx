@@ -52,6 +52,21 @@ export function ContextMenu({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: menu.x, top: menu.y })
+  /**
+   * 菜单刚弹出时**先不接受点击**。
+   *
+   * 手机上长按会触发 contextmenu，浏览器在手指抬起时还会补一个 click，
+   * 而菜单是**正好在手指位置**弹出的（top = 手指 Y），那个 click 就直接
+   * 落进菜单第一项 —— 长按一下图标就被打开了/被删了，纯属误触。
+   * 桌面端也有类似情况：右键后手抖点一下。
+   *
+   * 所以弹出后先屏蔽一小会儿，等手指抬完了再放行。
+   */
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    const t = window.setTimeout(() => setArmed(true), 320)
+    return () => window.clearTimeout(t)
+  }, [])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -107,7 +122,9 @@ export function ContextMenu({
       role="menu"
       aria-label={`应用「${menu.app.name}」的操作`}
       style={{ left: pos.left, top: pos.top }}
-      className="fixed z-50 w-64 overflow-hidden rounded-xl bg-slate-800/95 py-1.5 text-sm text-slate-100 shadow-2xl ring-1 ring-white/10 backdrop-blur focus:outline-none"
+      className={`fixed z-50 w-64 overflow-hidden rounded-xl bg-slate-800/95 py-1.5 text-sm text-slate-100 shadow-2xl ring-1 ring-white/10 backdrop-blur transition-opacity focus:outline-none ${
+        armed ? 'opacity-100' : 'pointer-events-none opacity-80'
+      }`}
     >
       {hasAny && defURL ? (
         <>

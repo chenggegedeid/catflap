@@ -9,11 +9,36 @@
  */
 
 import { useState } from 'react'
+import * as Lucide from 'lucide-react'
 import { fallbackBg, iconFallback, iconSrc } from '../../lib/icons'
+import { findLibIcon } from '../../lib/iconLibrary'
 
 export function AppIcon({ name, icon, color }: { name: string; icon: string; color?: string }) {
   const [broken, setBroken] = useState(false)
   const src = icon ? iconSrc(icon) : ''
+
+  /**
+   * 内置图标库（`lib:<名字>`）直接渲染，不发网络请求。
+   *
+   * 放在最前面判断：这类图标永远可用，不该走"加载失败 → 退化"那条路。
+   * 用 lucide 的命名空间动态取（图标名是数据，不是写死的组件）。
+   */
+  const lib = findLibIcon(icon)
+  if (lib) {
+    const Icon = (Lucide as unknown as Record<string, React.ElementType>)[lib.icon]
+    if (Icon) {
+      return (
+        <span
+          className="grid h-full w-full place-items-center text-white"
+          style={{ background: `linear-gradient(135deg, ${lib.from}, ${lib.to})` }}
+          aria-hidden
+        >
+          <Icon className="h-[55%] w-[55%]" strokeWidth={2} />
+        </span>
+      )
+    }
+    // 图标名写错了（将来删改图标库时可能遇到）→ 落回下面的退化逻辑
+  }
 
   if (!src || broken) {
     const { initial, hue } = iconFallback(name)

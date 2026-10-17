@@ -124,7 +124,11 @@ export function HomeDnd({
       if (!over) return
 
       const kind = (active.data.current?.kind as DragKind | undefined) ?? 'app'
-      const activeId = String(active.id)
+      /**
+       * 托盘项的拖拽 id 带 `dock:` 前缀（避免和网格里同名应用撞 id），
+       * 真实应用 id 在 data.appId 里。跨类型落点要用真实 id。
+       */
+      const activeId = (active.data.current?.appId as string | undefined) ?? String(active.id)
       const overKind = (over.data.current?.kind as DragKind | undefined) ?? null
 
       // ① 放进 Dock：只对应用有意义（分组不该进 Dock）
