@@ -1,8 +1,6 @@
 package home_api
 
 import (
-	"sort"
-
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/home"
 	"github.com/chenggegedeid/catflap/utils/res"
@@ -31,49 +29,31 @@ func (HomeApi) AppReorderView(c *gin.Context) {
 	}
 
 	err := home.Runtime.WithLock(func(cfg *home.Config) error {
-		index := make(map[string]int, len(cr.IDs))
-		for i, id := range cr.IDs {
-			index[id] = i
-		}
-
-		// 分成「点名的」和「没点名的」两堆，各自按新顺序 / 原顺序排好，再拼起来。
-		// 拼完一把重新编号 1..N —— 编号连续，前端和迁移逻辑都不用处理空洞。
-		listed := make([]home.App, 0, len(cr.IDs))
-		rest := make([]home.App, 0)
-		for _, a := range cfg.Apps {
-			if _, ok := index[a.ID]; ok {
-				listed = append(listed, a)
-			} else {
-				rest = append(rest, a)
-			}
-		}
-		sort.SliceStable(listed, func(i, j int) bool { return index[listed[i].ID] < index[listed[j].ID] })
-		sort.SliceStable(rest, func(i, j int) bool { return rest[i].Order < rest[j].Order })
-
-		out := append(listed, rest...)
-		for i := range out {
-			out[i].Order = i + 1
-		}
-		cfg.Apps = out
-
-		// 旧契约兼容：旧版导航页还读这两个字段
-		switch cr.Mode {
-		case "paged":
-			for i := range cfg.Apps {
-				cfg.Apps[i].LegacyPagedOrder = cfg.Apps[i].Order
-			}
-		case "scroll":
-			pos := 0
-			for i := range cfg.Apps {
-				if cfg.Apps[i].CategoryID != cr.CategoryID {
-					continue
-				}
-				pos++
-				cfg.Apps[i].LegacyScrollOrder = pos
-			}
-		}
+		cfg.Apps = home.ReorderWithinGroups(cfg.Apps, cr.IDs)
 		return nil
 	})
+
+	// 旧契约兼容：旧版导航页还读这两个字段
+	if err == nil && (cr.Mode == "paged" || cr.Mode == "scroll") {
+		_ = home.Runtime.WithLock(func(cfg *home.Config) error {
+			switch cr.Mode {
+			case "paged":
+				for i := range cfg.Apps {
+					cfg.Apps[i].LegacyPagedOrder = cfg.Apps[i].Order
+				}
+			case "scroll":
+				pos := 0
+				for i := range cfg.Apps {
+					if cfg.Apps[i].CategoryID != cr.CategoryID {
+						continue
+					}
+					pos++
+					cfg.Apps[i].LegacyScrollOrder = pos
+				}
+			}
+			return nil
+		})
+	}
 	if err != nil {
 		res.FailWithMsg("保存配置失败", c)
 		return

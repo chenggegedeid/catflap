@@ -71,6 +71,9 @@ export function AppCard({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onContextMenu={(e) => {
+        // 必须挡住冒泡：网格容器上也接了右键（空白处 → 新建），
+        // 不挡的话点卡片会同时弹出"卡片菜单"和"新建菜单"两层
+        e.stopPropagation()
         if (!onOpenMenu) return
         e.preventDefault()
         onOpenMenu(app, e.clientX, e.clientY)

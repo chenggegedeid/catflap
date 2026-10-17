@@ -58,7 +58,7 @@ export function TopRightActions({
             type="button"
             onClick={onOpenSettings}
             title="导航页设置：分组、图标、壁纸"
-            className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40"
+            className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
           >
             <Settings className="h-3.5 w-3.5" />
             设置
@@ -66,7 +66,7 @@ export function TopRightActions({
           <a
             href="/catflap/"
             title="反代 / 穿透 / 审计等"
-            className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40"
+            className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
           >
             <LayoutDashboard className="h-3.5 w-3.5" />
             管理后台
@@ -74,7 +74,7 @@ export function TopRightActions({
           <button
             type="button"
             onClick={onLogout}
-            className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40"
+            className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
           >
             <LogOut className="h-3.5 w-3.5" />
             退出
@@ -84,7 +84,7 @@ export function TopRightActions({
         <button
           type="button"
           onClick={onLogin}
-          className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40"
+          className="flex items-center gap-1.5 rounded-xl bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
         >
           <LogIn className="h-3.5 w-3.5" />
           登录
