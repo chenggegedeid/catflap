@@ -60,10 +60,14 @@ func Run(webFS fs.FS) {
 	}
 	logrus.Infof("已挂载 %d 个组件的接口：%v", len(mounted), mounted)
 
-	// 用户上传的图标静态目录
-	r.Static("/data/icon", "data/icon")
-	// 用户上传的自定义壁纸
-	r.Static("/data/wallpaper", "data/wallpaper")
+	/**
+	 * 这里**曾经**挂着两个静态目录（/data/icon、/data/wallpaper），是给导航页用的 ——
+	 * 访客不登录也要能看到图标。
+	 *
+	 * 导航页整块删掉之后，后台前端根本不引用这两个路径（grep 过），
+	 * 留着就是**把用户上传的文件对匿名访客开放**，没有任何收益。
+	 * 将来要显示请走接口并鉴权，别再直接 Static。
+	 */
 
 	// 服务索引显式入口：/go/{服务名}/... → 307 到该服务当前的洞
 	PortalRouters(r)
