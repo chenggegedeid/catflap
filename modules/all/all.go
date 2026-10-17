@@ -17,6 +17,7 @@ package all
 import (
 	_ "github.com/chenggegedeid/catflap/modules/audit"
 	_ "github.com/chenggegedeid/catflap/modules/auth"
+	_ "github.com/chenggegedeid/catflap/modules/backup"
 	_ "github.com/chenggegedeid/catflap/modules/cert"
 	_ "github.com/chenggegedeid/catflap/modules/ddns"
 	_ "github.com/chenggegedeid/catflap/modules/home"
