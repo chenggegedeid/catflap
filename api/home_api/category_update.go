@@ -44,9 +44,19 @@ func (HomeApi) CategoryUpdateView(c *gin.Context) {
 		res.FailWithMsg("id 不能为空", c)
 		return
 	}
-	// 只改开关时可以不带 name；但要改名时不能给个空白名字
-	if cr.RequireAuth == nil && strings.TrimSpace(cr.Name) == "" {
-		res.FailWithMsg("name 不能为空", c)
+	/**
+	 * 至少要有一样东西要改：改名、改可见性、或设口令。
+	 *
+	 * 只改可见性时不必带 name —— 逼人把名字重发一遍，
+	 * 既啰嗦又可能因为顺手一改把名字也改了。
+	 */
+	hasWork :=
+		strings.TrimSpace(cr.Name) != "" ||
+			cr.Visibility != nil ||
+			cr.RequireAuth != nil ||
+			strings.TrimSpace(cr.Password) != ""
+	if !hasWork {
+		res.FailWithMsg("没有要修改的内容", c)
 		return
 	}
 
