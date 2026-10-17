@@ -9,7 +9,7 @@
  * 键盘 ↑↓ 可切换（整栏是一个 listbox）。
  */
 
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Lock, Plus } from 'lucide-react'
 import type { Category, Visibility } from '../../types'
 import { DragList, SortableListItem } from '../grid/DragGrid'
@@ -71,6 +71,20 @@ export function CategoryRail({
   hiddenCount?: number
 }) {
   const railRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * 选中的分组**自动滚进可视区**。
+   *
+   * 分组多的时候横向一排放不下，用滚轮/滑动翻页选中的分组可能在屏幕外 ——
+   * 用户切了分组却看不见高亮在哪，很困惑。
+   * 只在横向排布（手机）时需要；桌面竖栏本来就全可见（scrollIntoView 也不会有害）。
+   */
+  useEffect(() => {
+    const el = railRef.current?.querySelector<HTMLElement>(`button[data-cat="${CSS.escape(active)}"]`)
+    if (!el) return
+    // block:'nearest' —— 不要连带把整个页面上下滚一下
+    el.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
+  }, [active])
 
   const catIdList = categories.map((c) => c.id)
   const entries: RailEntry[] = categories.map((c) => ({

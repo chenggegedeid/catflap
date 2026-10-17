@@ -25,6 +25,7 @@ import { UnlockModal } from './components/grid/UnlockModal'
 import { AppFormModal } from './components/settings/AppFormModal'
 import { BlankContextMenu, type BlankMenuState } from './components/grid/BlankContextMenu'
 import { useWheelPaging } from './components/layout/useWheelPaging'
+import { useSwipePaging } from './components/layout/useSwipePaging'
 import { HomeDnd, type DragInfo } from './components/dnd/HomeDnd'
 import { Dock, useDockDroppable } from './components/dock/Dock'
 import { SearchBar } from './components/search/SearchBar'
@@ -270,6 +271,11 @@ function HomePage() {
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
   // 拖动中禁用翻页：拖拽本身就在用指针，滚轮这时翻页只会捣乱
   useWheelPaging(!isTouch && catIds.length > 1 && !dragInfo, () => null, pageByWheel, true)
+  /**
+   * 触屏用滑动翻页 —— 手机上没有滚轮，这是唯一的翻页手势。
+   * 只在触摸设备启用（isTouch 用 hover:none 判断）。
+   */
+  useSwipePaging(isTouch && catIds.length > 1, !!dragInfo, pageByWheel)
 
   return (
     /**
