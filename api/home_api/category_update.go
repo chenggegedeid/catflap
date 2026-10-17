@@ -36,6 +36,9 @@ type CategoryUpdateRequest struct {
 	 * 从 lock 改成别的可见性时，哈希会被一并清掉 —— 不留没用的凭据在配置里。
 	 */
 	Password string `json:"password,omitempty"`
+
+	// Icon 分组图标。可以是上传/抓取的路径，也可以是内置图标库的 `lib:<名字>`
+	Icon *string `json:"icon,omitempty"`
 }
 
 func (HomeApi) CategoryUpdateView(c *gin.Context) {
@@ -50,10 +53,18 @@ func (HomeApi) CategoryUpdateView(c *gin.Context) {
 	 * 只改可见性时不必带 name —— 逼人把名字重发一遍，
 	 * 既啰嗦又可能因为顺手一改把名字也改了。
 	 */
+	/**
+	 * 每加一个可改字段，都要同步到这里。
+	 *
+	 * 之前加了 Icon 忘了加进这行 —— 于是"只改图标"的请求被判成"没有要修改的内容"，
+	 * 界面上就是点图标没反应。这类漏同步不会有编译错误，只能靠测试/实测发现。
+	 * Icon 用指针判 nil 而不是判空串：**传空串是要把图标清掉**，那是有效的修改。
+	 */
 	hasWork :=
 		strings.TrimSpace(cr.Name) != "" ||
 			cr.Visibility != nil ||
 			cr.RequireAuth != nil ||
+			cr.Icon != nil ||
 			strings.TrimSpace(cr.Password) != ""
 	if !hasWork {
 		res.FailWithMsg("没有要修改的内容", c)
@@ -83,6 +94,10 @@ func (HomeApi) CategoryUpdateView(c *gin.Context) {
 				cfg.Categories[i].Visibility = vis
 				// 老字段跟着走，让旧版前端读到的状态和新字段一致
 				cfg.Categories[i].RequireAuth = vis != home.VisibilityPublic
+
+				if cr.Icon != nil {
+					cfg.Categories[i].Icon = strings.TrimSpace(*cr.Icon)
+				}
 
 				if pw := strings.TrimSpace(cr.Password); pw != "" {
 					hash, err := pwd.HashPassword(pw)

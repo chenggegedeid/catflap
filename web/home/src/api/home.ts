@@ -64,7 +64,10 @@ export const moveApp = (id: string, categoryId: string) =>
 
 export const addCategory = (name: string, visibility: Visibility = 'public') =>
   apiSend<Category>('POST', '/api/home/category/add', { name, visibility })
-export const updateCategory = (id: string, patch: { name?: string; visibility?: Visibility; password?: string }) =>
+export const updateCategory = (
+  id: string,
+  patch: { name?: string; visibility?: Visibility; password?: string; icon?: string },
+) =>
   apiSend<Category>('PUT', '/api/home/category/update', { id, ...patch })
 export const deleteCategory = (id: string) => apiSend<unknown>('DELETE', '/api/home/category/delete', { id })
 export const reorderCategories = (ids: string[]) =>

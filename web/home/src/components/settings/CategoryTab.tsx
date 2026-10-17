@@ -12,6 +12,8 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, Lock, Plus, Trash2 } from 'lucide-react'
 import { addCategory, deleteCategory, reorderCategories, updateCategory } from '../../api/home'
+import { AppIcon } from '../card/AppIcon'
+import { IconPicker } from './IconPicker'
 import { useHome, visibleCategories } from '../../state/HomeProvider'
 import type { Category, Visibility } from '../../types'
 
@@ -28,6 +30,25 @@ export function CategoryTab() {
   const [newName, setNewName] = useState('')
   const [pwFor, setPwFor] = useState<string>('')
   const [pw, setPw] = useState('')
+  // 哪个分组正在展开图标库
+  const [iconFor, setIconFor] = useState<string>('')
+
+  /**
+   * 给分组设图标。
+   *
+   * 分组本来只能显示"名字前两字" —— 几个空分组排一起长得一模一样，
+   * 很难分辨。接上图标库之后，一个 NAS 图标比"存储"两个字好认。
+   */
+  const setCategoryIcon = async (c: Category, iconValue: string) => {
+    await mutate({
+      apply: (cfg) => ({
+        ...cfg,
+        categories: cfg.categories.map((x) => (x.id === c.id ? { ...x, icon: iconValue } : x)),
+      }),
+      request: () => updateCategory(c.id, { icon: iconValue }),
+      okMsg: '分组图标已更新',
+    })
+  }
 
   const doAdd = async () => {
     const name = newName.trim()
@@ -101,6 +122,9 @@ export function CategoryTab() {
           return (
             <li key={c.id} className="rounded-xl border border-slate-200 px-3 py-2.5">
               <div className="flex items-center gap-2">
+                <span className="h-7 w-7 shrink-0 overflow-hidden rounded-[22%]">
+                  <AppIcon name={c.name} icon={c.icon ?? ''} />
+                </span>
                 <input
                   defaultValue={c.name}
                   onBlur={(e) => doRename(c, e.target.value)}
@@ -164,7 +188,28 @@ export function CategoryTab() {
                     改口令
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setIconFor(iconFor === c.id ? '' : c.id)}
+                  className={`text-[11px] font-semibold underline-offset-2 hover:underline ${
+                    iconFor === c.id ? 'text-blue-600' : 'text-slate-500'
+                  }`}
+                >
+                  图标
+                </button>
               </div>
+
+              {iconFor === c.id && (
+                <div className="mt-2 rounded-lg border border-slate-200 p-1.5">
+                  <IconPicker
+                    value={c.icon ?? ''}
+                    onPick={(v) => {
+                      void setCategoryIcon(c, v)
+                      setIconFor('')
+                    }}
+                  />
+                </div>
+              )}
 
               {pwFor === c.id && (
                 <div className="mt-2 flex gap-1.5">

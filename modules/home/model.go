@@ -108,6 +108,14 @@ type Category struct {
 	 */
 	Visibility string `json:"visibility"`
 
+	/**
+	 * Icon 分组图标。
+	 *
+	 * 和应用的图标同一套取值：上传/抓取的路径，或内置图标库的 `lib:<名字>`。
+	 * 分组本来只能显示名字前两字，几个空分组排一起很难分辨 —— 有个图标好认得多。
+	 */
+	Icon string `json:"icon,omitempty"`
+
 	// PasswordHash lock 分组的口令哈希（pwd.HashPassword 产物）。
 	// 只有 Visibility=lock 才有值；改成别的可见性时一并清掉，
 	// 免得留一份没用的哈希在配置文件里。
