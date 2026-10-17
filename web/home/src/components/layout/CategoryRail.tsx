@@ -105,8 +105,16 @@ export function CategoryRail({
         </button>
       )}
 
-      {/* 只显示数量，不显示是谁 —— "你藏了几个"本身也是信息 */}
-      {hiddenCount && hiddenCount > 0 ? (
+      {/*
+        隐藏计数占位。
+
+        **登录后不要再画**：lock 分组本身已经在上面那一列里出现了（带锁图标），
+        后端同时回一个 hiddenCategoryCount 表示"还有 N 个锁着的分组" ——
+        那是同一件事的两种说法。两个都画出来，左栏就会竖两根锁。
+
+        所以这条只在**列表里没有 lock 分组**时才画，代表"访客被挡在外面的那些"。
+      */}
+      {hiddenCount && hiddenCount > 0 && !categories.some((c) => visibilityOf(c) === 'lock') ? (
         <div
           title="这些分组需要登录或口令才能查看"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-dashed border-white/30 text-white/60"

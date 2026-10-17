@@ -22,6 +22,7 @@ import { TopRightActions } from './components/chrome/TopRightActions'
 import { AppGrid } from './components/grid/AppGrid'
 import { ContextMenu, type MenuState } from './components/grid/ContextMenu'
 import { UnlockModal } from './components/grid/UnlockModal'
+import { AppFormModal } from './components/settings/AppFormModal'
 import { SearchBar } from './components/search/SearchBar'
 import { SettingsPanel } from './components/settings/SettingsPanel'
 import { HomeProvider, useHome, visibleApps, visibleCategories } from './state/HomeProvider'
@@ -44,6 +45,10 @@ function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 需要解锁的分组（点了 lock 分组但这次会话还没验过）
   const [unlocking, setUnlocking] = useState<Category | null>(null)
+  // 表单：null = 关着；'new' = 新增；AppView = 编辑它
+  const [formFor, setFormFor] = useState<AppView | 'new' | null>(null)
+
+  const openAddApp = useCallback(() => setFormFor('new'), [])
 
   const onRetry = useCallback(async () => {
     setRetrying(true)
@@ -113,6 +118,7 @@ function HomePage() {
                 categoryId={state.activeCategory}
                 canManage={!!cfg.authed}
                 onOpenMenu={(app, x, y) => setMenu({ app, x, y })}
+                onAddApp={openAddApp}
               />
             )}
           </main>
@@ -126,10 +132,17 @@ function HomePage() {
           prefer={cfg?.networkPrefer ?? 'wanV4'}
           onClose={() => setMenu(null)}
           onDelete={deleteOne}
-          onEdit={(app) => {
-            // TODO(M6 尾)：编辑表单
-            notify('error', `编辑「${app.name}」的表单还在做，先用后台改`)
-          }}
+          onEdit={setFormFor}
+          onNotify={notify}
+        />
+      )}
+
+      {formFor !== null && (
+        <AppFormModal
+          editing={formFor === 'new' ? null : formFor}
+          categories={state.config?.categories ?? []}
+          onClose={() => setFormFor(null)}
+          onSaved={() => void reload()}
           onNotify={notify}
         />
       )}
@@ -164,10 +177,12 @@ function GridArea({
   categoryId,
   canManage,
   onOpenMenu,
+  onAddApp,
 }: {
   categoryId: string
   canManage: boolean
   onOpenMenu: (app: AppView, x: number, y: number) => void
+  onAddApp: () => void
 }) {
   const { state } = useHome()
   const cfg = state.config!
@@ -183,7 +198,7 @@ function GridArea({
             ? '切到别的分类看看，或者把应用移进来。'
             : '在反代或穿透里把服务勾上「显示到主页」，它就会自己出现在这里。'
         }
-        action={canManage ? { label: '添加应用', onClick: () => undefined } : undefined}
+        action={canManage ? { label: '添加应用', onClick: onAddApp } : undefined}
       />
     )
   }
@@ -193,6 +208,7 @@ function GridArea({
       apps={apps}
       prefer={cfg.networkPrefer}
       onOpenMenu={canManage ? onOpenMenu : undefined}
+      onAddApp={canManage ? onAddApp : undefined}
     />
   )
 }

@@ -143,3 +143,22 @@ export async function copyText(text: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * 实际会走哪个入口。
+ *
+ * 和 preferredEntry 的区别：那个只返回 URL，这个连**类型**一起给。
+ * 需要类型是因为提示文案要说真话 —— 偏好设成"公网 v4"但 v4 没配、
+ * 实际退到内网的时候，卡片标题还写"公网 v4"就是在骗人。
+ */
+export function resolvedEntry(
+  addr: AddressSet | null | undefined,
+  prefer: NetworkKind,
+): { kind: NetworkKind; url: string } | null {
+  if (!addr) return null
+  for (const k of FALLBACK[prefer]) {
+    const v = addr[k]
+    if (v) return { kind: k, url: v }
+  }
+  return null
+}
