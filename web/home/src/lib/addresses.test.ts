@@ -4,6 +4,7 @@ import {
   hasEntry,
   mergeAddresses,
   preferredEntry,
+  resolvedEntry,
   summarize,
 } from './addresses'
 
@@ -80,5 +81,24 @@ describe('hasEntry', () => {
     expect(hasEntry({ wanV4: 'a' }, 'wanV4')).toBe(true)
     expect(hasEntry({ wanV4: 'a' }, 'lan')).toBe(false)
     expect(hasEntry(undefined, 'lan')).toBe(false)
+  })
+})
+
+describe('resolvedEntry', () => {
+  // 这一条是给"提示文案说真话"兜底用的：偏好 v4 但只有内网时，
+  // 调用方要能知道实际走的是内网，而不是照着偏好写"公网 v4"
+  it('偏好没配时退到下一个，并如实报告实际类型', () => {
+    const r = resolvedEntry({ wanV4: '', wanV6: '', lan: 'http://192.168.1.5:8080' }, 'wanV4')
+    expect(r).toEqual({ kind: 'lan', url: 'http://192.168.1.5:8080' })
+  })
+
+  it('偏好在就按偏好走', () => {
+    const r = resolvedEntry({ wanV4: 'https://a.com', lan: 'http://192.168.1.5' }, 'wanV4')
+    expect(r?.kind).toBe('wanV4')
+  })
+
+  it('一个都没配返回 null', () => {
+    expect(resolvedEntry({ wanV4: '', wanV6: '', lan: '' }, 'wanV4')).toBeNull()
+    expect(resolvedEntry(null, 'lan')).toBeNull()
   })
 })

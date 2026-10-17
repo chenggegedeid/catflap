@@ -17,7 +17,7 @@
  */
 
 import { useState } from 'react'
-import { preferredEntry, openEntry } from '../../lib/addresses'
+import { openEntry, resolvedEntry } from '../../lib/addresses'
 import type { AppView, NetworkPrefer } from '../../types'
 import { AppIcon } from './AppIcon'
 
@@ -46,7 +46,10 @@ export function AppCard({
   onToggleSelect?: (id: string) => void
 }) {
   const [hover, setHover] = useState(false)
-  const url = preferredEntry(app.addresses, prefer)
+  // 用 resolvedEntry 而不是 preferredEntry：要知道**实际**走的是哪个入口，
+  // 否则偏好 v4 但只有内网时，提示还写「公网 v4」—— 那是在骗人
+  const target = resolvedEntry(app.addresses, prefer)
+  const url = target?.url ?? null
 
   // 大卡片图标也大一点：2×2 里放一个 4.5rem 的图标会显得很小气
   const big = placement.w > 1 || placement.h > 1
@@ -93,7 +96,11 @@ export function AppCard({
           // disabled 会让整个元素收不到事件（包括右键），那样连菜单都出不来
           if (url) openEntry(url)
         }}
-        title={url ? `${app.name}（${titleOf(prefer)}）` : `${app.name}：还没配地址，右键可编辑`}
+        title={
+          url && target
+            ? `${app.name}（${titleOf(target.kind)}${target.kind !== prefer ? ' · 按偏好本该走 v4/v6，但没配' : ''}）`
+            : `${app.name}：还没配地址，右键可编辑`
+        }
         className={`flex h-full w-full flex-col items-center justify-center gap-2 rounded-2xl p-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${
           url ? 'hover:-translate-y-0.5 hover:bg-white/15' : 'opacity-60'
         }`}
@@ -130,8 +137,8 @@ export function AppCard({
   )
 }
 
-function titleOf(prefer: NetworkPrefer): string {
-  if (prefer === 'lan') return '内网'
-  if (prefer === 'wanV6') return '公网 v6'
+function titleOf(kind: 'wanV4' | 'wanV6' | 'lan'): string {
+  if (kind === 'lan') return '内网'
+  if (kind === 'wanV6') return '公网 v6'
   return '公网 v4'
 }

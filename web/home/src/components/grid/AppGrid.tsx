@@ -35,10 +35,13 @@ export function AppGrid({
   apps,
   prefer = 'wanV4',
   onOpenMenu,
+  onAddApp,
 }: {
   apps: AppView[]
   prefer?: NetworkPrefer
   onOpenMenu?: (app: AppView, x: number, y: number) => void
+  /** 有值才显示末尾的「新增应用」虚线卡 */
+  onAddApp?: () => void
 }) {
   const cols = useColumns()
 
@@ -82,6 +85,21 @@ export function AppGrid({
           />
         )
       })}
+
+      {/* 末尾的 "+"：像 Sun-Panel 那样，点一下就近新增。
+          放在网格最后一个格子里，比在页面角落找一个按钮好找。 */}
+      {onAddApp && (
+        <button
+          type="button"
+          onClick={onAddApp}
+          title="新增应用"
+          aria-label="新增应用"
+          style={{ gridColumn: 'span 1', gridRow: 'span 1' }}
+          className="grid min-h-[5.5rem] w-full place-items-center rounded-2xl border-2 border-dashed border-white/35 text-2xl text-white/60 transition hover:border-white/60 hover:bg-white/10 hover:text-white"
+        >
+          +
+        </button>
+      )}
     </div>
   )
 }
