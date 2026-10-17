@@ -210,6 +210,12 @@ export function HomeDnd({
     <DndContext
       sensors={sensors}
       collisionDetection={collision}
+      /**
+       * autoScroll 必须关：拖到视口边缘时它会自动滚动页面，
+       * 用户看到的就是"拖动的时候屏幕自己动了"，落点全乱。
+       * 一屏一组的布局下页面本来也不该滚。
+       */
+      autoScroll={false}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragCancel={() => {

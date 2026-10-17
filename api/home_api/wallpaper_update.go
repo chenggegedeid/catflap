@@ -23,8 +23,10 @@ type WallpaperUpdateRequest struct {
 func (HomeApi) WallpaperUpdateView(c *gin.Context) {
 	cr := middleware.GetBindRequest[WallpaperUpdateRequest](c)
 
-	if cr.Mode != "default" && cr.Mode != "bing" && cr.Mode != "custom" {
-		res.FailWithMsg("mode 只能是 default / bing / custom", c)
+	// preset = 内置壁纸库（CSS 渐变存在 CSS 字段里）。忘了它就会在
+	// 前端点选主题时被这里拦下 —— 表面是"点了没反应"，实际是 400。
+	if cr.Mode != "default" && cr.Mode != "preset" && cr.Mode != "bing" && cr.Mode != "custom" {
+		res.FailWithMsg("mode 只能是 default / preset / bing / custom", c)
 		return
 	}
 	if cr.Resolution != "1080" && cr.Resolution != "uhd" {
