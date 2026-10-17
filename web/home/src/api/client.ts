@@ -9,6 +9,7 @@
  */
 
 import { getToken } from './token'
+import { getUnlockToken } from './unlock'
 
 export class ApiError extends Error {
   /** HTTP 状态码；0 表示没拿到响应（断网 / 超时） */
@@ -40,6 +41,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
+  // 分组解锁 token：服务端据此决定要不要下发 lock 分组的内容。
+  // 放在 header 而不是 cookie，是为了让 fetch 走的每条路径都带上（后端两者都认）
+  const unlock = getUnlockToken()
+  if (unlock) headers['X-Catflap-Unlock'] = unlock
 
   // 超时控制：导航页可能挂在外网，卡住的请求不能让用户一直对着转圈
   const ctrl = new AbortController()
@@ -106,8 +111,12 @@ function buildInit(method: string, body?: unknown): RequestInit {
 }
 
 function authHeaders(): Record<string, string> {
+  const out: Record<string, string> = {}
   const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  if (token) out.Authorization = `Bearer ${token}`
+  const unlock = getUnlockToken()
+  if (unlock) out['X-Catflap-Unlock'] = unlock
+  return out
 }
 
 async function unwrap<T>(res: Response): Promise<{ data: T; msg: string }> {

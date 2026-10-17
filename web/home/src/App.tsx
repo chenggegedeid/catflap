@@ -21,9 +21,10 @@ import { Toasts } from './components/feedback/Toasts'
 import { TopRightActions } from './components/chrome/TopRightActions'
 import { AppGrid } from './components/grid/AppGrid'
 import { ContextMenu, type MenuState } from './components/grid/ContextMenu'
+import { UnlockModal } from './components/grid/UnlockModal'
 import { SearchBar } from './components/search/SearchBar'
 import { HomeProvider, useHome, visibleApps, visibleCategories } from './state/HomeProvider'
-import type { AppView } from './types'
+import type { AppView, Category } from './types'
 
 export default function App() {
   return (
@@ -39,6 +40,8 @@ function HomePage() {
   // 右键菜单 & 批量删除
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [selection, setSelection] = useState<Set<string> | null>(null)
+  // 需要解锁的分组（点了 lock 分组但这次会话还没验过）
+  const [unlocking, setUnlocking] = useState<Category | null>(null)
 
   const onRetry = useCallback(async () => {
     setRetrying(true)
@@ -127,7 +130,14 @@ function HomePage() {
           <CategoryRail
             categories={visibleCategories(cfg)}
             active={state.activeCategory}
-            onSelect={setActiveCategory}
+            onSelect={(id) => {
+              const cat = visibleCategories(cfg).find((c) => c.id === id)
+              if (cat && cat.visibility === 'lock') {
+                setUnlocking(cat)
+                return
+              }
+              setActiveCategory(id)
+            }}
             canManage={!!cfg?.authed}
             hiddenCount={cfg?.hiddenCategoryCount}
           />
@@ -178,6 +188,19 @@ function HomePage() {
           onDelete={deleteOne}
           onBatchDelete={startBatch}
           onResize={onMenuResize}
+        />
+      )}
+
+      {unlocking && (
+        <UnlockModal
+          category={unlocking}
+          onClose={() => setUnlocking(null)}
+          onUnlocked={() => {
+            // 解锁成功：选中它并重新拉配置（服务端这时才会下发它的内容）
+            setActiveCategory(unlocking.id)
+            setUnlocking(null)
+            void reload()
+          }}
         />
       )}
 
