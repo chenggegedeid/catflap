@@ -91,7 +91,8 @@ export function Task() {
             还没有计划任务。点下面「新建任务」添加一个。
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs text-muted">
                 <th className="px-4 py-2 font-semibold">名称</th>
@@ -165,6 +166,7 @@ export function Task() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 

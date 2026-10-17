@@ -416,7 +416,7 @@ function RecordModal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="col-span-2 block sm:col-span-1">
             <div className="mb-1 text-xs font-semibold text-muted">记录名称</div>
             <input

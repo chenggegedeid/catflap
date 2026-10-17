@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import PageBoundary from '../components/PageBoundary'
 import type { LucideIcon } from 'lucide-react'
 import {
+  Archive,
   ArrowLeftRight,
   Cloud,
   Bell,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react'
 
 import { Audit } from './Audit'
+import { Backup } from './Backup'
 import { Cert } from './Cert'
 import { ComponentManager } from './Components'
 import { Dashboard } from './Dashboard'
@@ -183,6 +185,13 @@ export const pages = {
     // 万一哪天它自己被关掉，用户就只能去改 config/components.json 了。
     element: <ComponentManager />,
   },
+  backup: {
+    label: '备份与恢复',
+    icon: Archive,
+    subtitle: '把配置打包带走，换机器或重装后一键还原',
+    element: <PageBoundary key="backup"><Backup /></PageBoundary>,
+  },
+
   settings: {
     label: '系统设置',
     icon: SettingsIcon,
@@ -237,7 +246,7 @@ export const pageGroups = [
   { keys: ['dashboard'] },
   { title: '网络与连接', keys: ['devices', 'forwards', 'stun', 'ddns', 'reverse-proxy', 'tunnel', 'cert', 'wol'] },
   { title: '自动化', keys: ['task'] },
-  { title: '系统与管理', keys: ['components', 'settings', 'logs', 'audit', 'notify'] },
+  { title: '系统与管理', keys: ['components', 'settings', 'backup', 'logs', 'audit', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]
 
 /**

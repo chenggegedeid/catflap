@@ -1151,3 +1151,107 @@ export function deviceOf<T extends { id: number; ip: string }>(
   if (!ip) return undefined
   return devices.find((x) => x.ip === ip)
 }
+
+// ===================== 备份与恢复 =====================
+
+/** 可备份的一项（模块或资产） */
+export interface BackupItem {
+  name: string
+  label: string
+  /** 现在有没有内容；没有的不让用户勾 */
+  exists: boolean
+  /** 含凭据（token / 密钥 / 口令哈希）—— 备份包是明文，要提示 */
+  sensitive?: boolean
+}
+
+export interface BackupModulesView {
+  modules: BackupItem[]
+  assets: BackupItem[]
+}
+
+/** 备份包清单（预览时看到的东西） */
+export interface BackupManifest {
+  version: number
+  appVersion?: string
+  createdAt?: string
+  modules?: { name: string; label: string; file: string; size: number; exists: boolean }[]
+  assets?: { kind: string; path: string; size: number }[]
+  sensitive?: boolean
+}
+
+export interface BackupImportResult {
+  restoredModules: string[]
+  restoredAssets: string[]
+  skipped: string[]
+}
+
+/** 可备份的模块与资产清单 */
+export const getBackupModules = () => request<BackupModulesView>('/api/backup/modules')
+
+/**
+ * 预览备份包：先看清单再决定恢复哪些模块。
+ * 走 multipart（文件），不用 JSON。
+ */
+export const previewBackup = (file: File) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request<BackupManifest>('/api/backup/preview', { method: 'POST', body: fd })
+}
+
+/**
+ * 恢复。内部会先给现有 config/ 打快照，失败自动回滚。
+ *
+ * @param modules 要恢复哪些模块；空数组 = 全部
+ */
+export const importBackup = (file: File, modules: string[] = [], assets: string[] = []) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  modules.forEach((m) => fd.append('modules', m))
+  assets.forEach((a) => fd.append('assets', a))
+  return request<BackupImportResult>('/api/backup/import', { method: 'POST', body: fd })
+}
+
+/**
+ * 导出备份包，触发浏览器下载。
+ *
+ * 单独一个函数（而不是走 request）因为返回的是二进制 zip，
+ * 要读 Content-Disposition 里的文件名再自己触发下载。
+ */
+export async function exportBackup(modules: string[] = [], assets: string[] = []): Promise<string> {
+  const token = getToken()
+  const res = await fetch('/api/backup/export', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ modules, assets }),
+  })
+  if (!res.ok) {
+    let msg = `导出失败（HTTP ${res.status}）`
+    try {
+      const j = await res.json()
+      if (j?.msg) msg = j.msg
+    } catch {
+      // 响应不是 JSON（比如网关返回的 HTML），用默认提示
+    }
+    throw new Error(msg)
+  }
+
+  // 从 Content-Disposition 拿文件名，服务端已经生成好了
+  let filename = 'catflap-backup.zip'
+  const cd = res.headers.get('Content-Disposition') || ''
+  const m = /filename="([^"]+)"/.exec(cd)
+  if (m) filename = m[1]
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  return filename
+}

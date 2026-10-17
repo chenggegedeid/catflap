@@ -94,7 +94,7 @@ func TestImportRestoresModule(t *testing.T) {
 	body := `{"title":"from-backup"}`
 	mj, _ := marshalManifest(Manifest{
 		Version: ManifestVersion,
-		Modules: []Module{{Name: "home", Label: "导航页", File: "config/stunConfig.json", Exists: true}},
+		Modules: []Module{{Name: "stun", Label: "穿透", File: "config/stunConfig.json", Exists: true}},
 	})
 
 	raw := makeZip(t, map[string]string{
@@ -106,8 +106,8 @@ func TestImportRestoresModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("导入失败: %v", err)
 	}
-	if len(out.RestoredModules) == 0 || out.RestoredModules[0] != "home" {
-		t.Errorf("应记录恢复了 home 模块，实际 %v", out.RestoredModules)
+	if len(out.RestoredModules) == 0 || out.RestoredModules[0] != "stun" {
+		t.Errorf("应记录恢复了 stun 模块，实际 %v", out.RestoredModules)
 	}
 
 	got, err := os.ReadFile("config/stunConfig.json")
@@ -140,7 +140,7 @@ func TestImportRollsBackOnFailure(t *testing.T) {
 	// 清单说有 home，但包里其实没有那个文件 → 解压时会失败
 	mj, _ := marshalManifest(Manifest{
 		Version: ManifestVersion,
-		Modules: []Module{{Name: "home", Label: "导航页", File: "config/stunConfig.json", Exists: true}},
+		Modules: []Module{{Name: "stun", Label: "穿透", File: "config/stunConfig.json", Exists: true}},
 	})
 	raw := makeZip(t, map[string]string{"manifest.json": string(mj)})
 
@@ -304,13 +304,13 @@ var regexpConfigPath = regexp.MustCompile(`config/[A-Za-z0-9_.-]+\.json`)
 // 敏感模块判定要对：这几个带凭据，备份包里有它们必须警告
 func TestSensitiveModules(t *testing.T) {
 	cases := map[string]bool{
-		"auth":    true,
-		"ddns":    true,
-		"cert":    true,
-		"home":    false,
-		"proxy":   false,
-		"stun":    false,
-		"devices": false,
+		"auth":   true,
+		"ddns":   true,
+		"cert":   true,
+		"device": false,
+		"proxy":  false,
+		"stun":   false,
+		"tunnel": false,
 	}
 	for name, want := range cases {
 		if got := isSensitiveModule(name); got != want {

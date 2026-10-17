@@ -68,7 +68,7 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
   return (
     <div className="space-y-4">
       {/* 指标卡 */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <Stat icon={<Activity className="h-3.5 w-3.5" />} label="请求次数" value={fmt(ov.requests)} />
         <Stat icon={<Users className="h-3.5 w-3.5" />} label="独立 IP" value={fmt(ov.uniqueIPs)} />
         <Stat

@@ -19,6 +19,8 @@ import (
 func BackupRouters(g *gin.RouterGroup) {
 	var app = backup_api.BackupApi{}
 
+	// 可备份的模块清单（渲染勾选框用）
+	g.GET("backup/modules", app.ModulesView)
 	// 先看清单再决定恢复范围（导入是覆盖性操作，先看清更稳妥）
 	g.POST("backup/preview", app.PreviewView)
 	// 导出下载（body 里带要导哪些模块/资产）

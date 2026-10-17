@@ -273,8 +273,8 @@ func TestSwitchStatePersists(t *testing.T) {
 	if switches.isEnabled("webhook") {
 		t.Error("关掉之后应当是关闭状态")
 	}
-	if !switches.isEnabled("home") {
-		t.Error("没碰过的组件应当默认启用")
+	if !switches.isEnabled("audit") {
+		t.Error("没碰过的组件应当默认启用（audit）")
 	}
 
 	// 模拟进程重启：丢掉内存状态，从文件恢复

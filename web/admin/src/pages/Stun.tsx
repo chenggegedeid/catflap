@@ -971,7 +971,7 @@ function ServiceModal({
                 </div>
               </label>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="col-span-2 block sm:col-span-1">
                   <div className={fieldLabelCls}>服务名称</div>
                   <input
@@ -1022,7 +1022,7 @@ function ServiceModal({
               {/* 协议决定了下面能配什么：证书、HTTPS、入口重定向都只有 TCP 才有 */}
               <div>
                 <div className={fieldLabelCls}>协议</div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {(
                     [
                       { value: 'TCP', hint: '网页、MC Java 版、SSH、远程桌面…' },
@@ -1522,7 +1522,7 @@ function ServiceModal({
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="col-span-2 block sm:col-span-1">
                       <div className="mb-1 text-xs font-semibold text-muted">Cloudflare 账号</div>
                       <select
@@ -1656,7 +1656,7 @@ function ServiceModal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="col-span-2 block sm:col-span-1">
                       <div className={fieldLabelCls}>Cloudflare 账号</div>
                       <select

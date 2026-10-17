@@ -79,7 +79,8 @@ export function AccessLogModal({
 
         {list.length > 0 && (
           <div className="max-h-[60vh] overflow-y-auto">
-            <table className="w-full text-left text-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
               <thead className="sticky top-0 bg-surface text-muted">
                 <tr>
                   <th className="pb-1.5 font-medium">时间</th>
@@ -122,6 +123,7 @@ export function AccessLogModal({
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

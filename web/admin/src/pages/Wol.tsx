@@ -90,7 +90,8 @@ export function Wol() {
             还没有添加任何机器。点右上角「添加机器」开始。
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs text-muted">
                 <th className="px-4 py-2 font-semibold">名称</th>
@@ -135,6 +136,7 @@ export function Wol() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 
