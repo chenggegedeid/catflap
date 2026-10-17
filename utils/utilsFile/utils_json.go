@@ -3,6 +3,7 @@ package utilsFile
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 // // 读取config 配置文件
@@ -77,16 +78,53 @@ func WriteJsonFile[T any](filePath string, obj T) error {
 		return err
 	}
 
-	// 配置文件里有 JWT 密钥、Cloudflare Token、DDNS 密钥，只给属主读写
-	if err = os.WriteFile(filePath, data, PrivateFileMode); err != nil {
+	/**
+	 * **先写临时文件，再原子改名**。
+	 *
+	 * 直接 WriteFile 的风险：写到一半进程被杀（断电、kill -9、
+	 * 容器被回收），目标文件就剩半截 JSON —— 下次启动读不出来，
+	 * 整个导航页起不来，而用户只是改了个图标。
+	 *
+	 * rename 在同一文件系统内是原子的：要么还是旧的完整配置，
+	 * 要么是新的完整配置，不存在中间态。
+	 */
+	dir := filepath.Dir(filePath)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		// 退回到直接写：至少别因为连临时文件都建不了就彻底失败
+		return writeDirect(filePath, data)
+	}
+	tmpName := tmp.Name()
+
+	if _, err = tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	tmp.Close()
+
+	if err = os.Chmod(tmpName, PrivateFileMode); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err = os.Rename(tmpName, filePath); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
 
-	// WriteFile 只在新建文件时应用权限，已存在的旧文件权限不变。
-	// 显式收一次，让历史版本留下的 0644 在下次保存时被纠正。
-	if err = os.Chmod(filePath, PrivateFileMode); err != nil {
-		return err
-	}
-
+	// 已存在的旧文件权限不会被 rename 改掉（用的是临时文件的权限 —— 已设过）
 	return nil
+}
+
+// writeDirect 兜底：临时文件都建不了时的最后退路
+func writeDirect(filePath string, data []byte) error {
+	if err := os.WriteFile(filePath, data, PrivateFileMode); err != nil {
+		return err
+	}
+	return os.Chmod(filePath, PrivateFileMode)
 }
