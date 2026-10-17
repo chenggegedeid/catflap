@@ -21,7 +21,14 @@ import (
 
 // legacyProxyConfigPath 反代配置的位置。和 modules/proxy 里那个常量保持一致
 // （重复一个字符串比 import 一个模块划算）。
-const legacyProxyConfigPath = "config/proxy.json"
+/**
+ * LegacyProxyConfigPath 旧版反代配置。
+ *
+ * 导出是为了备份能带上它：老机器上可能还留着这个文件，迁移没跑完就重装的话，
+ * 不备份等于把老数据丢了。备份它的代价只是一个小 json。
+ */
+const LegacyProxyConfigPath = "config/proxy.json"
+const legacyProxyConfigPath = LegacyProxyConfigPath
 
 type legacyTunnelShape struct {
 	Tunnel struct {

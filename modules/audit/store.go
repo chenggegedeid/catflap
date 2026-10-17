@@ -17,7 +17,14 @@ import (
 )
 
 const (
-	configPath = "config/audit.json"
+	/**
+	 * ConfigPath 审计配置。
+	 *
+	 * 导出是为了让备份模块引用它 —— 各模块的配置文件路径应当**只有一个真相**，
+	 * 备份那边再抄一份字符串的话，改了这里就会悄悄对不上（今天已经踩过一次）。
+	 */
+	ConfigPath = "config/audit.json"
+	configPath = ConfigPath
 	auditDir   = "data/access"
 	// ipStatsPath 按 IP 的聚合。这个要长期留着（累计值），不能按天删。
 	ipStatsPath = "data/access/ipstats.json"
