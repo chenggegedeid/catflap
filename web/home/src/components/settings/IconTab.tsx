@@ -1,0 +1,167 @@
+/**
+ * 图标管理。
+ *
+ * 一眼看过去哪些应用没图标、哪些图标加载不出来 —— 然后就地补。
+ *
+ * 补的方式两种：
+ *   1. 上传（本地文件）
+ *   2. 从网址抓（后端去取，避开浏览器跨域）
+ *
+ * 为什么值得单独一个标签：图标是导航页的脸面，但它恰恰是最容易坏的东西 ——
+ * favicon 站点改版、外链挂掉、抓的时候被墙，都可能让一格变成白板。
+ * 散在"编辑应用"里的话，得一个一个点进去才发现哪个坏了。
+ */
+
+import { useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
+import { fetchIconFromURL, updateApp, uploadIcon } from '../../api/home'
+import { useHome, visibleApps } from '../../state/HomeProvider'
+import { AppIcon } from '../card/AppIcon'
+import type { AppView } from '../../types'
+
+export function IconTab() {
+  const { state, mutate, notify } = useHome()
+  const apps = visibleApps(state.config, '')
+  const [busyId, setBusyId] = useState('')
+  const [urlFor, setUrlFor] = useState('')
+  const [url, setUrl] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+  const uploadTarget = useRef<string>('')
+
+  const missing = apps.filter((a) => !a.icon).length
+
+  const setIcon = async (app: AppView, path: string) => {
+    await mutate({
+      apply: (cfg) => ({ ...cfg, apps: cfg.apps.map((x) => (x.id === app.id ? { ...x, icon: path } : x)) }),
+      request: () => updateApp(app.id, { name: app.name, icon: path }),
+      okMsg: '图标已更新',
+    })
+  }
+
+  const onPickFile = (app: AppView) => {
+    uploadTarget.current = app.id
+    fileRef.current?.click()
+  }
+
+  const onFile = async (file: File) => {
+    const id = uploadTarget.current
+    const app = apps.find((a) => a.id === id)
+    if (!app) return
+    setBusyId(id)
+    try {
+      const { data } = await uploadIcon(file)
+      if (data?.path) await setIcon(app, data.path)
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : '上传失败')
+    } finally {
+      setBusyId('')
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const onFetchURL = async (app: AppView) => {
+    const u = url.trim()
+    if (!u) return
+    setBusyId(app.id)
+    try {
+      const { data } = await fetchIconFromURL(u)
+      if (data?.path) await setIcon(app, data.path)
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : '抓取失败，可以试试上传本地图标')
+    } finally {
+      setBusyId('')
+      setUrlFor('')
+      setUrl('')
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs leading-relaxed text-slate-500">
+          图标加载不出来时会自动退化成名字首字，但补上真图标更好认。
+        </p>
+        {missing > 0 && (
+          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+            {missing} 个缺图标
+          </span>
+        )}
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) void onFile(f)
+        }}
+      />
+
+      <ul className="grid grid-cols-2 gap-2">
+        {apps.map((a) => (
+          <li key={a.id} className="rounded-xl border border-slate-200 p-2">
+            <div className="flex items-center gap-2">
+              <span className="h-9 w-9 shrink-0 overflow-hidden rounded-[22%] ring-1 ring-black/5">
+                <AppIcon name={a.name} icon={a.icon} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-slate-800">{a.name}</div>
+                <div className="truncate text-[10px] text-slate-400">{a.icon || '无图标'}</div>
+              </div>
+            </div>
+
+            <div className="mt-2 flex gap-1">
+              <button
+                type="button"
+                disabled={busyId === a.id}
+                onClick={() => onPickFile(a)}
+                className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-slate-100 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+              >
+                <Upload className="h-3 w-3" />
+                上传
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlFor(urlFor === a.id ? '' : a.id)
+                  setUrl('')
+                }}
+                className="flex-1 rounded-lg bg-slate-100 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200"
+              >
+                网址抓取
+              </button>
+            </div>
+
+            {urlFor === a.id && (
+              <div className="mt-1.5 flex gap-1">
+                <input
+                  autoFocus
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void onFetchURL(a)
+                    if (e.key === 'Escape') setUrlFor('')
+                  }}
+                  placeholder="站点首页地址"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] focus:border-blue-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={busyId === a.id}
+                  onClick={() => void onFetchURL(a)}
+                  className="rounded-lg bg-blue-500 px-2 py-1 text-[11px] font-bold text-white transition hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {busyId === a.id ? '…' : '抓'}
+                </button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {apps.length === 0 && <p className="py-6 text-center text-xs text-slate-400">还没有应用</p>}
+    </div>
+  )
+}

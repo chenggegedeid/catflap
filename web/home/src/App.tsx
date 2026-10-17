@@ -12,7 +12,7 @@ import { useCallback, useState } from 'react'
 
 import './App.css'
 
-import { deleteApp, resizeApp, gotoLogin } from './api/home'
+import { deleteApp, gotoLogin } from './api/home'
 import { Background } from './components/layout/Background'
 import { CategoryRail } from './components/layout/CategoryRail'
 import { Header } from './components/layout/Header'
@@ -23,6 +23,7 @@ import { AppGrid } from './components/grid/AppGrid'
 import { ContextMenu, type MenuState } from './components/grid/ContextMenu'
 import { UnlockModal } from './components/grid/UnlockModal'
 import { SearchBar } from './components/search/SearchBar'
+import { SettingsPanel } from './components/settings/SettingsPanel'
 import { HomeProvider, useHome, visibleApps, visibleCategories } from './state/HomeProvider'
 import type { AppView, Category } from './types'
 
@@ -37,9 +38,10 @@ export default function App() {
 function HomePage() {
   const { state, reload, setActiveCategory, mutate, notify, toasts, dismissToast } = useHome()
   const [retrying, setRetrying] = useState(false)
-  // 右键菜单 & 批量删除
+  // 右键菜单
   const [menu, setMenu] = useState<MenuState | null>(null)
-  const [selection, setSelection] = useState<Set<string> | null>(null)
+  // 设置面板（分组 / 图标 / 外观）
+  const [settingsOpen, setSettingsOpen] = useState(false)
   // 需要解锁的分组（点了 lock 分组但这次会话还没验过）
   const [unlocking, setUnlocking] = useState<Category | null>(null)
 
@@ -63,53 +65,6 @@ function HomePage() {
     [state.config, mutate],
   )
 
-  const startBatch = useCallback((id: string) => {
-    setSelection(new Set([id]))
-  }, [])
-
-  const toggleSelect = useCallback((id: string) => {
-    setSelection((prev) => {
-      const next = new Set(prev ?? [])
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-
-  const confirmBatch = useCallback(() => {
-    if (!selection || selection.size === 0) return
-    if (!confirm(`删除选中的 ${selection.size} 个应用？只从导航页移除，不会动服务本身。`)) return
-    const ids = [...selection]
-    void mutate({
-      apply: (cfg) => ({ ...cfg, apps: cfg.apps.filter((a) => !selection.has(a.id)) }),
-      request: async () => {
-        for (const id of ids) await deleteApp(id)
-      },
-      okMsg: `已删除 ${ids.length} 个`,
-      retry: () => confirmBatch(),
-    })
-    setSelection(null)
-  }, [selection, mutate])
-
-  const doResize = useCallback(
-    (id: string, size: string) => {
-      void mutate({
-        apply: (cfg) => ({ ...cfg, apps: cfg.apps.map((a) => (a.id === id ? { ...a, size } : a)) }),
-        request: () => resizeApp(id, size as AppView['size'] as never),
-        retry: () => doResize(id, size),
-      })
-    },
-    [mutate],
-  )
-
-  const onMenuResize = useCallback(
-    (id: string, size: string) => {
-      void doResize(id, size)
-      notify('ok', '大小已调整')
-    },
-    [doResize, notify],
-  )
-
   // 壁纸和标题不依赖配置：加载中、加载失败也要有个能看的样子
   const cfg = state.config
 
@@ -118,7 +73,13 @@ function HomePage() {
       <Background wallpaper={cfg?.wallpaper} />
 
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col px-4 pb-10 pt-8 sm:px-6">
-        <TopRightActions authed={!!cfg?.authed} pending={state.pending > 0} onLogin={gotoLogin} />
+        <TopRightActions
+          authed={!!cfg?.authed}
+          pending={state.pending > 0}
+          onLogin={gotoLogin}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onReload={() => void reload()}
+        />
 
         <div className="flex flex-col items-center gap-6">
           <Header title={cfg?.title ?? 'Catflap'} showTime={cfg?.showTime ?? true} />
@@ -152,44 +113,28 @@ function HomePage() {
                 categoryId={state.activeCategory}
                 canManage={!!cfg.authed}
                 onOpenMenu={(app, x, y) => setMenu({ app, x, y })}
-                selection={selection}
-                onToggleSelect={toggleSelect}
               />
             )}
           </main>
         </div>
       </div>
 
-      {/* 批量删除的操作条 */}
-      {selection && selection.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900/90 px-3 py-2 text-sm text-white shadow-lg backdrop-blur">
-          <span>已选 {selection.size} 个</span>
-          <button
-            type="button"
-            onClick={confirmBatch}
-            className="rounded-lg bg-rose-500 px-3 py-1 text-xs font-semibold transition hover:bg-rose-600"
-          >
-            删除所选
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelection(null)}
-            className="rounded-lg bg-white/10 px-3 py-1 text-xs font-semibold transition hover:bg-white/20"
-          >
-            取消
-          </button>
-        </div>
-      )}
 
       {menu && (
         <ContextMenu
           menu={menu}
+          prefer={cfg?.networkPrefer ?? 'wanV4'}
           onClose={() => setMenu(null)}
           onDelete={deleteOne}
-          onBatchDelete={startBatch}
-          onResize={onMenuResize}
+          onEdit={(app) => {
+            // TODO(M6 尾)：编辑表单
+            notify('error', `编辑「${app.name}」的表单还在做，先用后台改`)
+          }}
+          onNotify={notify}
         />
       )}
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
       {unlocking && (
         <UnlockModal
@@ -219,14 +164,10 @@ function GridArea({
   categoryId,
   canManage,
   onOpenMenu,
-  selection,
-  onToggleSelect,
 }: {
   categoryId: string
   canManage: boolean
   onOpenMenu: (app: AppView, x: number, y: number) => void
-  selection: Set<string> | null
-  onToggleSelect: (id: string) => void
 }) {
   const { state } = useHome()
   const cfg = state.config!
@@ -252,8 +193,6 @@ function GridArea({
       apps={apps}
       prefer={cfg.networkPrefer}
       onOpenMenu={canManage ? onOpenMenu : undefined}
-      selection={canManage && selection ? selection : undefined}
-      onToggleSelect={canManage ? onToggleSelect : undefined}
     />
   )
 }
