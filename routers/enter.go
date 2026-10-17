@@ -70,7 +70,6 @@ func Run(webFS fs.FS) {
 
 	// 剥掉 路径 前缀
 	adminFS, _ := fs.Sub(webFS, "web/admin/dist")
-	homeFS, _ := fs.Sub(webFS, "web/home/dist")
 
 	// 所有非 API 请求：先找静态文件，找不到就返回 index.html（Vue Router 兜底）
 	r.NoRoute(func(c *gin.Context) {
@@ -81,29 +80,20 @@ func Run(webFS fs.FS) {
 			return
 		}
 
-		if path == "/catflap" {
-			c.Redirect(http.StatusMovedPermanently, "/catflap/")
-			return
-		}
-
-		if strings.HasPrefix(path, "/catflap/") {
-			filePath := strings.TrimPrefix(path, "/catflap/")
-			if filePath != "" {
-				if _, err := fs.Stat(adminFS, filePath); err == nil {
-					c.FileFromFS(filePath, http.FS(adminFS))
-					return
-				}
-			}
-
-			data, _ := fs.ReadFile(adminFS, "index.html")
-			c.Data(200, "text/html; charset=utf-8", data)
-			return
-		}
-
+		/**
+		 * 管理后台直接挂在**根路径**。
+		 *
+		 * 以前后台在 /catflap/ 下、根路径留给导航页。
+		 * 导航页砍掉之后没有第二个前端了，再保留子路径就是纯粹的多打一段字 ——
+		 * 访问 http://IP:3791/ 直接进后台。
+		 *
+		 * 静态资源优先：/assets/xxx.js 这类能命中就按文件返回，
+		 * 命中不了才回退 index.html（前端 SPA 路由靠这个）。
+		 */
 		filePath := strings.TrimPrefix(path, "/")
 		if filePath != "" {
-			if _, err := fs.Stat(homeFS, filePath); err == nil {
-				c.FileFromFS(filePath, http.FS(homeFS))
+			if _, err := fs.Stat(adminFS, filePath); err == nil {
+				c.FileFromFS(filePath, http.FS(adminFS))
 				return
 			}
 		}
@@ -115,7 +105,8 @@ func Run(webFS fs.FS) {
 			return
 		}
 
-		data, _ := fs.ReadFile(homeFS, "index.html")
+		// 兜底：交给管理后台的 index.html（前端 SPA 路由靠这个）
+		data, _ := fs.ReadFile(adminFS, "index.html")
 		c.Data(200, "text/html; charset=utf-8", data)
 	})
 

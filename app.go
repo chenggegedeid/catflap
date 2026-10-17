@@ -44,7 +44,7 @@ var (
 	homeURL    = backendURL + "/"
 )
 
-//go:embed web/admin/dist web/home/dist
+//go:embed web/admin/dist
 var webFS embed.FS
 
 func initRuntime() {

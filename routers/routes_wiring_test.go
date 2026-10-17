@@ -107,9 +107,12 @@ func TestMountedRoutesCoverEveryModule(t *testing.T) {
 		return false
 	}
 
+	/**
+	 * home 已从这里移除：导航页功能整块砍掉（v2.1.0 之后）。
+	 * 它的路由 /api/home/* 不再存在，所以也不该再要求。
+	 */
 	want := []string{
 		"/api/auth/",
-		"/api/home/",
 		"/api/webhook/",
 		"/api/cert/",
 		"/api/stun/",

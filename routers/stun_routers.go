@@ -158,13 +158,6 @@ func StunRouters(g *gin.RouterGroup) {
 		app.StunMCEntrySyncView,
 	)
 
-	// 切换某个 service 是否在 home 显示（与 home 模块联动）
-	g.PUT(
-		"stun/service/show-on-home",
-		middleware.BindJsonMiddleware[stun_api.StunServiceShowOnHomeRequest],
-		app.StunServiceShowOnHomeView,
-	)
-
 }
 
 // 把本模块的挂载交给组件注册表，routers/enter.go 不再需要列它。

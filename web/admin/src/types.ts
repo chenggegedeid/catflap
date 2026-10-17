@@ -562,8 +562,6 @@ export interface ProxyListener {
 
 /** 一个站点，对应 nginx 的一个 server 块 */
 export interface ProxySite {
-  /** 在导航主页上显示这个站点（和穿透服务那个标记是一回事） */
-  showOnHome?: boolean
   id: number
   /**
    * 站点后端在哪台设备上（和设备表按 id 关联）。

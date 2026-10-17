@@ -9,7 +9,6 @@ import {
   FileText,
   Pencil,
   Power,
-  Home as HomeIcon,
   Plus,
   Settings2,
   ShieldCheck,
@@ -1128,12 +1127,16 @@ export function ReverseProxy() {
   // 这几秒按钮上什么都不变的话用户以为没点着，再点一下又切回去了
   const [flagBusy, setFlagBusy] = useState(0)
 
-  const toggleSiteFlag = async (s: ProxySite, flag: 'enabled' | 'showOnHome') => {
-    const next = flag === 'enabled' ? !s.enabled : !s.showOnHome
+  /**
+   * 只剩「启停」一个开关了。
+   * 以前还有「添加到主页」（把站点同步到导航页），导航页砍掉后没了。
+   */
+  const toggleSiteFlag = async (s: ProxySite, flag: 'enabled') => {
+    const next = !s.enabled
     setFlagBusy(s.id)
     try {
       await api.setProxySiteFlag(s.id, flag, next)
-      toast(flag === 'enabled' ? (next ? '已启用' : '已停用') : next ? '已添加到主页' : '已从主页移除')
+      toast(next ? '已启用' : '已停用')
       await refresh()
     } catch (e) {
       toast('操作失败: ' + errText(e))
@@ -1533,7 +1536,7 @@ function SiteCard({
   testingId: number
   flagBusy: number
   onTest: () => void
-  onToggleFlag: (flag: 'enabled' | 'showOnHome') => void
+  onToggleFlag: (flag: 'enabled') => void
   onEdit: () => void
   onRemove: () => void
   /** 打开这个站点的访问日志 */
@@ -1565,13 +1568,6 @@ function SiteCard({
             }`}
           >
             <Power className="h-3 w-3" />
-          </button>
-          <button
-            onClick={() => onToggleFlag('showOnHome')}
-            title={s.showOnHome ? '从主页移除' : '添加到主页'}
-            className={`${iconBtn} ${s.showOnHome ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-          >
-            <HomeIcon className="h-3 w-3" />
           </button>
           <button onClick={onEdit} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="编辑">
             <Pencil className="h-3 w-3" />

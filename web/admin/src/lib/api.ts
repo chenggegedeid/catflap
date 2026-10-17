@@ -427,12 +427,6 @@ export const deleteStunService = (deviceId: number, serviceId: number) =>
     body: JSON.stringify({ deviceId, serviceId }),
   })
 
-export const setStunShowOnHome = (deviceId: number, serviceId: number, show: boolean) =>
-  request<unknown>('/api/stun/service/show-on-home', {
-    method: 'PUT',
-    body: JSON.stringify({ deviceId, serviceId, show }),
-  })
-
 /**
  * 立即把服务当前的外网地址写到入口域名上；平时端口一变会自动同步。
  *
@@ -465,14 +459,6 @@ export const syncStunMCEntry = (deviceId: number, serviceId: number) =>
     method: 'POST',
     body: JSON.stringify({ deviceId, serviceId }),
   })
-
-export interface HomeApp {
-  id: string
-  type: string
-}
-
-export const getHomeConfig = () =>
-  request<{ apps: HomeApp[] }>('/api/home/config')
 
 // ===================== DDNS =====================
 
@@ -1005,7 +991,7 @@ export const scanProxyLan = (cidr: string) =>
 export const getProxySiteOptions = () => request<ProxySiteOptions>('/api/proxy/site-options')
 
 /** 站点的一键开关（启用 / 显示在主页） */
-export const setProxySiteFlag = (id: number, flag: 'enabled' | 'showOnHome', value: boolean) =>
+export const setProxySiteFlag = (id: number, flag: 'enabled', value: boolean) =>
   request<unknown>('/api/proxy/site/flag', {
     method: 'POST',
     body: JSON.stringify({ id, flag, value }),

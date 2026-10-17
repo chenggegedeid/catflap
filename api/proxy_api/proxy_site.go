@@ -152,8 +152,6 @@ func (ProxyApi) ProxySiteFlagView(c *gin.Context) {
 	switch flag {
 	case "enabled":
 		site.Enabled = cr.Value
-	case "showonhome":
-		site.ShowOnHome = cr.Value
 	default:
 		res.FailWithMsg("不认识的开关", c)
 		return
