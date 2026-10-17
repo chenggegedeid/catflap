@@ -21,6 +21,7 @@ import { Toasts } from './components/feedback/Toasts'
 import { TopRightActions } from './components/chrome/TopRightActions'
 import { AppGrid } from './components/grid/AppGrid'
 import { ContextMenu, type MenuState } from './components/grid/ContextMenu'
+import { SearchBar } from './components/search/SearchBar'
 import { HomeProvider, useHome, visibleApps, visibleCategories } from './state/HomeProvider'
 import type { AppView } from './types'
 
@@ -118,6 +119,8 @@ function HomePage() {
 
         <div className="flex flex-col items-center gap-6">
           <Header title={cfg?.title ?? 'Catflap'} showTime={cfg?.showTime ?? true} />
+          {/* 搜索框要等配置到位（要拿引擎和应用列表），加载中不渲染 */}
+          {cfg && <SearchBar config={cfg} />}
         </div>
 
         <div className="mt-8 flex flex-1 gap-4 sm:gap-6">
