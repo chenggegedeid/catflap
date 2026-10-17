@@ -374,29 +374,64 @@ func tcpStunHealthKeepAlive(
 	currentIP := publicIP
 	currentPort := publicPort
 
+	/*
+	   打洞用的那台 STUN 服务器要**记住**，重连时优先回到同一台。
+
+	   原因（这是 TCP 打洞端口漂移的根因）：
+	   NAT3 / 端口受限锥形 NAT 下，同一个本机端口访问**不同**的服务器 IP，
+	   NAT 会分配**不同**的公网端口。而 GetBackupSTUNServer() 是"哪个先响应就用哪个"，
+	   每次调用可能返回不同的服务器 —— 于是每重连一次，公网端口就换一个，
+	   表现就是"端口几分钟变一次"（保活周期 25 秒）。
+
+	   lucky/natmap 能稳定数天，就是因为它始终对着同一台服务器续期。
+	*/
+	var pinnedServer string
+	if currentStunConn != nil {
+		if ra := currentStunConn.RemoteAddr(); ra != nil {
+			pinnedServer = ra.String()
+		}
+	}
+
+	// 候选服务器：原来那台优先，其次才考虑换。换服务器必然导致端口变化，
+	// 所以只在原服务器真的连不上时才走到后面。
+	serverCandidates := func() []string {
+		list := make([]string, 0, 3)
+		if pinnedServer != "" {
+			list = append(list, pinnedServer)
+		}
+		if best, err := Runtime.STUNService.GetBestSTUNServer(); err == nil {
+			list = append(list, best)
+		}
+		if backup, err := Runtime.STUNService.GetBackupSTUNServer(); err == nil {
+			list = append(list, backup)
+		}
+		return list
+	}
+
 	// 重连并重新握手。CGNAT 等多层 NAT 下重连后映射端口可能变化：
 	// 变化后的新映射同样可以把入站流量送到本服务（同一个本地端口），
 	// 所以这里不再把「端口变了」当致命错误，而是跟随新端口继续保活，
 	// 并通过 onState 通知上层重新同步 DDNS / 入口重定向。
 	redial := func() (net.Conn, string, int, error) {
-		stunServer, err := Runtime.STUNService.GetBestSTUNServer()
-		if err != nil {
-			stunServer, err = Runtime.STUNService.GetBackupSTUNServer()
-			if err != nil {
-				return nil, "", 0, fmt.Errorf("get stun server for reconnect: %w", err)
-			}
-		}
 		localAddr := fmt.Sprintf("%s:%d", localIP, localPort)
-		conn, dialErr := CurrentOutboundIface().DialReusable("tcp", localAddr, stunServer)
-		if dialErr != nil {
-			return nil, "", 0, fmt.Errorf("reconnect stun server %s failed: %w", stunServer, dialErr)
+		var lastErr error
+		for _, stunServer := range serverCandidates() {
+			conn, dialErr := CurrentOutboundIface().DialReusable("tcp", localAddr, stunServer)
+			if dialErr != nil {
+				lastErr = fmt.Errorf("reconnect stun server %s failed: %w", stunServer, dialErr)
+				continue
+			}
+			ip, port, hsErr := DoStunHandshake(conn)
+			if hsErr != nil {
+				conn.Close()
+				lastErr = fmt.Errorf("stun handshake after reconnect failed: %w", hsErr)
+				continue
+			}
+			// 成功了就把这台钉住，后续保活都回这里，端口才稳得住
+			pinnedServer = stunServer
+			return conn, ip, port, nil
 		}
-		ip, port, hsErr := DoStunHandshake(conn)
-		if hsErr != nil {
-			conn.Close()
-			return nil, "", 0, fmt.Errorf("stun handshake after reconnect failed: %w", hsErr)
-		}
-		return conn, ip, port, nil
+		return nil, "", 0, lastErr
 	}
 
 	followOrRestart := func(verifyErr error) error {
@@ -422,13 +457,24 @@ func tcpStunHealthKeepAlive(
 	}
 
 	// 首次保活验证：CGNAT 等多层 NAT 下，内网自连公网地址（回环）不通属正常，
-	// 不能作为健康依据。改用当前 STUN 连接重新握手，既保活又确认映射端口未变。
-	if err := tcpStunVerifyMapping(currentStunConn, currentPort); err != nil {
+	// 不能作为健康依据。改用当前 STUN 连接重新握手，既保活又确认映射。
+	//
+	// 同样是"只有连不上才重连"：端口对不上只是映射变了，跟着新端口走即可，
+	// 重连反而会因为换服务器（NAT3）再换一次端口。
+	if ip, port, err := DoStunHandshake(currentStunConn); err != nil {
 		if err := followOrRestart(err); err != nil {
 			return err
 		}
-	} else if onAlive != nil {
-		onAlive(currentIP, currentPort)
+	} else {
+		if port != currentPort || ip != currentIP {
+			currentIP, currentPort = ip, port
+			if onState != nil {
+				onState(STUNState{State: STUNMapped, ExternalIP: ip, ExternalPort: uint16(port)})
+			}
+		}
+		if onAlive != nil {
+			onAlive(currentIP, currentPort)
+		}
 	}
 
 	// 开启28s 的检查
@@ -485,19 +531,38 @@ func tcpStunHealthKeepAlive(
 
 		case <-healthTicker.C:
 
-			// 保活 + 映射验证：CGNAT 等环境下内向回环不通属正常，直接用 STUN 握手确认。
-			// 验证成功说明映射未变，顺带的 STUN 流量就是保活心跳。
-			if err := tcpStunVerifyMapping(currentStunConn, currentPort); err == nil {
-				if onAlive != nil {
-					onAlive(currentIP, currentPort)
+			/*
+			   保活：用**现有连接**重新握手一次就够了。
+
+			   关键点是区分两种情况，以前没区分，导致端口一直漂：
+			     - 连接还在、只是公网端口变了 → 更新记录即可，**不要重连**。
+			       重连会换服务器（NAT3 下换服务器 = 换端口），于是"变了又变"，
+			       形成"端口变 → 重连 → 端口再变"的循环，这正是漂移的放大器。
+			     - 连接断了（握手报错）→ 才重连，且固定回原来那台服务器。
+
+			   握手本身产生的流量就是保活心跳，不需要额外发包。
+			*/
+			ip, port, err := DoStunHandshake(currentStunConn)
+			if err != nil {
+				// 连接不可用：重连（候选列表里原来那台服务器排在最前）
+				if err := followOrRestart(err); err != nil {
+					return err
 				}
 				continue
 			}
 
-			// 验证失败：stunConn 断了或 NAT 映射已变，重连并跟随新映射
-			verifyErr := tcpStunVerifyMapping(currentStunConn, currentPort)
-			if err := followOrRestart(verifyErr); err != nil {
-				return err
+			if port != currentPort || ip != currentIP {
+				logrus.Infof("[%s] 公网映射变化 -> %s:%d，跟随新端口继续保活（不重连）",
+					serviceName, ip, port)
+				currentIP, currentPort = ip, port
+				// 先报 MAPPED 让上层把入口重定向标脏，再触发 DDNS/重定向同步
+				if onState != nil {
+					onState(STUNState{State: STUNMapped, ExternalIP: ip, ExternalPort: uint16(port)})
+				}
+			}
+
+			if onAlive != nil {
+				onAlive(currentIP, currentPort)
 			}
 		}
 	}

@@ -34,6 +34,12 @@ WATCHED = [
     "scripts/install.sh",
     "docs/guides/快速上手.md",
     "docs/guides/部署与升级.md",
+    # IP 归属地库：被 //go:embed 引用，删掉会直接编译失败；
+    # 许可证是 Apache-2.0 的要求，删掉就是许可不合规
+    "modules/audit/geo/ip2region_v4.xdb",
+    # IPv6 的库大（解压后 37MB），存的是 gzip 版
+    "modules/audit/geo/ip2region_v6.xdb.gz",
+    "modules/audit/geo/LICENSE.ip2region",
 ]
 
 # 已经不存在、且不该再被引用的历史路径。出现即报错。

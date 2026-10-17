@@ -26,7 +26,7 @@ export type ServiceState = 'running' | 'off' | 'failed'
 
 const stateDot: Record<ServiceState, string> = {
   running: 'bg-emerald-500',
-  off: 'bg-slate-300',
+  off: 'bg-fill',
   failed: 'bg-rose-400',
 }
 
@@ -90,7 +90,7 @@ export function ServiceCard({
       className={`flex cursor-grab flex-col rounded-xl border p-2.5 transition hover:border-blue-200 hover:shadow-md ${
         dropTarget ? 'ring-2 ring-blue-300' : ''
       } ${dragging ? 'opacity-40' : ''} ${
-        off ? 'border-slate-200/80 bg-slate-50/60' : 'border-slate-200/80'
+        off ? 'border-line/80 bg-surface-2/60' : 'border-line/80'
       } ${dim ? 'opacity-60' : ''}`}
     >
       {/* 行1：状态点 + 名字 + 图标行 */}
@@ -101,7 +101,7 @@ export function ServiceCard({
         />
         <span
           className={`min-w-0 flex-1 truncate text-[13px] font-bold ${
-            off ? 'text-slate-400' : 'text-slate-800'
+            off ? 'text-muted' : 'text-content'
           }`}
         >
           {name || '未命名服务'}
@@ -140,7 +140,7 @@ export function CardBadge({
   title?: string
 }) {
   const tones: Record<string, string> = {
-    slate: 'bg-slate-100 text-slate-500',
+    slate: 'bg-surface-2 text-muted',
     violet: 'bg-violet-50 text-violet-600',
     teal: 'bg-teal-50 text-teal-600',
     amber: 'bg-amber-50 text-amber-600',

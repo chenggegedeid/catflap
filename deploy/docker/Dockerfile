@@ -1,7 +1,8 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # Catflap —— 多阶段构建
 #
-# 注意顺序：后端用 //go:embed 嵌入两个 dist，所以**必须先构建前端**。
+# 注意顺序：后端用 //go:embed 嵌入 web/admin/dist，所以**必须先构建前端**。
+# （导航主页 web/home 已在 v2.1.0 之后移除，这里只剩一个前端。）
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ── 阶段 1：构建前端 ────────────────────────────────────────────────────────
@@ -12,7 +13,6 @@ COPY web/ ./web/
 
 # 用 npm ci 保证按 package-lock.json 精确安装
 RUN cd web/admin && npm ci --no-audit --no-fund && npm run build
-RUN cd web/home && npm ci --no-audit --no-fund && npm run build
 
 # ── 阶段 2：构建后端 ────────────────────────────────────────────────────────
 FROM golang:1.25-alpine AS backend
@@ -29,7 +29,6 @@ RUN go mod download
 COPY . .
 # 用阶段 1 构建出来的 dist 覆盖仓库里的那份，保证镜像里的前端与源码一致
 COPY --from=web /src/web/admin/dist ./web/admin/dist
-COPY --from=web /src/web/home/dist ./web/home/dist
 
 ARG VERSION=dev
 # ⚠️ 注入的是**裸版本号**（1.0.0，不带 v）：
@@ -57,7 +56,9 @@ WORKDIR /opt/catflap
 RUN install -d -o catflap -g catflap -m 0700 config data
 
 USER catflap
-EXPOSE 3333
+# 3791 = core.DefaultPort（core/listen.go）。改了那边的默认值这里要跟着改，
+# 否则健康检查会一直打在一个没人听的端口上，容器永远 unhealthy。
+EXPOSE 3791
 
 # 这两个目录必须挂卷，否则容器重建就丢配置
 VOLUME ["/opt/catflap/config", "/opt/catflap/data"]
@@ -65,6 +66,6 @@ VOLUME ["/opt/catflap/config", "/opt/catflap/data"]
 # 健康检查：只要进程还能响应版本接口就算活着
 # （路由是 /api/version，见 routers/system_routers.go 的 SystemRouters）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3333/api/version >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:3791/api/version >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["/usr/local/bin/catflap"]

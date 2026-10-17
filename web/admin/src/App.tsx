@@ -49,7 +49,7 @@ function App() {
   }
 
   if (auth === 'loading') {
-    return <div className="grid min-h-screen place-items-center bg-slate-50 text-sm text-slate-400">加载中…</div>
+    return <div className="grid min-h-screen place-items-center bg-surface-2 text-sm text-muted">加载中…</div>
   }
   if (auth === 'setup') {
     return <Setup onSuccess={() => setAuth('authed')} />

@@ -20,6 +20,12 @@ type wolComponent struct {
 
 func (wolComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (wolComponent) Title() string { return "网络唤醒" }
+
+// Summary 见 core/component.Describer。
+func (wolComponent) Summary() string { return "发魔术包唤醒局域网里的机器" }
+
 func (wolComponent) Init(context.Context) error { return InitWOL() }
 
 func init() {

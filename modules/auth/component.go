@@ -18,6 +18,12 @@ type authComponent struct{}
 
 func (authComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (authComponent) Title() string { return "登录与鉴权" }
+
+// Summary 见 core/component.Describer。
+func (authComponent) Summary() string { return "面板密码、登录会话与接口鉴权" }
+
 // Init 无 ctx 可用：密码哈希与 token 密钥都在本机文件里，没有网络等待。
 // 这里显式忽略而不是传下去，是为了让「auth 不做任何可阻塞的事」这条约定
 // 在签名的层面就看得出来。

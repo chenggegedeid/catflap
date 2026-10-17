@@ -114,12 +114,12 @@ export function TrafficPanel() {
             title="实时速率"
             action={
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-400">近 1 分钟</span>
+                <span className="text-[11px] text-muted">近 1 分钟</span>
                 <button
                   onClick={() => setPaused((p) => !p)}
                   title={paused ? '继续刷新' : '暂停刷新（看瞬时值时用）'}
                   className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition ${
-                    paused ? 'bg-amber-50 text-amber-600' : 'text-slate-500 hover:bg-slate-100'
+                    paused ? 'bg-amber-50 text-amber-600' : 'text-muted hover:bg-surface-2'
                   }`}
                 >
                   <RotateCw className={`h-3 w-3 ${paused ? '' : 'animate-spin'}`} />
@@ -175,7 +175,7 @@ export function TrafficPanel() {
                   className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
                     trendHours === h
                       ? 'bg-blue-50 text-blue-600 ring-1 ring-blue-200'
-                      : 'text-slate-500 hover:bg-slate-50'
+                      : 'text-muted hover:bg-surface-2'
                   }`}
                 >
                   {label}
@@ -205,7 +205,7 @@ export function TrafficPanel() {
       <SuspiciousPanel />
 
       {rt?.totals.since ? (
-        <div className="px-1 text-[11px] text-slate-400">
+        <div className="px-1 text-[11px] text-muted">
           统计始于 {new Date(rt.totals.since * 1000).toLocaleString('zh-CN')}
           {paused && ' · 已暂停刷新'}
         </div>
@@ -219,7 +219,7 @@ function RateNumber({ label, value, color, dir }: { label: string; value: number
   const Icon = dir === 'in' ? ArrowDown : ArrowUp
   return (
     <div>
-      <div className="flex items-center gap-1 text-xs text-slate-500">
+      <div className="flex items-center gap-1 text-xs text-muted">
         <Icon className="h-3 w-3" style={{ color }} />
         {label}
       </div>
@@ -243,7 +243,7 @@ function RateChart({ series }: { series: { in: number; out: number }[] }) {
   const pad = 2
 
   if (series.length === 0) {
-    return <div className="flex h-[90px] items-center justify-center text-xs text-slate-400">等待数据…</div>
+    return <div className="flex h-[90px] items-center justify-center text-xs text-muted">等待数据…</div>
   }
 
   let peak = 0
@@ -271,7 +271,7 @@ function RateChart({ series }: { series: { in: number; out: number }[] }) {
         <polyline points={toPoints((p) => p.in)} fill="none" stroke="#378ADD" strokeWidth={1.5} />
         <polyline points={toPoints((p) => p.out)} fill="none" stroke="#639922" strokeWidth={1.5} />
       </svg>
-      <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
+      <div className="mt-1 flex items-center justify-between text-[11px] text-muted">
         <span className="flex items-center gap-3">
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-2.5 bg-[#378ADD]" /> 入站
@@ -312,7 +312,7 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
     .slice(0, 6)
 
   if (rows.length === 0) {
-    return <div className="flex h-[110px] items-center justify-center text-xs text-slate-400">暂无流量</div>
+    return <div className="flex h-[110px] items-center justify-center text-xs text-muted">暂无流量</div>
   }
 
   const peak = rows[0].total || 1
@@ -322,7 +322,7 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
       {rows.map((r) => (
         <div key={r.key}>
           <div className="mb-1 flex items-baseline justify-between text-xs">
-            <span className="text-slate-600">
+            <span className="text-content">
               {r.tunnel && (
                 <span
                   title="穿透服务（不经过反向代理，直接由洞口转发）"
@@ -332,13 +332,13 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
                 </span>
               )}
               {r.label}
-              <span className="ml-2 text-[11px] text-slate-400">
+              <span className="ml-2 text-[11px] text-muted">
                 {fmtCount(r.requests)} {r.tunnel ? '次连接' : '次'}
               </span>
             </span>
-            <span className="tabular-nums text-slate-500">{fmtBytes(r.total)}</span>
+            <span className="tabular-nums text-muted">{fmtBytes(r.total)}</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
             <div
               className={`h-full rounded-full ${r.tunnel ? 'bg-blue-400' : 'bg-blue-500'}`}
               style={{ width: `${Math.max((r.total / peak) * 100, 2)}%` }}
@@ -347,9 +347,9 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
 
           {/* 展开看这个服务**按天**的流量历史 —— 之前只有总量，看不出哪天用得多 */}
           {expanded === r.key && (
-            <div className="mt-2 rounded-lg bg-slate-50 px-2.5 py-2">
+            <div className="mt-2 rounded-lg bg-surface-2 px-2.5 py-2">
               {(trend?.perServiceDay?.[r.key.replace(/^(site-|tun-)/, '')] ?? []).length === 0 ? (
-                <div className="text-[11px] text-slate-400">这个范围内没有它的记录</div>
+                <div className="text-[11px] text-muted">这个范围内没有它的记录</div>
               ) : (
                 <MiniDayBars
                   points={trend!.perServiceDay![r.key.replace(/^(site-|tun-)/, '')]}
@@ -359,7 +359,7 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
           )}
           <button
             onClick={() => setExpanded(expanded === r.key ? '' : r.key)}
-            className="mt-0.5 text-[10px] text-slate-400 transition hover:text-blue-500"
+            className="mt-0.5 text-[10px] text-muted transition hover:text-blue-500"
           >
             {expanded === r.key ? '收起历史 ▲' : '按天历史 ▼'}
           </button>
@@ -376,15 +376,15 @@ function MiniDayBars({ points }: { points: { date: string; in: number; out: numb
     <div className="space-y-1">
       {points.map((p) => (
         <div key={p.date} className="flex items-center gap-2 text-[10px]">
-          <span className="w-[68px] shrink-0 font-mono text-slate-400">{p.date.slice(5)}</span>
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-white ring-1 ring-slate-200/70">
+          <span className="w-[68px] shrink-0 font-mono text-muted">{p.date.slice(5)}</span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface ring-1 ring-line/70">
             <div
               className="h-full rounded-full bg-blue-400"
               style={{ width: `${Math.max(((p.in + p.out) / peak) * 100, 2)}%` }}
               title={`${p.date}：入 ${fmtBytes(p.in)} / 出 ${fmtBytes(p.out)}`}
             />
           </div>
-          <span className="w-[64px] shrink-0 text-right tabular-nums text-slate-500">
+          <span className="w-[64px] shrink-0 text-right tabular-nums text-muted">
             {fmtBytes(p.in + p.out)}
           </span>
         </div>
@@ -396,9 +396,9 @@ function MiniDayBars({ points }: { points: { date: string; in: number; out: numb
 /** 指标卡 */
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-slate-50 px-4 py-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-0.5 text-xl font-semibold tabular-nums text-slate-700">{value}</div>
+    <div className="rounded-xl bg-surface-2 px-4 py-3">
+      <div className="text-xs text-muted">{label}</div>
+      <div className="mt-0.5 text-xl font-semibold tabular-nums text-content">{value}</div>
     </div>
   )
 }
@@ -469,17 +469,17 @@ function SuspiciousPanel() {
         />
       </div>
       <div className="px-5 pb-4">
-        <div className="mb-2 text-[11px] text-slate-400">
+        <div className="mb-2 text-[11px] text-muted">
           24 小时内异常访问（4xx）密集的来源。点「拉黑」临时封 1 天。
         </div>
         <div className="space-y-1.5">
           {list.map((x) => (
             <div key={x.ip} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-rose-50/50 px-3 py-2">
-              <span className="font-mono text-xs text-slate-700">{x.ip}</span>
-              <span className="text-[11px] text-slate-500">{x.requests} 次</span>
+              <span className="font-mono text-xs text-content">{x.ip}</span>
+              <span className="text-[11px] text-muted">{x.requests} 次</span>
               <span className="text-[11px] font-semibold text-rose-600">异常 {x.errors}</span>
               {x.paths.length > 0 && (
-                <span className="truncate font-mono text-[10px] text-slate-400">
+                <span className="truncate font-mono text-[10px] text-muted">
                   在扫 {x.paths.slice(0, 2).join('、')}
                 </span>
               )}
@@ -493,7 +493,7 @@ function SuspiciousPanel() {
             </div>
           ))}
         </div>
-        {msg && <div className="mt-2 text-[11px] text-slate-500">{msg}</div>}
+        {msg && <div className="mt-2 text-[11px] text-muted">{msg}</div>}
       </div>
     </Card>
   )
@@ -515,7 +515,7 @@ function RateLineChart({
   bucketSeconds: number
 }) {
   if (series.length === 0) {
-    return <div className="flex h-[180px] items-center justify-center text-xs text-slate-400">这个范围内没有流量记录</div>
+    return <div className="flex h-[180px] items-center justify-center text-xs text-muted">这个范围内没有流量记录</div>
   }
 
   // 速率（bps），画图前先找到峰值用来定 y 轴刻度
@@ -553,14 +553,14 @@ function RateLineChart({
 
   return (
     <div>
-      <div className="mb-1 flex items-center gap-4 text-[11px] text-slate-500">
+      <div className="mb-1 flex items-center gap-4 text-[11px] text-muted">
         <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-2 rounded-full bg-slate-400" /> 入站速率
+          <span className="inline-block h-2 w-2 rounded-full bg-fill" /> 入站速率
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block h-2 w-2 rounded-full bg-violet-400" /> 出站速率
         </span>
-        <span className="ml-auto text-slate-400">
+        <span className="ml-auto text-muted">
           峰值 {fmtRate(peak)}bps
         </span>
       </div>

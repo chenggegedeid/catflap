@@ -24,6 +24,12 @@ type certComponent struct {
 
 func (certComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (certComponent) Title() string { return "证书管理" }
+
+// Summary 见 core/component.Describer。
+func (certComponent) Summary() string { return "申请与自动续签 HTTPS 证书" }
+
 // Init 读配置、装载磁盘上已有的证书、启动续期与热重载调度器。
 func (certComponent) Init(context.Context) error { return InitCert() }
 

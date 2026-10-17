@@ -136,7 +136,7 @@ interface CertStatus {
 }
 
 function certStatus(c: Certificate): CertStatus {
-  if (!c.enabled) return { label: '已禁用', tone: 'bg-slate-100 text-slate-500', icon: CircleSlash }
+  if (!c.enabled) return { label: '已禁用', tone: 'bg-surface-2 text-muted', icon: CircleSlash }
   if (c.expired) return { label: '已过期', tone: 'bg-rose-50 text-rose-500', icon: TriangleAlert }
   if (c.lastError) return { label: '有错误', tone: 'bg-rose-50 text-rose-500', icon: TriangleAlert }
   if (!c.loaded) {
@@ -289,8 +289,8 @@ function CertModal({
   }
 
   const input =
-    'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400'
-  const labelText = 'mb-1 text-xs font-semibold text-slate-500'
+    'w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted'
+  const labelText = 'mb-1 text-xs font-semibold text-muted'
 
   return (
     <div
@@ -299,13 +299,13 @@ function CertModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">{initial ? '编辑证书' : '添加证书'}</div>
+          <div className="text-base font-bold text-content">{initial ? '编辑证书' : '添加证书'}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
@@ -341,7 +341,7 @@ function CertModal({
                 </option>
               ))}
             </select>
-            <div className="mt-1.5 text-[11px] leading-relaxed text-slate-400">{meta.hint}</div>
+            <div className="mt-1.5 text-[11px] leading-relaxed text-muted">{meta.hint}</div>
           </label>
 
           {/* HTTP-01 的限制是协议层面的，常驻展示，不等报错才说 */}
@@ -372,7 +372,7 @@ function CertModal({
               placeholder={'一行一个，如\nexample.com\n*.example.com'}
               className={`${input} font-mono`}
             />
-            <div className="mt-1 text-[11px] text-slate-400">
+            <div className="mt-1 text-[11px] text-muted">
               {domains.length > 0
                 ? `将覆盖 ${domains.length} 个域名：${domains.join('、')}`
                 : isSelfSigned
@@ -380,7 +380,7 @@ function CertModal({
                   : '用换行或逗号分隔'}
             </div>
             {hasWildcard && (
-              <div className="mt-1 text-[11px] text-slate-400">
+              <div className="mt-1 text-[11px] text-muted">
                 通配符只覆盖一层：<span className="font-mono">*.example.com</span> 能覆盖{' '}
                 <span className="font-mono">a.example.com</span>，但不覆盖{' '}
                 <span className="font-mono">example.com</span> 和{' '}
@@ -436,7 +436,7 @@ function CertModal({
                   />
                 )}
                 {form.directoryChoice.includes('staging') && (
-                  <div className="mt-1 text-[11px] leading-5 text-slate-400">
+                  <div className="mt-1 text-[11px] leading-5 text-muted">
                     这里签出来的证书浏览器不认，只用来验证 DNS 权限和域名填对了没有。
                     跑通之后改回正式环境，会重新签一张能用的。
                   </div>
@@ -446,7 +446,7 @@ function CertModal({
                   第一次配 DNS-01 十有八九要试几轮，这句得在他动手前说
                 */}
                 {form.directoryChoice === '' && (
-                  <div className="mt-1 text-[11px] leading-5 text-slate-400">
+                  <div className="mt-1 text-[11px] leading-5 text-muted">
                     正式环境一小时内验证失败 5 次就会被暂时挡住，只能等。
                     第一次配、或者反复签不出来，先用上面的测试环境试通再回来。
                   </div>
@@ -492,7 +492,7 @@ function CertModal({
                       </option>
                     ))}
                   </select>
-                  <div className="mt-1 text-[11px] text-slate-400">
+                  <div className="mt-1 text-[11px] text-muted">
                     复用 DDNS 里已配好的凭证，签发时自动写入 TXT 记录，验证完成后自动清理
                   </div>
                 </label>
@@ -507,14 +507,14 @@ function CertModal({
                     onChange={(e) => setForm((p) => ({ ...p, httpPort: e.target.value }))}
                     className={input}
                   />
-                  <div className="mt-1 text-[11px] text-slate-400">
+                  <div className="mt-1 text-[11px] text-muted">
                     CA 始终从 80 端口发起验证。这里只在你用端口转发把外部 80 转到本机其它端口时才需要改。
                   </div>
                 </label>
               )}
 
-              <details className="rounded-xl bg-slate-50 px-3 py-2">
-                <summary className="cursor-pointer text-xs font-semibold text-slate-500">
+              <details className="rounded-xl bg-surface-2 px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold text-muted">
                   外部账户绑定 EAB（ZeroSSL 等需要）
                 </summary>
                 <div className="mt-2 space-y-2">
@@ -543,7 +543,7 @@ function CertModal({
           )}
 
           <div className="grid grid-cols-2 gap-2">
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs font-medium text-content">
               <input
                 type="checkbox"
                 checked={form.enabled}
@@ -552,7 +552,7 @@ function CertModal({
               />
               启用
             </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs font-medium text-content">
               <input
                 type="checkbox"
                 checked={form.isDefault}
@@ -562,7 +562,7 @@ function CertModal({
               设为默认证书
             </label>
           </div>
-          <div className="text-[11px] text-slate-400">
+          <div className="text-[11px] text-muted">
             默认证书用于客户端没带 SNI（比如直接用 IP 访问）或没有域名匹配时兜底，全局只能有一张。
           </div>
 
@@ -573,7 +573,7 @@ function CertModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -623,7 +623,7 @@ function UploadModal({
   }
 
   const box =
-    'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed outline-none focus:border-blue-400'
+    'w-full rounded-xl border border-line bg-surface px-3 py-2 font-mono text-[11px] leading-relaxed outline-none focus:border-blue-400'
 
   return (
     <div
@@ -632,13 +632,13 @@ function UploadModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-2xl overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">上传 PEM — {cert.name}</div>
+          <div className="text-base font-bold text-content">上传 PEM — {cert.name}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
@@ -646,9 +646,9 @@ function UploadModal({
 
         <div className="space-y-3">
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">
+            <div className="mb-1 text-xs font-semibold text-muted">
               证书链（fullchain）
-              <span className="ml-1 font-normal text-slate-400">含中间证书，否则部分客户端会报证书链不完整</span>
+              <span className="ml-1 font-normal text-muted">含中间证书，否则部分客户端会报证书链不完整</span>
             </div>
             <textarea
               rows={8}
@@ -659,7 +659,7 @@ function UploadModal({
             />
           </label>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">私钥</div>
+            <div className="mb-1 text-xs font-semibold text-muted">私钥</div>
             <textarea
               rows={6}
               value={keyPem}
@@ -668,7 +668,7 @@ function UploadModal({
               className={box}
             />
           </label>
-          <div className="text-[11px] text-slate-400">
+          <div className="text-[11px] text-muted">
             私钥只写到本机 data/cert/ 目录（权限 0600），不会出现在任何接口返回里。
           </div>
           {err && <div className="text-xs text-rose-500">{err}</div>}
@@ -678,7 +678,7 @@ function UploadModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -782,7 +782,7 @@ export function Cert() {
         <div className="py-12 text-center text-rose-500">
           <AlertCircle className="mx-auto h-8 w-8" />
           <div className="mt-2 text-sm font-semibold">数据加载失败</div>
-          <div className="mt-1 text-xs text-slate-500">{loadErr}</div>
+          <div className="mt-1 text-xs text-muted">{loadErr}</div>
           <button onClick={refresh} className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white">
             重试
           </button>
@@ -794,7 +794,7 @@ export function Cert() {
   if (!certs) {
     return (
       <Card>
-        <div className="py-12 text-center text-sm text-slate-400">正在加载...</div>
+        <div className="py-12 text-center text-sm text-muted">正在加载...</div>
       </Card>
     )
   }
@@ -802,18 +802,18 @@ export function Cert() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-base font-bold text-slate-800">证书管理</div>
+        <div className="text-base font-bold text-content">证书管理</div>
       </div>
 
       {/* 这页存在的意义，一句话说清楚 */}
       <Card>
-        <div className="flex gap-3 text-xs leading-relaxed text-slate-500">
+        <div className="flex gap-3 text-xs leading-relaxed text-muted">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
           <div>
-            这里的证书用于在 <span className="font-semibold text-slate-700">STUN 洞口终结 TLS</span>
+            这里的证书用于在 <span className="font-semibold text-content">STUN 洞口终结 TLS</span>
             ：开启后外部访问是 <span className="font-mono">https://</span>，而不是明文 HTTP。
             在 STUN 页面为每个服务填好对外域名并打开「洞口终结 TLS」即可使用，
-            证书续期时只热替换内存中的指针，<span className="font-semibold text-slate-700">不会断开已有连接，也不需要重启穿透</span>。
+            证书续期时只热替换内存中的指针，<span className="font-semibold text-content">不会断开已有连接，也不需要重启穿透</span>。
           </div>
         </div>
       </Card>
@@ -825,8 +825,8 @@ export function Cert() {
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">证书总数</div>
-              <div className="text-2xl font-bold text-slate-800">{list.length}</div>
+              <div className="text-xs text-muted">证书总数</div>
+              <div className="text-2xl font-bold text-content">{list.length}</div>
             </div>
           </div>
         </Card>
@@ -836,8 +836,8 @@ export function Cert() {
               <CircleCheck className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">生效中</div>
-              <div className="text-2xl font-bold text-slate-800">{active}</div>
+              <div className="text-xs text-muted">生效中</div>
+              <div className="text-2xl font-bold text-content">{active}</div>
             </div>
           </div>
         </Card>
@@ -847,8 +847,8 @@ export function Cert() {
               <Clock className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">15 天内到期</div>
-              <div className="text-2xl font-bold text-slate-800">{expiring}</div>
+              <div className="text-xs text-muted">15 天内到期</div>
+              <div className="text-2xl font-bold text-content">{expiring}</div>
             </div>
           </div>
         </Card>
@@ -858,8 +858,8 @@ export function Cert() {
               <TriangleAlert className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">过期 / 异常</div>
-              <div className="text-2xl font-bold text-slate-800">{problem}</div>
+              <div className="text-xs text-muted">过期 / 异常</div>
+              <div className="text-2xl font-bold text-content">{problem}</div>
             </div>
           </div>
         </Card>
@@ -884,7 +884,7 @@ export function Cert() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-sm">
             <thead>
-              <tr className="bg-slate-50/60 text-xs text-slate-500">
+              <tr className="bg-surface-2/60 text-xs text-muted">
                 <th className="px-5 py-2.5 text-left font-medium">名称</th>
                 <th className="px-3 py-2.5 text-left font-medium">来源</th>
                 <th className="px-3 py-2.5 text-left font-medium">覆盖域名</th>
@@ -894,10 +894,10 @@ export function Cert() {
                 <th className="px-5 py-2.5 text-right font-medium">操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-line">
               {list.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={7} className="px-5 py-8 text-center text-sm text-muted">
                     还没有证书，点右上角「添加证书」开始
                   </td>
                 </tr>
@@ -911,7 +911,7 @@ export function Cert() {
                 const selfSigned = c.source === 'self-signed'
                 const canReissue = selfSigned || c.source === 'acme-dns01' || c.source === 'acme-http01'
                 return (
-                  <tr key={c.id} className="align-top text-slate-700 transition hover:bg-slate-50/60">
+                  <tr key={c.id} className="align-top text-content transition hover:bg-surface-2/60">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-1.5 font-semibold">
                         {c.name}
@@ -927,12 +927,12 @@ export function Cert() {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-xs text-slate-500">{sourceLabel(c.source)}</td>
+                    <td className="px-3 py-3 text-xs text-muted">{sourceLabel(c.source)}</td>
                     <td className="px-3 py-3">
                       <div className="flex max-w-xs flex-wrap gap-1">
-                        {c.domains.length === 0 && <span className="text-xs text-slate-400">--</span>}
+                        {c.domains.length === 0 && <span className="text-xs text-muted">--</span>}
                         {c.domains.map((d) => (
-                          <span key={d} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">
+                          <span key={d} className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-content">
                             {d}
                           </span>
                         ))}
@@ -945,14 +945,14 @@ export function Cert() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-xs">
-                      <div className="text-slate-600">{fmtDate(c.notAfter)}</div>
+                      <div className="text-content">{fmtDate(c.notAfter)}</div>
                       {c.notAfter && !c.expired && (
-                        <div className={c.daysLeft <= 15 ? 'text-amber-600' : 'text-slate-400'}>剩 {c.daysLeft} 天</div>
+                        <div className={c.daysLeft <= 15 ? 'text-amber-600' : 'text-muted'}>剩 {c.daysLeft} 天</div>
                       )}
                     </td>
                     {/* 自签证书的签发者就是它自己，直接显示会是「nas.home.lan」，
                         看着像某个叫这名字的 CA。说清楚是谁签的更有用 */}
-                    <td className="px-3 py-3 text-xs text-slate-500">
+                    <td className="px-3 py-3 text-xs text-muted">
                       {selfSigned ? 'Catflap 自签' : c.issuer || '--'}
                     </td>
                     <td className="px-5 py-3 text-right">
@@ -961,7 +961,7 @@ export function Cert() {
                           <button
                             onClick={() => issue(c)}
                             disabled={busy || !c.enabled}
-                            className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+                            className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
                             title={
                               !c.enabled
                                 ? '证书已禁用'
@@ -976,7 +976,7 @@ export function Cert() {
                         {c.source === 'upload' && (
                           <button
                             onClick={() => setUploadModal(c)}
-                            className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                            className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-blue-50 hover:text-blue-600"
                             title="上传 PEM"
                           >
                             <Upload className="h-3 w-3" />
@@ -984,14 +984,14 @@ export function Cert() {
                         )}
                         <button
                           onClick={() => setEditModal({ open: true, initial: c })}
-                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
+                          className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-emerald-50 hover:text-emerald-600"
                           title="编辑"
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
                           onClick={() => removeCert(c)}
-                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                          className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-rose-50 hover:text-rose-500"
                           title="删除"
                         >
                           <Trash2 className="h-3 w-3" />
@@ -1005,7 +1005,7 @@ export function Cert() {
           </table>
         </div>
 
-        <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">共 {list.length} 张证书</div>
+        <div className="border-t border-line px-5 py-3 text-xs text-muted">共 {list.length} 张证书</div>
       </Card>
 
       {editModal.open && (
@@ -1022,7 +1022,7 @@ export function Cert() {
 
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className="rounded-lg bg-slate-900/85 px-4 py-2 text-sm text-white shadow-lg">
+          <div key={t.id} className="rounded-lg bg-inverse/90 px-4 py-2 text-sm text-on-inverse shadow-lg">
             {t.text}
           </div>
         ))}

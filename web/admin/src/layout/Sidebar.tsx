@@ -35,7 +35,7 @@ export function Sidebar({ active, onChange, open, onClose }: SidebarProps) {
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 flex h-screen w-60 shrink-0 flex-col border-r border-slate-200/70 bg-white/95 backdrop-blur transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 lg:bg-white/80 ${
+      className={`fixed inset-y-0 left-0 z-40 flex h-screen w-60 shrink-0 flex-col border-r border-line/70 bg-surface/95 backdrop-blur transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 lg:bg-surface/80 ${
         open ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
       }`}
     >
@@ -43,13 +43,13 @@ export function Sidebar({ active, onChange, open, onClose }: SidebarProps) {
       <div className="flex h-16 items-center gap-2 px-5">
         <div className="-mx-1.5 flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1">
           <img src={logo} alt="Catflap" className="h-9 w-9" />
-          <span className="truncate text-lg font-bold tracking-tight text-slate-800">catflap</span>
+          <span className="truncate text-lg font-bold tracking-tight text-content">catflap</span>
         </div>
         <button
           type="button"
           onClick={onClose}
           title="关闭菜单"
-          className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 lg:hidden"
+          className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-content lg:hidden"
         >
           <X className="h-4 w-4" />
         </button>
@@ -59,7 +59,7 @@ export function Sidebar({ active, onChange, open, onClose }: SidebarProps) {
         {navGroups.map((group, gi) => (
           <div key={gi} className="mb-3">
             {group.title && (
-              <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted">
                 {group.title}
               </div>
             )}
@@ -73,19 +73,19 @@ export function Sidebar({ active, onChange, open, onClose }: SidebarProps) {
                   onClick={() => onChange(item.key)}
                   className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition ${
                     isActive
-                      ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md shadow-blue-500/25'
-                      : 'text-slate-600 hover:bg-slate-100'
+                      ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-on-inverse shadow-md shadow-blue-500/25'
+                      : 'text-content hover:bg-surface-2'
                   }`}
                 >
                   <Icon
-                    className={`h-4 w-4 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`}
+                    className={`h-4 w-4 ${isActive ? 'text-on-inverse' : 'text-muted group-hover:text-content'}`}
                   />
                   <span className="flex-1 text-left font-medium">{item.label}</span>
                   {item.badge && (
                     <span
                       className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
                         isActive
-                          ? 'bg-white/25 text-white'
+                          ? 'bg-surface/25 text-on-inverse'
                           : 'bg-blue-50 text-blue-600'
                       }`}
                     >
@@ -99,13 +99,13 @@ export function Sidebar({ active, onChange, open, onClose }: SidebarProps) {
         ))}
       </nav>
 
-      <div className="px-5 pb-4 text-[11px] text-slate-400">
+      <div className="px-5 pb-4 text-[11px] text-muted">
         <a
           href="https://github.com/chenggegedeid/catflap"
           target="_blank"
           rel="noreferrer"
           title="GitHub 仓库"
-          className="inline-flex items-center gap-1.5 transition hover:text-slate-600"
+          className="inline-flex items-center gap-1.5 transition hover:text-content"
         >
           <GithubMark className="h-3.5 w-3.5" />© 2026 catflap
         </a>

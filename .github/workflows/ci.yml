@@ -80,6 +80,12 @@ jobs:
       - name: 校验脚本里的路径引用
         run: python3 scripts/check_path_refs.py
 
+      # 页面 ↔ 组件的绑定：关掉一个功能后，侧栏上对应的入口要跟着消失。
+      # 后端组件名与前端 registry 里那串字符串对不上时不会报错，只是静默失效 ——
+      # 侧栏留着一个点了就 404 的入口。
+      - name: 校验页面与组件的绑定
+        run: python3 scripts/check_component_bindings.py
+
       # 仓库是公开的：别把 AI 会话记录、本机内网 IP、代理口令之类带进来。
       # 提交后再删，历史里也还留着，所以要在提交前挡住。
       - name: 校验仓库无隐私内容
@@ -93,14 +99,17 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           "$(go env GOPATH)/bin/govulncheck" ./...
 
-  # ── 两个前端各自能构建（TypeScript 有错会在这里挡住）─────────────
+  # ── 前端能构建（TypeScript 有错会在这里挡住）─────────────────────
+  #
+  # 导航主页 web/home 移除后这里只剩 admin。matrix 也一并去掉了：
+  # 留着 home 会让 job 因为目录不存在而红。
   frontend:
     name: 前端校验 (${{ matrix.app }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app: [admin, home]
+        app: [admin]
     steps:
       - uses: actions/checkout@v4
 

@@ -3,10 +3,12 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/chenggegedeid/catflap/core"
+	"github.com/chenggegedeid/catflap/core/component"
 	"github.com/chenggegedeid/catflap/modules/ddns"
 	"github.com/chenggegedeid/catflap/modules/wol"
 
@@ -93,6 +95,15 @@ func loop(ctx context.Context) {
 // 一次只处理一个任务、串行执行：计划任务的量级很小（个位数），
 // 并发只会带来「两个动作互相踩」的麻烦（比如同时唤醒和同时同步 DDNS）。
 func RunDue(now time.Time) {
+	// 计划任务这个功能本身被关掉就什么都不跑。
+	//
+	// 光靠「接口 404」拦不住这里：循环是常驻 goroutine，开关翻位不会自动
+	// 把它停掉。不挡这一下的话，用户关掉「计划任务」、侧栏入口也消失了，
+	// 后台却还在按点同步 DDNS —— 而且因为接口 404，界面上连执行记录都看不到。
+	if !component.IsEnabled(Name) {
+		return
+	}
+
 	Runtime.mu.RLock()
 	tasks := make([]Task, len(Runtime.Config.Tasks))
 	copy(tasks, Runtime.Config.Tasks)
@@ -206,8 +217,32 @@ func Persist(cfg Config) error {
 	return nil
 }
 
+// actionComponent 每种动作依赖哪个组件。
+//
+// 关掉那个组件之后动作就不该再执行：界面上写着「已关闭」，后台却还在定时
+// 同步解析 / 发魔术包，用户没有任何一处能看出来。
+func actionComponent(action ActionKind) string {
+	switch action {
+	case ActionDDNS:
+		return ddns.Name
+	case ActionWOL:
+		return wol.Name
+	default:
+		return ""
+	}
+}
+
 // execute 真正干活。加动作就是加一个 case。
+//
+// 每个动作执行前先看它依赖的组件开没开：这是「关掉功能就真的不干活」这条
+// 语义的最后一道闸门。前面的 RunDue 只管计划任务自己，管不到 DDNS / WOL。
 func execute(t Task) error {
+	if name := actionComponent(t.Action); name != "" && !component.IsEnabled(name) {
+		// 这里用组件机器名（ddns / wol）而不是界面上的中文名：功能管理页也是
+		// 照旧露机器名的，用户要按它去 config/components.json 或日志里对上号。
+		return fmt.Errorf("%s 功能已关闭，本次跳过", name)
+	}
+
 	switch t.Action {
 	case ActionDDNS:
 		// 复用 ddns 自己的调度器：它能正确处理「provider 变了要重建」

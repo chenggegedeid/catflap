@@ -22,6 +22,12 @@ type backupComponent struct{}
 
 func (backupComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (backupComponent) Title() string { return "配置备份" }
+
+// Summary 见 core/component.Describer。
+func (backupComponent) Summary() string { return "导出全部配置与素材，可一键还原" }
+
 // Init 不需要做任何事：备份是直接读配置文件的，没有运行时状态要准备。
 func (backupComponent) Init(context.Context) error { return nil }
 

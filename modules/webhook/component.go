@@ -21,6 +21,12 @@ type webhookComponent struct {
 
 func (webhookComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (webhookComponent) Title() string { return "Webhook 通知" }
+
+// Summary 见 core/component.Describer。
+func (webhookComponent) Summary() string { return "把事件推送到自定义的 HTTP 地址" }
+
 func (webhookComponent) Init(context.Context) error { return InitWebhook() }
 
 func init() {

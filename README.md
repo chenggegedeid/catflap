@@ -219,13 +219,12 @@ curl -s http://127.0.0.1:3791/api/auth/status   # 看是否已初始化
 
 ## 从源码构建
 
-**顺序很重要**：`app.go` 用 `//go:embed` 嵌入了两个 `dist`，**必须先构建前端**。
+**顺序很重要**：`app.go` 用 `//go:embed` 嵌入了前端产物，**必须先构建前端**。
 
 ```bash
 git clone https://github.com/chenggegedeid/catflap.git && cd catflap
 
 (cd web/admin && npm ci && npm run build)
-(cd web/home  && npm ci && npm run build)
 
 export CGO_ENABLED=0
 go build -trimpath -ldflags "-s -w -X github.com/chenggegedeid/catflap/core.Version=v1.0.0" -o bin/catflap .

@@ -18,6 +18,12 @@ type notifyComponent struct {
 
 func (notifyComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (notifyComponent) Title() string { return "通知" }
+
+// Summary 见 core/component.Describer。
+func (notifyComponent) Summary() string { return "统一配置通知渠道，供各功能按名选用" }
+
 func (notifyComponent) Init(context.Context) error {
 	if err := Init(); err != nil {
 		return err

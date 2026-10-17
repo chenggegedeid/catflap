@@ -206,7 +206,7 @@ export function Dashboard() {
         <div className="py-12 text-center text-rose-500">
           <AlertTriangle className="mx-auto h-8 w-8" />
           <div className="mt-2 text-sm font-semibold">数据加载失败</div>
-          <div className="mt-1 text-xs text-slate-500">{loadErr}</div>
+          <div className="mt-1 text-xs text-muted">{loadErr}</div>
           <button onClick={refresh} className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white">
             重试
           </button>
@@ -228,42 +228,42 @@ export function Dashboard() {
             action={
               <button
                 onClick={refresh}
-                className="flex items-center gap-1 text-xs text-slate-400 transition hover:text-blue-500"
+                className="flex items-center gap-1 text-xs text-muted transition hover:text-blue-500"
               >
                 <RotateCw className="h-3.5 w-3.5" /> 刷新
               </button>
             }
           />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-xl bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">公网 IP</div>
-              <div className="mt-1 break-all font-mono text-sm font-bold text-slate-800">
+            <div className="rounded-xl bg-surface-2 p-3">
+              <div className="text-xs text-muted">公网 IP</div>
+              <div className="mt-1 break-all font-mono text-sm font-bold text-content">
                 {config?.publicIP || '--'}
               </div>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">NAT 层数</div>
-              <div className="mt-1 text-sm font-bold text-slate-800">
+            <div className="rounded-xl bg-surface-2 p-3">
+              <div className="text-xs text-muted">NAT 层数</div>
+              <div className="mt-1 text-sm font-bold text-content">
                 {config ? `${(config.natRouterList || []).length} 层` : '--'}
               </div>
-              <div className="mt-0.5 truncate text-[11px] text-slate-400" title={natType?.udp?.natType || ''}>
+              <div className="mt-0.5 truncate text-[11px] text-muted" title={natType?.udp?.natType || ''}>
                 {natType?.udp?.natType || '未检测'}
               </div>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">穿透中</div>
+            <div className="rounded-xl bg-surface-2 p-3">
+              <div className="text-xs text-muted">穿透中</div>
               <div
                 className={`mt-1 text-sm font-bold ${
-                  enabledRows.length > 0 && runningCount === enabledRows.length ? 'text-emerald-600' : 'text-slate-800'
+                  enabledRows.length > 0 && runningCount === enabledRows.length ? 'text-emerald-600' : 'text-content'
                 }`}
               >
                 {runningCount} / {enabledRows.length}
               </div>
-              <div className="mt-0.5 text-[11px] text-slate-400">已启用的服务</div>
+              <div className="mt-0.5 text-[11px] text-muted">已启用的服务</div>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">最优 STUN</div>
-              <div className="mt-1 break-all font-mono text-[11px] font-semibold text-slate-700">
+            <div className="rounded-xl bg-surface-2 p-3">
+              <div className="text-xs text-muted">最优 STUN</div>
+              <div className="mt-1 break-all font-mono text-[11px] font-semibold text-content">
                 {config?.bestStun || '--'}
               </div>
             </div>
@@ -286,7 +286,7 @@ export function Dashboard() {
                   key={q.label}
                   type="button"
                   onClick={() => go(q.page)}
-                  className="flex flex-col items-center gap-1.5 rounded-2xl border border-slate-200/70 bg-white p-3 text-xs font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:shadow-md"
+                  className="flex flex-col items-center gap-1.5 rounded-2xl border border-line/70 bg-surface p-3 text-xs font-semibold text-content transition hover:-translate-y-0.5 hover:shadow-md"
                 >
                   <span className={`grid h-9 w-9 place-items-center rounded-xl ${q.tone}`}>
                     <Icon className="h-4 w-4" />
@@ -324,7 +324,7 @@ export function Dashboard() {
         </Card>
       )}
 
-      <div className="flex justify-end gap-3 pt-1 text-xs text-slate-400">
+      <div className="flex justify-end gap-3 pt-1 text-xs text-muted">
         {version && <span>Catflap {version}</span>}
         {refreshedAt && <span>最后刷新 {refreshedAt.toLocaleTimeString()}</span>}
       </div>

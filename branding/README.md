@@ -61,8 +61,8 @@ branding/
 图标和名称不只在 `branding/` 里。换品牌时**必须同步**下面这些位置，
 漏一个就会在某个角落露馅：
 
-- **前端**：`web/admin/src/assets/` 与 `web/admin/public/favicon.png`、
-  `web/home/src/assets/`；界面文案里的品牌名
+- **前端**：`web/admin/src/assets/` 与 `web/admin/public/favicon.png`；
+  界面文案里的品牌名
 - **后端**：`app.go` 顶部常量、`middleware/auth.go` 的免登录头名、
   `modules/cert/selfsign.go` 的自签证书主题（**浏览器里能直接看到**）
 - **构建**：`build/windows/icon.ico`、`build/windows/info.json`、

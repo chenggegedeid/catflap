@@ -63,7 +63,10 @@ func (AuthApi) LoginView(c *gin.Context) {
 		return
 	}
 	recordLogin(c, cr.Username, true, "")
-	res.OkWithData(gin.H{"token": token}, c)
+	// 一并回用户名：界面上要显示它（顶栏头像旁边）。这里回的是**实际生效的那个**
+	// （UsernameFor()，老配置用户名留空时是 admin），而不是用户输入框里的原文 ——
+	// 输入框可以留空照样登进来，拿原文显示就会出现一个空名字。
+	res.OkWithData(gin.H{"token": token, "username": auth.Runtime.Username()}, c)
 }
 
 // recordLogin 记一次登录尝试。

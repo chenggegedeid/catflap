@@ -30,6 +30,12 @@ type auditComponent struct {
 
 func (auditComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (auditComponent) Title() string { return "访问审计" }
+
+// Summary 见 core/component.Describer。
+func (auditComponent) Summary() string { return "记录谁访问了站点，自动封禁扫描者" }
+
 func (auditComponent) Init(context.Context) error {
 	cfg, err := ReadConfig()
 	if err != nil {
@@ -45,6 +51,9 @@ func (auditComponent) Init(context.Context) error {
 	if err := loadIPStats(); err != nil {
 		logrus.Warnf("[audit] 读取 IP 统计失败（从零开始）：%v", err)
 	}
+
+	// 按天/按小时的聚合。读不到不要紧，读的时候会从明细重算
+	LoadDayStats()
 
 	core.OnShutdown(func() {
 		Flush()
@@ -75,11 +84,20 @@ func ticker() {
 	}
 }
 
-// loadIPStats 读回按 IP 的统计
+// loadIPStats 读回按 IP 的统计。
+//
+// 文件不在时从明细重建，而不是「从零开始」。
+//
+// 为什么这条重要：ipstats.json 是**缓存在内存里、每分钟才落盘**的。进程被
+// kill -9、容器被回收、或者用户清了一次 data/ 里的缓存，文件就没了。
+// 早期版本直接返回，结果是审计页上一片空白 —— 而明细明明都在
+// （「已记录 IP 321」那个数字来自这里，访问记录却读得出来）。
+// 明细是真相，缓存没了就重算，这是派生数据的本分。
 func loadIPStats() error {
 	data, err := os.ReadFile(ipStatsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			rebuildIPStatsFromRecords()
 			return nil
 		}
 		return err
@@ -88,7 +106,10 @@ func loadIPStats() error {
 		Stats []IPStat `json:"stats"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
+		// 文件坏了也别放弃：明细还在，重建一次比让页面空着强
+		logrus.Warnf("[audit] ipstats.json 解析失败，将从访问明细重建：%v", err)
+		rebuildIPStatsFromRecords()
+		return nil
 	}
 
 	Runtime.mu.Lock()
@@ -108,7 +129,45 @@ func loadIPStats() error {
 		Runtime.ipStats[st.IP] = &st
 	}
 	Runtime.mu.Unlock()
+
+	// 文件在但一条都没有：也走重建（可能是上一次 flush 写到一半被打断）
+	if len(payload.Stats) == 0 {
+		rebuildIPStatsFromRecords()
+	}
 	return nil
+
+}
+
+// rebuildIPStatsFromRecords 从访问明细重算按 IP 的聚合。
+//
+// 读保留期内的全部明细文件。这里可能慢（被扫过的机器一天几十 MB），
+// 但只在「缓存丢了」这一种情况下发生，而且是在启动阶段 ——
+// 慢一点比页面上什么也看不到强。
+func rebuildIPStatsFromRecords() {
+	days := Days()
+	if len(days) == 0 {
+		return
+	}
+
+	total := 0
+	for _, day := range days {
+		recs, err := ReadDay(day, "", 0)
+		if err != nil {
+			continue
+		}
+		for _, r := range recs {
+			if r.IP == "" {
+				continue
+			}
+			// 直接调 updateIPStats：聚合逻辑只有一份，重建和实时记录
+			// 走的必须是同一个函数 —— 抄一遍迟早两边算得不一样
+			updateIPStats(r)
+			total++
+		}
+	}
+	if total > 0 {
+		logrus.Infof("[audit] 按 IP 统计缓存缺失，已从 %d 天的 %d 条明细重建", len(days), total)
+	}
 }
 
 // cleanOldFiles 删过期明细。IP 聚合不删（那是累计值）。

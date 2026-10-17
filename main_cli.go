@@ -57,13 +57,12 @@ func main() {
 		logrus.Fatal(err)
 	}
 	if !started {
-		logrus.Infof("Catflap 已在 %s 运行", adminURL)
+		logrus.Infof("Catflap 已在 %s 运行", backendURL)
 		return
 	}
 
 	postStartup()
 
-	logrus.Infof("管理后台运行在 %s", adminURL)
-	logrus.Infof("导航主页运行在 %s", homeURL)
+	logrus.Infof("管理后台运行在 %s", backendURL)
 	select {}
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/chenggegedeid/catflap/core"
+	"github.com/chenggegedeid/catflap/core/component"
 	"github.com/chenggegedeid/catflap/utils/utilsFile"
 
 	"github.com/sirupsen/logrus"
@@ -197,6 +198,15 @@ func InitUpdate(version string) error {
 		// 刚启动网络未必通（开机自启时网卡还没拿到地址），晚一点再查
 		time.Sleep(30 * time.Second)
 		for {
+			// 关掉「自动更新」之后就别再往外发请求了。
+			//
+			// 这个循环是永久的，开关翻位不会停它。不挡这一下的话，界面上写着
+			// 已关闭，后台仍然每隔 checkInterval 请求一次 GitHub —— 而 GitHub 对
+			// 未认证请求有每小时 60 次的限流，一个关掉了的功能照样能把额度吃掉。
+			if !Enabled() {
+				time.Sleep(checkInterval)
+				continue
+			}
 			if err := Runtime.Check(context.Background()); err != nil {
 				logrus.Warnf("检查更新失败：%v", err)
 			}
@@ -205,6 +215,12 @@ func InitUpdate(version string) error {
 	}()
 	return nil
 }
+
+// Enabled 报告自动更新功能当前是否开启。
+//
+// 走 component.IsEnabled 而不是另存一份状态：开关的真相源只有
+// config/components.json 一个。
+func Enabled() bool { return component.IsEnabled(Name) }
 
 func readConfig() (Config, error) {
 	if fi, err := os.Stat(ConfigPath); os.IsNotExist(err) || (fi != nil && fi.Size() == 0) {

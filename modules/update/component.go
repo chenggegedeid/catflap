@@ -29,6 +29,12 @@ type updateComponent struct {
 
 func (updateComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (updateComponent) Title() string { return "自动更新" }
+
+// Summary 见 core/component.Describer。
+func (updateComponent) Summary() string { return "定期检查并下载新版本" }
+
 func (updateComponent) Init(context.Context) error { return InitUpdate(core.Version) }
 
 func init() {

@@ -15,6 +15,12 @@ type tunnelComponent struct {
 
 func (tunnelComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (tunnelComponent) Title() string { return "Tunnel 隧道" }
+
+// Summary 见 core/component.Describer。
+func (tunnelComponent) Summary() string { return "CGNAT 下不带端口的出口通道" }
+
 func (tunnelComponent) Init(context.Context) error {
 	cfg, err := ReadConfig()
 	if err != nil {

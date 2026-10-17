@@ -122,6 +122,12 @@ type trafficComponent struct {
 
 func (trafficComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (trafficComponent) Title() string { return "流量统计" }
+
+// Summary 见 core/component.Describer。
+func (trafficComponent) Summary() string { return "按站点累计进出流量与访问次数" }
+
 func (trafficComponent) Init(context.Context) error {
 	core.OnShutdown(Stop)
 	return Start()

@@ -42,13 +42,12 @@ go env -w GOPROXY=https://goproxy.cn,direct
 
 ## 构建
 
-**顺序很重要**：`app.go` 用 `//go:embed` 嵌入了 `web/admin/dist` 与 `web/home/dist`，
+**顺序很重要**：`app.go` 用 `//go:embed` 嵌入了 `web/admin/dist`，
 所以**必须先构建前端，再编译后端**，否则 `go build` 直接失败。
 
 ```bash
-# 前端（两个都要）
+# 前端
 (cd web/admin && npm ci && npm run build)
-(cd web/home  && npm ci && npm run build)
 
 # 后端：命令行版
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/catflap .

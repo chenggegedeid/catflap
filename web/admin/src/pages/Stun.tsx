@@ -4,7 +4,6 @@ import { Card, CardHeader } from '../components/Card'
 import { LanScanModal } from '../components/LanScanModal'
 import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
 import { DomainInput } from '../components/DomainInput'
-import { AccessControlEditor, type AccessMode } from '../components/AccessControlEditor'
 import { AccessLogModal } from '../components/AccessLogModal'
 import type { ServiceState } from '../components/ServiceCard'
 import { modalBackdrop } from '../components/modal'
@@ -121,35 +120,35 @@ function DeviceModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">{initial ? '编辑设备' : '添加设备'}</div>
+          <div className="text-base font-bold text-content">{initial ? '编辑设备' : '添加设备'}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-3">
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">设备名称</div>
+            <div className="mb-1 text-xs font-semibold text-muted">设备名称</div>
             <input
               autoFocus
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="如 群晖NAS / 树莓派"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">设备内网 IP</div>
+            <div className="mb-1 text-xs font-semibold text-muted">设备内网 IP</div>
             <input
               value={form.ip}
               onChange={(e) => setForm((p) => ({ ...p, ip: e.target.value }))}
               placeholder="如 192.168.1.100"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           {err && <div className="text-xs text-rose-500">{err}</div>}
@@ -158,7 +157,7 @@ function DeviceModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -191,9 +190,6 @@ interface ServiceFormState {
   internalPort: string
   protocol: 'TCP' | 'UDP'
   useUpnp: boolean
-  // 访问控制（IP 门禁）：和反代站点同一个组件、同一套语义
-  accessMode: string
-  accessRules: string
   /** 打洞用的本机端口，'' 表示随机（和 0 一个意思） */
   punchLocalPort: string
   domain: string
@@ -230,9 +226,9 @@ function formToPayloadTLS(form: ServiceFormState) {
 
 type ServiceModalTab = 'basic' | 'webhook' | 'redirect'
 
-const fieldLabelCls = 'mb-1 text-xs font-semibold text-slate-500'
+const fieldLabelCls = 'mb-1 text-xs font-semibold text-muted'
 const fieldInputCls =
-  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400'
+  'w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400'
 
 const emptyRedirect: RedirectConfig = {
   enabled: false,
@@ -336,10 +332,8 @@ const emptyService: ServiceFormState = {
   // UPnP 默认**关**：以前默认开，结果每条服务都去路由器上开映射，
   // 端口开一片自己都不知道。需要的人自己勾（打洞本身够用）。
   useUpnp: false,
-  // 访问控制默认**黑名单**（规则空 = 谁都能连，但模式是 deny）——
-  // 用户要求：避免每个服务都要去设一遍模式。审计里封 IP 同步过来直接能放。
-  accessMode: 'deny',
-  accessRules: '',
+  // 访问控制默认**关**：站点级 IP 名单已废弃，过滤统一走全局封禁表 / 白名单。
+  // （老数据里可能还存着 deny 规则，读进来会被忽略，见 formToPayload。）
   punchLocalPort: '',
   domain: '',
   tlsTerminate: false,
@@ -415,9 +409,7 @@ function serviceToForm(svc: StunService): ServiceFormState {
     internalPort: String(svc.internalPort || ''),
     protocol: (svc.protocol as 'TCP' | 'UDP') || 'TCP',
     useUpnp: !!svc.useUpnp,
-    accessMode: svc.access?.mode ?? 'deny',
-    accessRules: (svc.access?.rules ?? []).join('\n'),
-    punchLocalPort: svc.punchLocalPort ? String(svc.punchLocalPort) : '',
+  punchLocalPort: svc.punchLocalPort ? String(svc.punchLocalPort) : '',
     domain: svc.domain || '',
     tlsTerminate: !!svc.tlsTerminate,
     certId: String(svc.certId || 0),
@@ -887,18 +879,18 @@ function ServiceModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl bg-white text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl bg-surface text-content shadow-2xl ring-1 ring-line">
         <div className="flex items-center justify-between px-6 py-5">
-          <div className="text-base font-bold text-slate-800">{initial ? '编辑服务' : '添加服务'}</div>
+          <div className="text-base font-bold text-content">{initial ? '编辑服务' : '添加服务'}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex gap-8 border-b border-slate-100 px-6">
+        <div className="flex gap-8 border-b border-line px-6">
           {[
             { key: 'basic' as const, label: '基础配置' },
             // 入口重定向是 HTTP 307，只有浏览器听得懂；UDP 根本没有这回事
@@ -912,7 +904,7 @@ function ServiceModal({
               className={`border-b-2 px-0 pb-3 text-sm font-bold transition ${
                 activeTab === tab.key
                   ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
+                  : 'border-transparent text-muted hover:text-content'
               }`}
             >
               {tab.label}
@@ -959,13 +951,13 @@ function ServiceModal({
                 </div>
 
                 {hostPorts.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-slate-50 p-2">
+                  <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-surface-2 p-2">
                     {hostPorts.map((p) => (
                       <button
                         key={p.port}
                         type="button"
                         onClick={() => setForm((prev) => ({ ...prev, internalPort: String(p.port) }))}
-                        className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
+                        className="rounded bg-surface px-2 py-1 text-[11px] font-semibold text-content ring-1 ring-line transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
                       >
                         {p.port}
                         {p.name && <span className="ml-1 opacity-70">{p.name}</span>}
@@ -974,7 +966,7 @@ function ServiceModal({
                   </div>
                 )}
 
-                <div className="mt-1 text-[11px] text-slate-400">
+                <div className="mt-1 text-[11px] text-muted">
                   服务会加在这台设备下。机器没在列表里就去「设备」页加一台。
                 </div>
               </label>
@@ -1008,7 +1000,7 @@ function ServiceModal({
               <label className="block">
                 <div className={fieldLabelCls}>
                   穿透通道本机端口
-                  <span className="ml-1 font-normal text-slate-400">（可选，建议填）</span>
+                  <span className="ml-1 font-normal text-muted">（可选，建议填）</span>
                 </div>
                 <input
                   type="number"
@@ -1019,7 +1011,7 @@ function ServiceModal({
                   max={65535}
                   className={fieldInputCls}
                 />
-                <p className="mt-1 text-xs leading-5 text-slate-400">
+                <p className="mt-1 text-xs leading-5 text-muted">
                   外部端口是路由器照着这个本机端口分配的。不填的话本机端口每次随机，
                   外部端口也跟着一直变，配好的「域名+端口」过一会儿就失效；
                   填一个没被占用的端口（如 30000-60000），外部端口就稳定下来了，
@@ -1044,22 +1036,22 @@ function ServiceModal({
                       className={`rounded-xl border px-3 py-2 text-left transition ${
                         form.protocol === o.value
                           ? 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200'
-                          : 'border-slate-200 hover:border-slate-300'
+                          : 'border-line hover:border-line'
                       }`}
                     >
                       <div
-                        className={`text-sm font-bold ${form.protocol === o.value ? 'text-blue-600' : 'text-slate-700'}`}
+                        className={`text-sm font-bold ${form.protocol === o.value ? 'text-blue-600' : 'text-content'}`}
                       >
                         {o.value}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-slate-400">{o.hint}</div>
+                      <div className="mt-0.5 text-[11px] text-muted">{o.hint}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="space-y-3 rounded-xl border border-slate-200/80 bg-slate-50/50 p-3">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <div className="space-y-3 rounded-xl border border-line/80 bg-surface-2/50 p-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-content">
                   <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
                   对外访问
                 </div>
@@ -1076,7 +1068,7 @@ function ServiceModal({
                     placeholder={tlsOn ? '必须是证书覆盖的域名' : '留空用公网 IP'}
                     className={fieldInputCls}
                   />
-                  <div className="mt-1 text-[11px] text-slate-400">
+                  <div className="mt-1 text-[11px] text-muted">
                     {ddnsZones.length > 0
                       ? '主域来自 DDNS 解析记录；删掉那条解析后这里的主域就没了，服务会回落到公网 IP'
                       : '要在 DDNS 页解析到你的公网 IP'}
@@ -1087,7 +1079,7 @@ function ServiceModal({
                   <>
                     {/* 洞口一终结 TLS，非 HTTPS 的连接全会被当成敲错地址的浏览器回 302，
                         MC、SSH 这类直接连不上——这是最容易配错的一项，旁边必须写明 */}
-                    <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                    <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-surface px-3 py-2 ring-1 ring-line">
                       <input
                         type="checkbox"
                         checked={form.tlsTerminate}
@@ -1103,8 +1095,8 @@ function ServiceModal({
                         className="mt-0.5 h-3.5 w-3.5"
                       />
                       <span>
-                        <span className="block text-xs font-semibold text-slate-700">加 HTTPS 证书</span>
-                        <span className="block text-[11px] text-slate-400">
+                        <span className="block text-xs font-semibold text-content">加 HTTPS 证书</span>
+                        <span className="block text-[11px] text-muted">
                           只有网页才勾。MC、SSH、远程桌面勾了会连不上
                         </span>
                       </span>
@@ -1149,7 +1141,7 @@ function ServiceModal({
                     )}
 
                     {/* 一个勾两种含义，后端拆成 backendHttps / https，见 formToPayloadTLS */}
-                    <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                    <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-surface px-3 py-2 ring-1 ring-line">
                       <input
                         type="checkbox"
                         checked={form.internalHttps}
@@ -1157,8 +1149,8 @@ function ServiceModal({
                         className="mt-0.5 h-3.5 w-3.5"
                       />
                       <span>
-                        <span className="block text-xs font-semibold text-slate-700">内网服务本身就是 HTTPS</span>
-                        <span className="block text-[11px] text-slate-400">
+                        <span className="block text-xs font-semibold text-content">内网服务本身就是 HTTPS</span>
+                        <span className="block text-[11px] text-muted">
                           {tlsOn
                             ? '勾了 Catflap 会用 HTTPS 去连它；它是明文就别勾，不然连不上'
                             : '它自带证书就勾，外面的链接会写成 https://'}
@@ -1181,7 +1173,7 @@ function ServiceModal({
                   <label
                     key={opt.key}
                     title={opt.hint || undefined}
-                    className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600"
+                    className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs font-medium text-content"
                   >
                     <input
                       type="checkbox"
@@ -1190,7 +1182,7 @@ function ServiceModal({
                       className="h-3.5 w-3.5"
                     />
                     {opt.label}
-                    {opt.hint && <span className="text-[10px] text-slate-400">（UDP 无效）</span>}
+                    {opt.hint && <span className="text-[10px] text-muted">（UDP 无效）</span>}
                   </label>
                 ))}
               </div>
@@ -1209,11 +1201,11 @@ function ServiceModal({
 
           {activeTab === 'webhook' && (
             <div className="mx-auto max-w-2xl">
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-bold text-content">
                 <Send className="h-4 w-4 text-blue-500" />
                 通知渠道
               </div>
-              <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500">
+              <div className="mb-3 rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted">
                 渠道在「通知」页里统一配置（推送地址、token 都存那儿），这里只选用 ——
                 同一个群机器人被多个服务用的时候，改一次全都跟着变。
                 <a href="#/notify" className="ml-1 text-blue-600 underline-offset-2 hover:underline">
@@ -1222,11 +1214,11 @@ function ServiceModal({
               </div>
 
               {channelsLoading ? (
-                <div className="rounded-xl border border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                <div className="rounded-xl border border-line px-3 py-6 text-center text-xs text-muted">
                   正在加载渠道…
                 </div>
               ) : channels.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400">
+                <div className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-muted">
                   还没有任何通知渠道。
                   <a href="#/notify" className="ml-1 text-blue-600 underline-offset-2 hover:underline">
                     去添加一个
@@ -1234,7 +1226,7 @@ function ServiceModal({
                   ，之后这个服务就能选它来发通知了。
                 </div>
               ) : (
-                <div className="space-y-1.5 rounded-xl border border-slate-200 p-3">
+                <div className="space-y-1.5 rounded-xl border border-line p-3">
                   {channels.map((ch) => (
                     <label key={ch.id} className="flex cursor-pointer items-center gap-2 text-xs">
                       <input
@@ -1249,14 +1241,14 @@ function ServiceModal({
                           }))
                         }
                       />
-                      <span className={ch.enabled ? 'text-slate-700' : 'text-slate-400'}>
+                      <span className={ch.enabled ? 'text-content' : 'text-muted'}>
                         {ch.name}
                         {!ch.enabled && '（已停用，勾了也不会发）'}
                       </span>
                     </label>
                   ))}
                   {(form.channelIds ?? []).length === 0 && (
-                    <div className="pt-1 text-[11px] text-slate-400">
+                    <div className="pt-1 text-[11px] text-muted">
                       一个都不选 = 这个服务不发通知。
                     </div>
                   )}
@@ -1266,7 +1258,7 @@ function ServiceModal({
               {/* 自定义通知正文：怎么发在通知页配好了，这里只写"说什么" */}
               <div className="mt-4">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-bold text-slate-800">通知内容（可选）</div>
+                  <div className="text-sm font-bold text-content">通知内容（可选）</div>
                   <select
                     value=""
                     onChange={(e) => {
@@ -1274,7 +1266,7 @@ function ServiceModal({
                       if (tpl) setForm((p) => ({ ...p, notifyTemplate: tpl.body }))
                       e.target.value = ''
                     }}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] outline-none focus:border-blue-400"
+                    className="rounded-lg border border-line bg-surface px-2 py-1 text-[11px] outline-none focus:border-blue-400"
                     title="按渠道挑一条模板，填进下面"
                   >
                     <option value="">用一条模板…</option>
@@ -1290,15 +1282,15 @@ function ServiceModal({
                   onChange={(e) => setForm((p) => ({ ...p, notifyTemplate: e.target.value }))}
                   rows={5}
                   placeholder="留空就用默认文案：服务名 + 外部地址 + 内网端口"
-                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-400"
+                  className="w-full resize-y rounded-xl border border-line bg-surface px-3 py-2 font-mono text-xs outline-none focus:border-blue-400"
                 />
-                <div className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                <div className="mt-1.5 text-[11px] leading-relaxed text-muted">
                   可用占位符（发的时候会自动换成真实值）：
                   <div className="mt-1 flex flex-wrap gap-1">
                     {NOTIFY_PLACEHOLDERS.map((p) => (
                       <span
                         key={p}
-                        className="rounded bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 ring-1 ring-slate-200"
+                        className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted ring-1 ring-line"
                       >
                         {p}
                       </span>
@@ -1317,7 +1309,7 @@ function ServiceModal({
                 >
                   {notifyTesting ? '正在发送…' : '发一条测试通知'}
                 </button>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-muted">
                   用上面选的渠道和这条模板真发一次，验证能不能收到
                 </span>
               </div>
@@ -1344,24 +1336,16 @@ function ServiceModal({
           )}
 
 
-          {/* 访问控制：和反代站点用同一个组件、同一套语义。
-              穿透直接暴露在公网上，门禁比反代更需要 —— 默认就是黑名单。 */}
-          {activeTab === 'basic' && (
-            <div className="mt-4">
-              <AccessControlEditor
-                mode={form.accessMode as AccessMode}
-                rules={form.accessRules}
-                onChange={(next) =>
-                  setForm((p) => ({ ...p, accessMode: next.mode, accessRules: next.rules }))
-                }
-              />
-            </div>
-          )}
+          {/*
+            站点级 IP 名单已移除。穿透本来就直接暴露在公网上，
+            同样"不知道谁会来"—— 过滤统一交给全局黑名单（支持网段）+ 自动拉黑。
+            Access 字段仍在数据模型里保留，老配置读进来不会报错，只是不再生效。
+          */}
 
           {activeTab === 'redirect' && form.protocol === 'TCP' && (
             <div className="mx-auto max-w-2xl">
               {/* 一个服务只用一种入口：网页走 307，MC 走 SRV。选哪个就只显示哪块，另一个自动关掉 */}
-              <div className="mb-4 inline-flex w-full flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
+              <div className="mb-4 inline-flex w-full flex-wrap gap-1 rounded-xl bg-surface-2 p-1">
                 {(
                   [
                     { key: 'none', label: '不用', icon: null },
@@ -1380,7 +1364,7 @@ function ServiceModal({
                       }))
                     }
                     className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                      entryKind === o.key ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                      entryKind === o.key ? 'bg-surface text-blue-600 shadow-sm' : 'text-muted hover:text-content'
                     }`}
                   >
                     {o.icon && <o.icon className="h-3.5 w-3.5" />}
@@ -1398,29 +1382,29 @@ function ServiceModal({
               )}
 
               {entryKind === 'none' && (
-                <div className="rounded-xl bg-slate-50 p-4 text-xs leading-6 text-slate-500">
+                <div className="rounded-xl bg-surface-2 p-4 text-xs leading-6 text-muted">
                   外部端口会变。想让别人用一个固定的名字找到这个服务，选一种入口：
                   <div className="mt-1">
-                    · <span className="font-semibold text-slate-600">网页</span>：浏览器访问入口域名，自动跳到当前端口
+                    · <span className="font-semibold text-content">网页</span>：浏览器访问入口域名，自动跳到当前端口
                   </div>
                   <div>
-                    · <span className="font-semibold text-slate-600">MC Java 版</span>：朋友在 MC 里只填域名，不用填端口
+                    · <span className="font-semibold text-content">MC Java 版</span>：朋友在 MC 里只填域名，不用填端口
                   </div>
-                  <div className="text-slate-400">SSH、远程桌面这类两种都用不了，只能用「域名 + 当前端口」。</div>
+                  <div className="text-muted">SSH、远程桌面这类两种都用不了，只能用「域名 + 当前端口」。</div>
                 </div>
               )}
 
               {entryKind === 'web' && (
                 <>
-                  <div className="mb-4 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
+                  <div className="mb-4 rounded-xl bg-surface-2 p-3 text-xs leading-5 text-muted">
                     端口会变，入口域名不变：浏览器访问入口域名，Cloudflare 自动跳到当前端口。
-                    <span className="text-slate-400">只对网页有用，MC、SSH 这类不认跳转。</span>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-slate-600">
-                      <span className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200">
+                    <span className="text-muted">只对网页有用，MC、SSH 这类不认跳转。</span>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-content">
+                      <span className="rounded-md bg-surface px-2 py-1 ring-1 ring-line">
                         {form.redirect.entryHost.trim() || '入口域名'}
                       </span>
-                      <span className="text-slate-400">→</span>
-                      <span className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200">
+                      <span className="text-muted">→</span>
+                      <span className="rounded-md bg-surface px-2 py-1 ring-1 ring-line">
                         {redirectPreviewTarget || '等服务跑起来才知道端口'}
                       </span>
                     </div>
@@ -1432,14 +1416,14 @@ function ServiceModal({
                     出了问题也不报错——只表现为「打不开」。所以现场查出来摆在这儿。
                   */}
                   {initial && savedRedirectOn && (
-                    <div className="mb-4 rounded-xl border border-slate-200 p-3">
+                    <div className="mb-4 rounded-xl border border-line p-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold text-slate-500">Cloudflare 上的解析记录</div>
+                        <div className="text-xs font-semibold text-muted">Cloudflare 上的解析记录</div>
                         <button
                           type="button"
                           disabled={inspecting}
                           onClick={() => void loadInspect()}
-                          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+                          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-muted transition hover:bg-surface-2 hover:text-content disabled:opacity-50"
                         >
                           <RotateCw className={`h-3 w-3 ${inspecting ? 'animate-spin' : ''}`} />
                           {inspecting ? '查询中' : '刷新'}
@@ -1448,7 +1432,7 @@ function ServiceModal({
 
                       {inspectErr && <div className="text-[11px] leading-5 text-rose-500">查不了：{inspectErr}</div>}
                       {!inspectErr && !inspect && (
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-[11px] text-muted">
                           {inspecting ? '正在去 Cloudflare 查…' : '点右上角刷新看现在什么样'}
                         </div>
                       )}
@@ -1457,17 +1441,17 @@ function ServiceModal({
                         <div className="space-y-2.5">
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-500">
+                              <span className="rounded bg-surface-2 px-1.5 py-0.5 font-semibold text-muted">
                                 入口
                               </span>
-                              <span className="font-mono text-slate-700">{inspect.entry.host}</span>
+                              <span className="font-mono text-content">{inspect.entry.host}</span>
                               {inspect.entry.found && (
-                                <span className="font-mono text-slate-400">
+                                <span className="font-mono text-muted">
                                   {inspect.entry.type} {inspect.entry.content}
                                 </span>
                               )}
                               {inspect.entry.byCatflap && (
-                                <span className="text-slate-400">· Catflap 建的</span>
+                                <span className="text-muted">· Catflap 建的</span>
                               )}
                             </div>
                             <div className="mt-1 text-[11px] leading-5">
@@ -1494,19 +1478,19 @@ function ServiceModal({
 
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-500">
+                              <span className="rounded bg-surface-2 px-1.5 py-0.5 font-semibold text-muted">
                                 落地
                               </span>
-                              <span className="font-mono text-slate-700">
+                              <span className="font-mono text-content">
                                 {inspect.landingHost || '还没定'}
                               </span>
                               {inspect.landing.managed && inspect.landing.lastIP && (
-                                <span className="font-mono text-slate-400">A {inspect.landing.lastIP}</span>
+                                <span className="font-mono text-muted">A {inspect.landing.lastIP}</span>
                               )}
                             </div>
                             <div className="mt-1 text-[11px] leading-5">
                               {!inspect.landingHost ? (
-                                <span className="text-slate-400">
+                                <span className="text-muted">
                                   这个服务没填对外域名，307 直接跳到公网 IP，不需要解析记录
                                 </span>
                               ) : inspect.landing.managed && inspect.landing.status === 'failed' ? (
@@ -1531,7 +1515,7 @@ function ServiceModal({
                         </div>
                       )}
 
-                      <div className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] leading-5 text-slate-400">
+                      <div className="mt-2.5 border-t border-line pt-2 text-[11px] leading-5 text-muted">
                         两条的要求正好相反：入口那条要开小黄云，落地那条要关 —— 开了的话 Cloudflare
                         不转发打洞出来的高位端口，一样访问不了。
                       </div>
@@ -1540,11 +1524,11 @@ function ServiceModal({
 
                   <div className="grid grid-cols-2 gap-3">
                     <label className="col-span-2 block sm:col-span-1">
-                      <div className="mb-1 text-xs font-semibold text-slate-500">Cloudflare 账号</div>
+                      <div className="mb-1 text-xs font-semibold text-muted">Cloudflare 账号</div>
                       <select
                         value={String(form.redirect.providerId || 0)}
                         onChange={(e) => updateRedirect({ providerId: Number(e.target.value) || 0 })}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+                        className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted"
                       >
                         <option value="0">请选择</option>
                         {redirectCapableProviders.map((p) => (
@@ -1553,7 +1537,7 @@ function ServiceModal({
                           </option>
                         ))}
                       </select>
-                      <div className="mt-1 text-[11px] text-slate-400">
+                      <div className="mt-1 text-[11px] text-muted">
                         {redirectCapableProviders.length === 0
                           ? '"DDNS" 页面里还没有 Cloudflare 账号，先去那边加一个'
                           : '令牌要有 DNS 编辑 + 单一重定向编辑两项权限'}
@@ -1561,27 +1545,27 @@ function ServiceModal({
                     </label>
 
                     <label className="col-span-2 block sm:col-span-1">
-                      <div className="mb-1 text-xs font-semibold text-slate-500">入口域名</div>
+                      <div className="mb-1 text-xs font-semibold text-muted">入口域名</div>
                       <input
                         value={form.redirect.entryHost}
                         onChange={(e) => updateRedirect({ entryHost: e.target.value })}
                         placeholder="catflap.example.com"
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+                        className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted"
                       />
-                      <div className="mt-1 text-[11px] text-slate-400">
+                      <div className="mt-1 text-[11px] text-muted">
                         外面记的就是这个，Catflap 会自己建好；别和基础配置里的对外域名填成同一个
                       </div>
                     </label>
 
                     <label className="col-span-2 block sm:col-span-1">
-                      <div className="mb-1 text-xs font-semibold text-slate-500">主域名</div>
+                      <div className="mb-1 text-xs font-semibold text-muted">主域名</div>
                       <input
                         value={form.redirect.zoneDomain}
                         onChange={(e) => updateRedirect({ zoneDomain: e.target.value })}
                         placeholder={redirectGuessedZone || 'example.com'}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+                        className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted"
                       />
-                      <div className="mt-1 text-[11px] text-slate-400">
+                      <div className="mt-1 text-[11px] text-muted">
                         {redirectGuessedZone
                           ? `留空就按 ${redirectGuessedZone} 算；域名多一层（如 a.b.co.uk）才需要填`
                           : '留空按入口域名的后两段算'}
@@ -1590,8 +1574,8 @@ function ServiceModal({
                   </div>
 
                   {initial ? (
-                    <div className="mt-4 rounded-xl border border-slate-200 p-3">
-                      <div className="mb-2 text-xs font-semibold text-slate-500">最近一次同步</div>
+                    <div className="mt-4 rounded-xl border border-line p-3">
+                      <div className="mb-2 text-xs font-semibold text-muted">最近一次同步</div>
                       {status?.redirectStatus === 'ok' && (
                         <div className="text-xs text-emerald-600">
                           成功 → <span className="font-mono">{status.redirectTarget}</span>
@@ -1608,7 +1592,7 @@ function ServiceModal({
                           外网端口已经换了，现在从入口域名进来打不开 —— 那边还指着上一个地址{' '}
                           <span className="font-mono">{status.redirectTarget}</span>
                           {status.redirectAt ? `（${fmtTime(status.redirectAt)}）` : ''}
-                          <div className="mt-1 text-slate-400">
+                          <div className="mt-1 text-muted">
                             洞确认通了会自己改过去，一般几十秒。等不及就点下面的「立即同步」
                           </div>
                         </div>
@@ -1620,7 +1604,7 @@ function ServiceModal({
                         </div>
                       )}
                       {!status?.redirectStatus && (
-                        <div className="text-xs text-slate-400">还没同步过</div>
+                        <div className="text-xs text-muted">还没同步过</div>
                       )}
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1637,7 +1621,7 @@ function ServiceModal({
                           type="button"
                           disabled={redirectBusy || redirectDirty}
                           onClick={() => runRedirect('remove')}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-rose-50 hover:text-rose-500 disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-surface-2 px-3 py-1.5 text-xs font-semibold text-content transition hover:bg-rose-50 hover:text-rose-500 disabled:opacity-50"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           删掉 Cloudflare 上的规则
@@ -1647,26 +1631,26 @@ function ServiceModal({
                             上面改的还没保存 —— 点右下角「保存」，几秒后自己就同步了，不用回来点这两个
                           </span>
                         ) : (
-                          <span className="text-[11px] text-slate-400">
+                          <span className="text-[11px] text-muted">
                             端口一变会自动同步，这里是手动再跑一遍
                           </span>
                         )}
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-4 text-[11px] text-slate-400">先把服务保存了，再回来点同步</div>
+                    <div className="mt-4 text-[11px] text-muted">先把服务保存了，再回来点同步</div>
                   )}
                 </>
               )}
 
               {entryKind === 'mc' && (
                 <div>
-                  <div className="mb-4 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
+                  <div className="mb-4 rounded-xl bg-surface-2 p-3 text-xs leading-5 text-muted">
                     朋友在 MC 里只填域名，不用填端口；端口变了 Catflap 自动改 SRV 记录。
-                    <span className="text-slate-400">基岩版不认 SRV，用不上。</span>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-slate-600">
-                      <span className="text-slate-400">朋友填</span>
-                      <span className="rounded-md bg-white px-2 py-1 font-semibold ring-1 ring-slate-200">
+                    <span className="text-muted">基岩版不认 SRV，用不上。</span>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-content">
+                      <span className="text-muted">朋友填</span>
+                      <span className="rounded-md bg-surface px-2 py-1 font-semibold ring-1 ring-line">
                         {form.mcEntry.host.trim() || 'mc.example.com'}
                       </span>
                     </div>
@@ -1678,7 +1662,7 @@ function ServiceModal({
                       <select
                         value={String(form.mcEntry.providerId || 0)}
                         onChange={(e) => updateMCEntry({ providerId: Number(e.target.value) || 0 })}
-                        className={`${fieldInputCls} disabled:bg-slate-50 disabled:text-slate-400`}
+                        className={`${fieldInputCls} disabled:bg-surface-2 disabled:text-muted`}
                       >
                         <option value="0">请选择</option>
                         {redirectCapableProviders.map((p) => (
@@ -1687,7 +1671,7 @@ function ServiceModal({
                           </option>
                         ))}
                       </select>
-                      <div className="mt-1 text-[11px] text-slate-400">
+                      <div className="mt-1 text-[11px] text-muted">
                         {redirectCapableProviders.length === 0
                           ? '"DDNS" 页面里还没有 Cloudflare 账号，先去那边加一个'
                           : '「编辑区域 DNS」模板建的令牌就够'}
@@ -1700,9 +1684,9 @@ function ServiceModal({
                         value={form.mcEntry.host}
                         onChange={(e) => updateMCEntry({ host: e.target.value })}
                         placeholder="mc.example.com"
-                        className={`${fieldInputCls} disabled:bg-slate-50 disabled:text-slate-400`}
+                        className={`${fieldInputCls} disabled:bg-surface-2 disabled:text-muted`}
                       />
-                      <div className="mt-1 text-[11px] text-slate-400">朋友在 MC 里填的就是它</div>
+                      <div className="mt-1 text-[11px] text-muted">朋友在 MC 里填的就是它</div>
                     </label>
 
                     {/* SRV 只能指向域名不能指向 IP，那个域名自己得解析到公网 IP。
@@ -1731,11 +1715,11 @@ function ServiceModal({
                                 })
                               }
                               className={`rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 ${
-                                on ? 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200' : 'border-slate-200 hover:border-slate-300'
+                                on ? 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200' : 'border-line hover:border-line'
                               }`}
                             >
-                              <div className={`text-xs font-bold ${on ? 'text-blue-600' : 'text-slate-700'}`}>{o.title}</div>
-                              <div className="mt-0.5 text-[11px] text-slate-400">{o.hint}</div>
+                              <div className={`text-xs font-bold ${on ? 'text-blue-600' : 'text-content'}`}>{o.title}</div>
+                              <div className="mt-0.5 text-[11px] text-muted">{o.hint}</div>
                             </button>
                           )
                         })}
@@ -1745,7 +1729,7 @@ function ServiceModal({
                         <select
                           value={form.mcEntry.target}
                           onChange={(e) => updateMCEntry({ target: e.target.value })}
-                          className={`${fieldInputCls} mt-2 disabled:bg-slate-50 disabled:text-slate-400`}
+                          className={`${fieldInputCls} mt-2 disabled:bg-surface-2 disabled:text-muted`}
                         >
                           {/* 存着的那个不在 DDNS 里了（被删了）也得让人看见选的是谁 */}
                           {!ddnsHosts.includes(form.mcEntry.target) && (
@@ -1759,7 +1743,7 @@ function ServiceModal({
                         </select>
                       )}
 
-                      <div className="mt-2 font-mono text-[11px] text-slate-500">
+                      <div className="mt-2 font-mono text-[11px] text-muted">
                         _minecraft._tcp.{form.mcEntry.host.trim() || 'mc.example.com'} →{' '}
                         {form.mcEntry.target || form.mcEntry.host.trim() || 'mc.example.com'}:端口
                       </div>
@@ -1767,8 +1751,8 @@ function ServiceModal({
                   </div>
 
                   {initial ? (
-                    <div className="mt-4 rounded-xl border border-slate-200 p-3">
-                      <div className="mb-2 text-xs font-semibold text-slate-500">最近一次同步</div>
+                    <div className="mt-4 rounded-xl border border-line p-3">
+                      <div className="mb-2 text-xs font-semibold text-muted">最近一次同步</div>
                       {status?.mcEntryStatus === 'ok' && (
                         <div className="text-xs text-emerald-600">
                           成功 →{' '}
@@ -1789,7 +1773,7 @@ function ServiceModal({
                           {status.mcEntryAt ? `（${fmtTime(status.mcEntryAt)}）` : ''}
                         </div>
                       )}
-                      {!status?.mcEntryStatus && <div className="text-xs text-slate-400">还没同步过</div>}
+                      {!status?.mcEntryStatus && <div className="text-xs text-muted">还没同步过</div>}
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
@@ -1802,14 +1786,14 @@ function ServiceModal({
                           立即同步
                         </button>
                         <span
-                          className={`text-[11px] ${mcEntryDirty ? 'font-semibold text-amber-600' : 'text-slate-400'}`}
+                          className={`text-[11px] ${mcEntryDirty ? 'font-semibold text-amber-600' : 'text-muted'}`}
                         >
                           {mcEntryDirty ? '上面改的还没保存 —— 点右下角「保存」，几秒后自己就同步了' : '端口一变会自动同步'}
                         </span>
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-4 text-[11px] text-slate-400">先把服务保存了，再回来点同步</div>
+                    <div className="mt-4 text-[11px] text-muted">先把服务保存了，再回来点同步</div>
                   )}
                 </div>
               )}
@@ -1818,11 +1802,11 @@ function ServiceModal({
         </div>
 
         {err && <div className="px-6 pb-2 text-xs text-rose-500">{err}</div>}
-        <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+        <div className="flex justify-end gap-2 border-t border-line px-6 py-4">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -1864,40 +1848,40 @@ function LogModal({
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-          <div className="text-base font-bold text-slate-800">
+      <div className="flex w-full max-w-2xl flex-col rounded-2xl bg-surface shadow-2xl ring-1 ring-line">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+          <div className="text-base font-bold text-content">
             {status.deviceName || ''} / {status.serviceName || ''} - 服务日志
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-6 py-3 text-xs text-slate-500">
-          当前阶段：<span className="font-semibold text-slate-700">{phaseLabel[status.phaseStr] || status.phaseStr}</span>
-          {' · '}重启次数：<span className="font-semibold text-slate-700">{status.restartCount ?? 0}</span>
+        <div className="px-6 py-3 text-xs text-muted">
+          当前阶段：<span className="font-semibold text-content">{phaseLabel[status.phaseStr] || status.phaseStr}</span>
+          {' · '}重启次数：<span className="font-semibold text-content">{status.restartCount ?? 0}</span>
           {' · '}共 {logs.length} 条日志
         </div>
-        <div ref={bodyRef} className="max-h-[60vh] overflow-y-auto bg-slate-50 px-6 py-3">
+        <div ref={bodyRef} className="max-h-[60vh] overflow-y-auto bg-surface-2 px-6 py-3">
           {logs.length === 0 ? (
-            <div className="py-8 text-center text-sm text-slate-400">暂无日志</div>
+            <div className="py-8 text-center text-sm text-muted">暂无日志</div>
           ) : (
             logs.map((l, i) => (
               <div
                 key={i}
-                className="flex items-start gap-3 border-b border-slate-100 py-1.5 text-xs last:border-0"
+                className="flex items-start gap-3 border-b border-line py-1.5 text-xs last:border-0"
               >
-                <span className="font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                <span className="font-mono text-[11px] text-muted whitespace-nowrap">
                   {new Date(l.createdAt).toLocaleString()}
                 </span>
                 <span className="shrink-0 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
                   {phaseLabel[l.phaseStr] || l.phaseStr}
                 </span>
-                <span className="break-all text-slate-700">{l.message}</span>
+                <span className="break-all text-content">{l.message}</span>
               </div>
             ))
           )}
@@ -1933,7 +1917,7 @@ function natTypeTone(natType: string) {
   if (natType.includes('NAT3')) return { panel: 'border-amber-200 bg-amber-50/40', badge: 'bg-amber-100 text-amber-700' }
   if (natType.includes('NAT4') || natType.includes('阻断')) return { panel: 'border-rose-200 bg-rose-50/40', badge: 'bg-rose-100 text-rose-700' }
   if (natType.includes('公网')) return { panel: 'border-teal-200 bg-teal-50/40', badge: 'bg-teal-100 text-teal-700' }
-  return { panel: 'border-slate-200 bg-slate-50/70', badge: 'bg-slate-100 text-slate-600' }
+  return { panel: 'border-line bg-surface-2/70', badge: 'bg-surface-2 text-content' }
 }
 
 function NatProtocolResult({ protocol, result }: { protocol: 'UDP' | 'TCP'; result: NatDetectResult | null }) {
@@ -1942,11 +1926,11 @@ function NatProtocolResult({ protocol, result }: { protocol: 'UDP' | 'TCP'; resu
 
   if (!result) {
     return (
-      <section className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-4">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
-          <ProtocolIcon className="h-4 w-4 text-slate-400" /> {protocol}
+      <section className="rounded-lg border border-dashed border-line bg-surface-2/70 p-4">
+        <div className="flex items-center gap-2 text-sm font-bold text-content">
+          <ProtocolIcon className="h-4 w-4 text-muted" /> {protocol}
         </div>
-        <div className="mt-5 text-center text-sm text-slate-400">尚无检测结果</div>
+        <div className="mt-5 text-center text-sm text-muted">尚无检测结果</div>
       </section>
     )
   }
@@ -1955,12 +1939,12 @@ function NatProtocolResult({ protocol, result }: { protocol: 'UDP' | 'TCP'; resu
     <section className={`rounded-lg border p-4 ${tone.panel}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white text-slate-600 shadow-sm ring-1 ring-slate-200/80">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-surface text-content shadow-sm ring-1 ring-line/80">
             <ProtocolIcon className="h-4 w-4" />
           </span>
           <div>
-            <div className="text-sm font-bold text-slate-800">{protocol}</div>
-            <div className="text-[11px] text-slate-400">{protocol === 'UDP' ? 'Mapping + Filtering' : 'Mapping'}</div>
+            <div className="text-sm font-bold text-content">{protocol}</div>
+            <div className="text-[11px] text-muted">{protocol === 'UDP' ? 'Mapping + Filtering' : 'Mapping'}</div>
           </div>
         </div>
         <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-bold ${tone.badge}`}>
@@ -1969,33 +1953,33 @@ function NatProtocolResult({ protocol, result }: { protocol: 'UDP' | 'TCP'; resu
       </div>
 
       <div className="mt-4">
-        <div className="text-[11px] font-semibold text-slate-400">NAT 类型</div>
-        <div className="mt-1 break-words text-sm font-bold leading-5 text-slate-800">{result.natType || '无法确定'}</div>
+        <div className="text-[11px] font-semibold text-muted">NAT 类型</div>
+        <div className="mt-1 break-words text-sm font-bold leading-5 text-content">{result.natType || '无法确定'}</div>
       </div>
 
       <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
-        <div className="min-w-0 rounded-md bg-white/80 px-3 py-2 ring-1 ring-slate-200/70">
-          <dt className="text-[11px] font-semibold text-slate-400">Mapping</dt>
-          <dd className="mt-1 break-words font-medium leading-5 text-slate-700">{behaviorText(result.mapping, mappingLabels)}</dd>
+        <div className="min-w-0 rounded-md bg-surface/80 px-3 py-2 ring-1 ring-line/70">
+          <dt className="text-[11px] font-semibold text-muted">Mapping</dt>
+          <dd className="mt-1 break-words font-medium leading-5 text-content">{behaviorText(result.mapping, mappingLabels)}</dd>
           {result.mapping && result.mapping !== 'unknown' && (
-            <dd className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+            <dd className="mt-1.5 text-[10px] leading-relaxed text-muted">
               {result.mapping === 'EIM' && '✓ 最佳：同一端口对所有目标使用相同映射，打洞成功率最高'}
               {result.mapping === 'ADM' && '△ 中等：不同目标 IP 使用不同映射，需要端口预测'}
               {result.mapping === 'APDM' && '✗ 困难：每个目标 IP+端口都不同，打洞成功率低'}
             </dd>
           )}
         </div>
-        <div className="min-w-0 rounded-md bg-white/80 px-3 py-2 ring-1 ring-slate-200/70">
-          <dt className="text-[11px] font-semibold text-slate-400">Filtering</dt>
-          <dd className="mt-1 break-words font-medium leading-5 text-slate-700">
+        <div className="min-w-0 rounded-md bg-surface/80 px-3 py-2 ring-1 ring-line/70">
+          <dt className="text-[11px] font-semibold text-muted">Filtering</dt>
+          <dd className="mt-1 break-words font-medium leading-5 text-content">
             {protocol === 'TCP' ? 'TCP 不适用' : behaviorText(result.filtering, filteringLabels)}
           </dd>
           {protocol === 'TCP' ? (
-            <dd className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+            <dd className="mt-1.5 text-[10px] leading-relaxed text-muted">
               TCP 面向连接特性导致 Filtering 无法准确测试
             </dd>
           ) : result.filtering && result.filtering !== 'unknown' ? (
-            <dd className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+            <dd className="mt-1.5 text-[10px] leading-relaxed text-muted">
               {result.filtering === 'EIF' && '✓ 宽松：任何外部地址都能连入'}
               {result.filtering === 'ADF' && '△ 中等：需要先向目标发包建立连接'}
               {result.filtering === 'APDF' && '○ 严格：需要精确匹配端口，但 EIM 下仍可打洞'}
@@ -2067,15 +2051,15 @@ function NatTypeModal({ onClose }: { onClose: () => void }) {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-2xl ring-1 ring-slate-200">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-lg bg-surface shadow-2xl ring-1 ring-line">
+        <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100">
               <Info className="h-4.5 w-4.5" />
             </span>
             <div className="min-w-0">
-              <div className="text-base font-bold text-slate-800">NAT 类型详情</div>
-              <div className="mt-0.5 text-xs text-slate-400">RFC 5780 行为检测</div>
+              <div className="text-base font-bold text-content">NAT 类型详情</div>
+              <div className="mt-0.5 text-xs text-muted">RFC 5780 行为检测</div>
             </div>
           </div>
           <button
@@ -2083,14 +2067,14 @@ function NatTypeModal({ onClose }: { onClose: () => void }) {
             onClick={onClose}
             title="关闭"
             aria-label="关闭"
-            className="grid h-8 w-8 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="overflow-y-auto p-5">
           {loading ? (
-            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-slate-400">
+            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted">
               <LoaderCircle className="h-4 w-4 animate-spin" /> 正在加载
             </div>
           ) : error ? (
@@ -2100,7 +2084,7 @@ function NatTypeModal({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={load}
-                className="flex items-center gap-1 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-content hover:bg-surface-2"
               >
                 <RotateCw className="h-3.5 w-3.5" /> 重试
               </button>
@@ -2121,8 +2105,8 @@ function NatTypeModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
         {!loading && !error && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
-            <span className="text-xs text-slate-400">重新检测通常需要数秒</span>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+            <span className="text-xs text-muted">重新检测通常需要数秒</span>
             <button
               type="button"
               onClick={detect}
@@ -2187,15 +2171,15 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-2xl ring-1 ring-slate-200">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-lg bg-surface shadow-2xl ring-1 ring-line">
+        <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100">
               <Server className="h-4.5 w-4.5" />
             </span>
             <div className="min-w-0">
-              <div className="text-base font-bold text-slate-800">STUN 服务器</div>
-              <div className="mt-0.5 text-xs text-slate-400">每行一个，host 或 host:port（默认 3478）</div>
+              <div className="text-base font-bold text-content">STUN 服务器</div>
+              <div className="mt-0.5 text-xs text-muted">每行一个，host 或 host:port（默认 3478）</div>
             </div>
           </div>
           <button
@@ -2203,7 +2187,7 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
             onClick={onClose}
             title="关闭"
             aria-label="关闭"
-            className="grid h-8 w-8 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
@@ -2213,12 +2197,23 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
             value={text}
             onChange={(e) => setText(e.target.value)}
             spellCheck={false}
-            className="h-72 w-full resize-y rounded-md border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-700 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            className="h-72 w-full resize-y rounded-md border border-line bg-surface-2 p-3 font-mono text-xs leading-5 text-content outline-none transition focus:border-blue-300 focus:bg-surface focus:ring-2 focus:ring-blue-100"
             placeholder={'stun.moonlight-stream.org:3478\nstun.threema.ch:3478\n...'}
           />
-          <div className="mt-2 space-y-1 text-xs leading-5 text-slate-400">
+          <div className="mt-2 space-y-1 text-xs leading-5 text-muted">
             <p>保存后会立即重测一遍延迟并选出「最优」。正在跑的打洞服务不受影响，下一次打洞或保活重连起用新列表。</p>
             <p>提示：部分服务商（如 sonetel / nextcloud）会在几秒内掐掉 TCP 连接，TCP 打洞会反复重启，建议从列表里去掉它们。</p>
+            <p>
+              想换成更新的一批？这里有一份持续校验过的公开清单，复制进来即可：
+              <a
+                href="https://github.com/pradt2/always-online-stun/blob/master/valid_hosts_tcp.txt"
+                target="_blank"
+                rel="noreferrer"
+                className="ml-1 text-blue-500 underline hover:text-blue-600 dark:text-blue-400"
+              >
+                always-online-stun（TCP）
+              </a>
+            </p>
           </div>
           {error && (
             <div className="mt-3 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
@@ -2227,8 +2222,8 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
-          <span className="text-xs text-slate-400">保存前会逐行校验并去重</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+          <span className="text-xs text-muted">保存前会逐行校验并去重</span>
           <div className="flex items-center gap-2">
             {/* 恢复内置列表放在「取消」左边：它是个不常用但关键的回头路，
                 排在次要位置，避免和「保存」抢注意力 */}
@@ -2237,14 +2232,14 @@ function StunServersModal({ initial, onClose, onSaved }: { initial: string[]; on
               onClick={resetDefault}
               disabled={saving}
               title="丢弃当前编辑，恢复成程序内置的默认列表并立即重测"
-              className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
+              className="rounded-md border border-line px-3 py-2 text-xs font-semibold text-muted transition hover:bg-surface-2 disabled:opacity-50"
             >
               恢复内置列表
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+              className="rounded-md border border-line px-3 py-2 text-xs font-semibold text-content transition hover:bg-surface-2"
             >
               取消
             </button>
@@ -2398,10 +2393,8 @@ export function Stun() {
       internalPort: Number(form.internalPort),
       protocol: form.protocol,
       useUpnp: form.useUpnp,
-      access: {
-        mode: form.accessMode,
-        rules: form.accessRules.split('\n').map((x) => x.trim()).filter(Boolean),
-      },
+      // 站点级名单已废弃，始终传「不限制」；过滤统一走全局封禁表 / 白名单
+      access: { mode: '', rules: [] },
       punchLocalPort: Number(form.punchLocalPort) || 0,
       domain: form.domain.trim().toLowerCase(),
       ...formToPayloadTLS(form),
@@ -2528,7 +2521,7 @@ export function Stun() {
         <div className="py-12 text-center text-rose-500">
           <AlertCircle className="mx-auto h-8 w-8" />
           <div className="mt-2 text-sm font-semibold">数据加载失败</div>
-          <div className="mt-1 text-xs text-slate-500">{loadErr}</div>
+          <div className="mt-1 text-xs text-muted">{loadErr}</div>
           <button
             onClick={refresh}
             className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white"
@@ -2545,7 +2538,7 @@ export function Stun() {
   const [overSvc, setOverSvc] = useState('')
 
   if (!config) {
-    return <Card><div className="py-12 text-center text-sm text-slate-400">正在加载...</div></Card>
+    return <Card><div className="py-12 text-center text-sm text-muted">正在加载...</div></Card>
   }
 
 
@@ -2635,14 +2628,14 @@ export function Stun() {
               disabled={busy}
               title={busy ? '正在切换，打洞要几秒' : off ? '点一下启用' : '点一下停用'}
               className={`${iconBtn} disabled:cursor-wait ${
-                off ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                off ? 'bg-fill text-muted hover:bg-fill' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
               }`}
             >
               {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Power className="h-3 w-3" />}
             </button>
             <button
               onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev), initial: svc })}
-              className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`}
+              className={`${iconBtn} bg-surface-2 text-content hover:bg-fill`}
               title="编辑"
             >
               <Pencil className="h-3 w-3" />
@@ -2658,7 +2651,7 @@ export function Stun() {
                   name: svc.name || '未命名服务',
                 })
               }
-              className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`}
+              className={`${iconBtn} bg-surface-2 text-content hover:bg-fill`}
               title="访问日志（谁访问过它）"
             >
               <FileText className="h-3 w-3" />
@@ -2674,7 +2667,7 @@ export function Stun() {
         }
         subtitle={
           off ? (
-            <span className="text-slate-400">已停用，外部地址不通</span>
+            <span className="text-muted">已停用，外部地址不通</span>
           ) : fullAddr ? (
             <div className="flex min-w-0 items-center gap-1">
               <button
@@ -2682,7 +2675,7 @@ export function Stun() {
                 title={`点击复制：${fullAddr}`}
                 className="flex min-w-0 flex-1 items-center gap-1 text-left"
               >
-                <ClipboardCopy className="h-3 w-3 shrink-0 text-slate-400" />
+                <ClipboardCopy className="h-3 w-3 shrink-0 text-muted" />
                 <span className="truncate font-mono text-xs font-semibold text-blue-600">{fullAddr}</span>
               </button>
               <button
@@ -2694,12 +2687,12 @@ export function Stun() {
               </button>
             </div>
           ) : (
-            <span className="text-slate-400">{phaseLabel[phase] || '等待外部地址…'}</span>
+            <span className="text-muted">{phaseLabel[phase] || '等待外部地址…'}</span>
           )
         }
         meta={
           <>
-            <span className="font-mono text-[11px] text-slate-400">: {svc.internalPort}</span>
+            <span className="font-mono text-[11px] text-muted">: {svc.internalPort}</span>
             <CardBadge tone="slate" title="协议">
               {(svc.protocol || 'TCP').toUpperCase()}
             </CardBadge>
@@ -2747,7 +2740,7 @@ export function Stun() {
           className="flex-wrap gap-2"
           action={
             <div className="flex max-w-full flex-wrap items-center justify-end gap-2 text-xs">
-              <span className="text-slate-400">最优 STUN:</span>
+              <span className="text-muted">最优 STUN:</span>
               <span className="max-w-[220px] break-all text-right font-mono font-semibold text-blue-500 sm:max-w-none">
                 {config.bestStun || '--'}
               </span>
@@ -2755,7 +2748,7 @@ export function Stun() {
                 type="button"
                 onClick={() => setStunServersOpen(true)}
                 title="编辑 STUN 服务器列表"
-                className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-content transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
               >
                 <Server className="h-3.5 w-3.5" /> 服务器
               </button>
@@ -2763,32 +2756,32 @@ export function Stun() {
                 type="button"
                 onClick={() => setNatTypeOpen(true)}
                 title="查看 NAT 类型详情"
-                className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-content transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
               >
                 <Info className="h-3.5 w-3.5" /> NAT 类型
               </button>
               <button
                 onClick={refresh}
-                className="ml-2 flex items-center gap-1 rounded-md text-slate-500 transition hover:text-blue-500"
+                className="ml-2 flex items-center gap-1 rounded-md text-muted transition hover:text-blue-500"
               >
                 <RotateCw className="h-3.5 w-3.5" /> 刷新
               </button>
             </div>
           }
         />
-        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-4">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 p-4">
           <div className="flex min-w-[140px] flex-col items-center gap-1 rounded-xl bg-sky-50 px-4 py-3 ring-1 ring-sky-200">
             <div className="flex items-center gap-1.5">
               <Computer className="h-4 w-4 text-sky-500" />
               <span className="text-xs font-semibold text-sky-600">本机 IP</span>
             </div>
-            <span className="font-mono text-xs text-slate-600">{config.localIP || '--'}</span>
+            <span className="font-mono text-xs text-content">{config.localIP || '--'}</span>
           </div>
           {[...(config.natRouterList || [])]
             .sort((a, b) => a.natLevel - b.natLevel)
             .map((r) => (
               <div key={r.natLevel} className="flex items-center gap-2">
-                <ChevronRight className="h-4 w-4 text-slate-300" />
+                <ChevronRight className="h-4 w-4 text-muted" />
                 <div
                   className={`flex min-w-[140px] flex-col items-center gap-1 rounded-xl px-4 py-3 ring-1 ${
                     r.ipType === 'cgn' ? 'bg-violet-50 ring-violet-200' : 'bg-amber-50 ring-amber-200'
@@ -2804,17 +2797,17 @@ export function Stun() {
                       {r.ipType === 'cgn' ? 'CGN 网关' : `路由 NAT ${r.natLevel}`}
                     </span>
                   </div>
-                  <span className="font-mono text-xs text-slate-600">{r.lanIP}</span>
+                  <span className="font-mono text-xs text-content">{r.lanIP}</span>
                 </div>
               </div>
             ))}
-          <ChevronRight className="h-4 w-4 text-slate-300" />
+          <ChevronRight className="h-4 w-4 text-muted" />
           <div className="flex min-w-[140px] flex-col items-center gap-1 rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200">
             <div className="flex items-center gap-1.5">
               <Globe className="h-4 w-4 text-emerald-500" />
               <span className="text-xs font-semibold text-emerald-600">公网 IP</span>
             </div>
-            <span className="font-mono text-xs text-slate-600">{config.publicIP || '--'}</span>
+            <span className="font-mono text-xs text-content">{config.publicIP || '--'}</span>
           </div>
         </div>
       </Card>
@@ -2827,7 +2820,7 @@ export function Stun() {
       {/* 统一的「添加服务」入口：弹出表单里选设备 —— 和反代同一套做法，
           不是先加设备再加服务。设备列表是共用的，选一台就行。 */}
       <div className="flex items-center justify-between">
-        <div className="text-[11px] leading-relaxed text-slate-400">
+        <div className="text-[11px] leading-relaxed text-muted">
           穿透服务按设备分组。加服务时选好设备，它会归到那台设备下面。
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -2848,9 +2841,9 @@ export function Stun() {
           // 设备的增删属于「设备」页，穿透页不再铺开所有设备。
           <Card className="!p-0">
             <div className="px-5 py-12 text-center">
-              <Server className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-2 text-sm text-slate-500">还没有内网穿透服务</p>
-              <p className="mt-1 text-[11px] text-slate-400">
+              <Server className="mx-auto h-8 w-8 text-muted" />
+              <p className="mt-2 text-sm text-muted">还没有内网穿透服务</p>
+              <p className="mt-1 text-[11px] text-muted">
                 点右上角「添加服务」，选设备、填端口就行
               </p>
             </div>
@@ -2881,17 +2874,17 @@ export function Stun() {
             return out.map(({ dev, svcs }, gi) => (
               <Card key={dev ? getDeviceId(dev) : `rest-${gi}`} className="!p-0">
                 {/* 设备头：和反代页同一套样式 */}
-                <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                <div className="flex items-center gap-2 border-b border-line px-3 py-2">
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
                     <Server className="h-3.5 w-3.5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-bold text-slate-800">
+                    <p className="truncate text-[13px] font-bold text-content">
                       {dev ? dev.name : '未归到设备'}
                     </p>
-                    {dev && <p className="font-mono text-[10px] text-slate-400">{dev.ip}</p>}
+                    {dev && <p className="font-mono text-[10px] text-muted">{dev.ip}</p>}
                   </div>
-                  <span className="shrink-0 text-[11px] text-slate-400">{svcs.length} 个服务</span>
+                  <span className="shrink-0 text-[11px] text-muted">{svcs.length} 个服务</span>
                   {dev && (
                     <button
                       onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev) })}
@@ -3006,7 +2999,7 @@ export function Stun() {
           <div
             key={t.id}
             // 限宽换行：长的那几句不限宽会拉成一条横穿屏幕的线，反而看不下去
-            className="max-w-[min(90vw,34rem)] break-words rounded-lg bg-slate-900/85 px-4 py-2 text-sm leading-relaxed text-white shadow-lg"
+            className="max-w-[min(90vw,34rem)] break-words rounded-lg bg-inverse/90 px-4 py-2 text-sm leading-relaxed text-on-inverse shadow-lg"
           >
             {t.text}
           </div>

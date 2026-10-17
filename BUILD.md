@@ -13,12 +13,10 @@ Catflap 有两个编译目标,靠 Go build tag `desktop` 区分:
 
 ## 前置:先构建前端
 
-Go 编译依赖 `web/admin/dist` 和 `web/home/dist`(embed 目标)。**改过前端后必须先重新构建**,否则打进去的是旧资源。
+Go 编译依赖 `web/admin/dist`(embed 目标)。**改过前端后必须先重新构建**,否则打进去的是旧资源。
 
 ```powershell
-# 分别构建
 cd web/admin; npm run build; cd ../..
-cd web/home;  npm run build; cd ../..
 ```
 
 或用 Taskfile 一把梭:

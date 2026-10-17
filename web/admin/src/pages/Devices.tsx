@@ -147,7 +147,7 @@ export function Devices() {
           <CardHeader
             title={
               <span>
-                设备 <span className="ml-1 font-normal text-slate-400">{devices.length}</span>
+                设备 <span className="ml-1 font-normal text-muted">{devices.length}</span>
               </span>
             }
             action={
@@ -171,7 +171,7 @@ export function Devices() {
           />
         </div>
         <div className="px-5 pb-5">
-          <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+          <div className="mb-3 rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted ring-1 ring-line/70">
             设备按 IP 标识。加好之后，内网穿透、反向代理、端口转发都能直接选它 ——
             同一台机器不用在三处各填一遍。
             <br />
@@ -179,10 +179,10 @@ export function Devices() {
           </div>
 
           {devices.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center">
-              <Server className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-2 text-sm text-slate-500">还没有设备</p>
-              <p className="mt-1 text-[11px] text-slate-400">
+            <div className="rounded-xl border border-dashed border-line py-10 text-center">
+              <Server className="mx-auto h-8 w-8 text-muted" />
+              <p className="mt-2 text-sm text-muted">还没有设备</p>
+              <p className="mt-1 text-[11px] text-muted">
                 先加一台（比如你的群晖、软路由），之后才能在它上面加服务
               </p>
               <button
@@ -241,8 +241,8 @@ export function Devices() {
 
       {deleteConfirm.open && deleteConfirm.device && (
         <div className={modalBackdrop} onMouseDown={(e) => { if (e.target === e.currentTarget) setDeleteConfirm({ open: false, detail: '' }) }}>
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl ring-1 ring-slate-200">
-            <h3 className="mb-3 text-sm font-bold text-slate-800">
+          <div className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-xl ring-1 ring-line">
+            <h3 className="mb-3 text-sm font-bold text-content">
               删除设备「{deleteConfirm.device.name}」
             </h3>
             {/* detail 是后端返回的清单，逐条列出将被连带删掉的服务 */}
@@ -252,7 +252,7 @@ export function Devices() {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setDeleteConfirm({ open: false, detail: '' })}
-                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-content ring-1 ring-line transition hover:bg-surface-2"
               >
                 取消
               </button>
@@ -294,22 +294,22 @@ function DeviceCard({
   onDelete: () => void
 }) {
   return (
-    <div className="flex flex-col rounded-xl border border-slate-200/80 p-3 transition hover:border-blue-200 hover:shadow-md">
-      <div className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2">
+    <div className="flex flex-col rounded-xl border border-line/80 p-3 transition hover:border-blue-200 hover:shadow-md">
+      <div className="mb-2 flex items-center gap-2 border-b border-line pb-2">
         {/* 手柄：让"可以拖动"看得出来，光靠光标变化不够明显 */}
-        <span className="cursor-grab text-slate-300" title="按住拖动可以排序">
+        <span className="cursor-grab text-muted" title="按住拖动可以排序">
           <GripVertical className="h-4 w-4" />
         </span>
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-500">
           <HardDrive className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold text-slate-800">{device.name}</p>
-          <p className="font-mono text-[11px] text-slate-400">{device.ip}</p>
+          <p className="truncate text-sm font-bold text-content">{device.name}</p>
+          <p className="font-mono text-[11px] text-muted">{device.ip}</p>
         </div>
         <button
           onClick={onEdit}
-          className="grid h-6 w-6 place-items-center rounded-md bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+          className="grid h-6 w-6 place-items-center rounded-md bg-surface-2 text-content transition hover:bg-fill"
           title="编辑"
         >
           <Pencil className="h-3 w-3" />
@@ -378,18 +378,18 @@ function DeviceServices({ ip }: { ip: string }) {
   }, [stun, proxy, ip])
 
   if (items.length === 0) {
-    return <p className="text-[11px] text-slate-400">这台机器上还没有服务</p>
+    return <p className="text-[11px] text-muted">这台机器上还没有服务</p>
   }
 
   return (
     <div className="space-y-1">
       {items.map((it, i) => (
         <div key={i} className="flex items-center gap-1.5 text-[11px]">
-          <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 font-bold text-slate-500">
+          <span className="shrink-0 rounded bg-surface-2 px-1 py-0.5 font-bold text-muted">
             {it.kind}
           </span>
-          <span className="min-w-0 flex-1 truncate text-slate-600">{it.label}</span>
-          {it.port && <span className="font-mono text-slate-400">:{it.port}</span>}
+          <span className="min-w-0 flex-1 truncate text-content">{it.label}</span>
+          {it.port && <span className="font-mono text-muted">:{it.port}</span>}
         </div>
       ))}
     </div>
@@ -430,30 +430,30 @@ function DeviceModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" onClick={onCancel}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="mb-3 text-sm font-bold text-slate-800">{initial ? '编辑设备' : '添加设备'}</h3>
+      <div className="w-full max-w-sm rounded-2xl bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-3 text-sm font-bold text-content">{initial ? '编辑设备' : '添加设备'}</h3>
         <form onSubmit={submit} className="space-y-3">
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">名字</div>
+            <div className="mb-1 text-xs font-semibold text-muted">名字</div>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="群晖 NAS（留空就用 IP）"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">IP</div>
+            <div className="mb-1 text-xs font-semibold text-muted">IP</div>
             <input
               value={ip}
               onChange={(e) => setIp(e.target.value)}
               placeholder="192.168.1.20"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
             />
           </label>
           {err && <div className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onCancel} className="rounded-xl px-4 py-2 text-sm text-slate-500 transition hover:bg-slate-100">
+            <button type="button" onClick={onCancel} className="rounded-xl px-4 py-2 text-sm text-muted transition hover:bg-surface-2">
               取消
             </button>
             <button

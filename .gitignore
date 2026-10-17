@@ -12,6 +12,9 @@
 /modules/stun/test/data/
 /test/config/
 /test/data/
+# modules/task 的测试同样以包目录为 CWD，RunDue → SaveConfig 会写出
+# modules/task/config/taskConfig.json。理由同上。
+/modules/task/config/
 
 
 # ── 构建产物 ────────────────────────────────────────────────────────
@@ -32,7 +35,7 @@ node_modules/
 *.tsbuildinfo
 .vite/
 
-# 注意：web/admin/dist 与 web/home/dist **故意入库**。
+# 注意：web/admin/dist **故意入库**。
 # 原因有二：
 #   1. app.go 用 //go:embed 嵌入它们，不入库会导致 clone 后直接 `go build` 失败；
 #   2. 上游也是这么做的，保持一致的目的是让 `git merge upstream` 干净。

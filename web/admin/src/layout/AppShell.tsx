@@ -25,11 +25,11 @@ export function AppShell({ active, onChange, children }: AppShellProps) {
   }, [navOpen])
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30">
+    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-blue-950/30 dark:to-indigo-950/30">
       {/* 抽屉拉出来时盖住内容，点一下关掉。lg 以上永不出现 */}
       {navOpen && (
         <div
-          className="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden dark:bg-black/70"
           onClick={() => setNavOpen(false)}
         />
       )}

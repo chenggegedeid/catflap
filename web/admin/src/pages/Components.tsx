@@ -42,7 +42,7 @@ const toneClass: Record<Tone, string> = {
   ok: 'bg-emerald-50 text-emerald-600',
   warn: 'bg-amber-50 text-amber-600',
   bad: 'bg-rose-50 text-rose-600',
-  idle: 'bg-slate-100 text-slate-500',
+  idle: 'bg-surface-2 text-muted',
 }
 
 const HEALTH_LABEL: Record<string, string> = {
@@ -104,14 +104,14 @@ export function ComponentManager() {
                 setErr('')
                 void refreshComponents()
               }}
-              className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+              className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-content transition hover:bg-surface-2"
             >
               <RotateCw className="h-3.5 w-3.5" /> 刷新
             </button>
           }
         />
 
-        <p className="text-xs leading-relaxed text-slate-500">
+        <p className="text-xs leading-relaxed text-muted">
           关闭一个功能后，它的接口会直接返回 404（不是 403 —— 不告诉未被授权的人
           「这里本来有个功能」），侧栏上对应的入口也会消失。改动立即生效，不用重启。
         </p>
@@ -131,34 +131,42 @@ export function ComponentManager() {
 
       <Card className="p-0">
         {!loaded ? (
-          <div className="px-5 py-6 text-sm text-slate-400">读取中…</div>
+          <div className="px-5 py-6 text-sm text-muted">读取中…</div>
         ) : list.length === 0 ? (
-          <div className="px-5 py-6 text-sm text-slate-400">
+          <div className="px-5 py-6 text-sm text-muted">
             没有读到任何组件。若是接口报错，上面的提示里会有原因。
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-line">
             {list.map((c) => {
               const linked = pageByComponent(c.name)
               const Icon = linked?.meta.icon ?? Blocks
               const h = health[c.name]
               const working = busy === c.name
 
+              // 显示名的优先顺序：页面的中文名（有页面的组件）→ 组件自己报的
+              // 中文名（core/component.Describer）→ 机器名。
+              //
+              // 最后落到机器名是兜底不是常态：新增模块忘了实现 Describer 就会
+              // 走到这里，scripts/check_component_bindings.py 会盯着。
+              const displayName = linked?.meta.label ?? c.title ?? c.name
+
               return (
                 <li key={c.name} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-5">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-500">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted">
                     <Icon className="h-4.5 w-4.5" />
                   </span>
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-slate-800">
-                        {linked?.meta.label ?? c.name}
+                      <span className="truncate text-sm font-semibold text-content">
+                        {displayName}
                       </span>
                       {/* 机器名照旧露出来：查日志、改 config/components.json 时用的是它 */}
-                      <span className="shrink-0 font-mono text-[10px] text-slate-400">{c.name}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted">{c.name}</span>
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+                      {c.summary && <span>{c.summary}</span>}
                       {c.tasks && c.tasks.length > 0 && <span>定时任务：{c.tasks.join('、')}</span>}
                       {h?.message && <span className="text-amber-600">{h.message}</span>}
                     </div>
@@ -182,7 +190,7 @@ export function ComponentManager() {
                   {linked && c.enabled && (
                     <a
                       href={`#/${linked.key}`}
-                      className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                      className="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-content transition hover:bg-surface-2"
                     >
                       打开 <ArrowUpRight className="h-3.5 w-3.5" />
                     </a>
@@ -193,27 +201,27 @@ export function ComponentManager() {
                       type="button"
                       role="switch"
                       aria-checked={c.enabled}
-                      aria-label={`${c.enabled ? '关闭' : '开启'} ${c.name}`}
+                      aria-label={`${c.enabled ? '关闭' : '开启'} ${displayName}`}
                       disabled={working}
                       onClick={() => void onToggle(c, !c.enabled)}
                       title={c.enabled ? '关闭这个功能' : '开启这个功能'}
                       className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${
-                        c.enabled ? 'bg-blue-500' : 'bg-slate-300'
+                        c.enabled ? 'bg-blue-500' : 'bg-fill'
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${
+                        className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-surface shadow transition-all ${
                           c.enabled ? 'left-[1.375rem]' : 'left-0.5'
                         }`}
                       >
                         <Power
-                          className={`h-3 w-3 ${c.enabled ? 'text-blue-500' : 'text-slate-400'}`}
+                          className={`h-3 w-3 ${c.enabled ? 'text-blue-500' : 'text-muted'}`}
                         />
                       </span>
                     </button>
                   ) : (
                     // 不能关的功能说明白为什么，否则用户会去找那个不存在的开关
-                    <span className="shrink-0 text-[11px] text-slate-400">不可关闭</span>
+                    <span className="shrink-0 text-[11px] text-muted">不可关闭</span>
                   )}
                 </li>
               )

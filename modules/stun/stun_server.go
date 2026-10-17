@@ -56,7 +56,7 @@ func (s *STUNService) GetBackupSTUNServer() (string, error) {
 	}
 
 	var wg sync.WaitGroup
-	resultCh := make(chan string, len(s.AvailableSTUNServers))
+	resultCh := make(chan STUNServiceDelay, len(s.AvailableSTUNServers))
 
 	//遍历测试返回可用的
 	wg.Add(len(s.AvailableSTUNServers))
@@ -68,7 +68,7 @@ func (s *STUNService) GetBackupSTUNServer() (string, error) {
 				return
 			}
 
-			resultCh <- serverDeelay.Server
+			resultCh <- *serverDeelay
 		}()
 	}
 
@@ -77,9 +77,27 @@ func (s *STUNService) GetBackupSTUNServer() (string, error) {
 		close(resultCh)
 	}()
 
-	// 只要拿到可用服务器直接返回
-	if server, ok := <-resultCh; ok {
-		return server, nil
+	/*
+	   收集**全部**可用结果后取**延时最小**的那台，而不是"谁先响应用谁"。
+
+	   原来只取第一个 `<-resultCh`，而各 goroutine 的完成顺序取决于网络抖动，
+	   于是同一个函数连续两次调用可能返回不同的服务器。
+
+	   这一点对 TCP 打洞很致命：NAT3（端口受限锥形）下，同一个本机端口访问
+	   不同的服务器 IP 会被分配不同的公网端口 —— 保活时一换服务器，公网端口
+	   就跟着变，表现就是"打洞端口几分钟漂移一次"。
+	   选最稳定的（延时最低）那台，能让重连尽量回到同一台服务器。
+	*/
+	var best string
+	var bestDelay time.Duration
+	got := false
+	for serverDelay := range resultCh {
+		if !got || serverDelay.Delay < bestDelay {
+			best, bestDelay, got = serverDelay.Server, serverDelay.Delay, true
+		}
+	}
+	if got {
+		return best, nil
 	}
 
 	//如果遍历完了都没有

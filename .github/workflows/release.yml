@@ -47,7 +47,11 @@ jobs:
           echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG} / 注入版本=${TAG#v}"
 
-  # ── 先构建两个前端，产出 dist 给后续任务复用 ─────────────────────
+  # ── 先构建前端，产出 dist 给后续任务复用 ─────────────────────────
+  #
+  # 以前这里还要构建 web/home（导航主页），那个前端已经移除。
+  # 忘了删这个步骤的话，npm ci 会因为目录不存在直接失败，
+  # 而失败发生在整条流水线的最前面 —— 一个资产都出不来。
   web:
     name: 构建前端
     runs-on: ubuntu-latest
@@ -62,12 +66,8 @@ jobs:
         working-directory: web/admin
         run: npm ci && npm run build
 
-      - name: 构建 home
-        working-directory: web/home
-        run: npm ci && npm run build
-
       - name: 打包 dist
-        run: tar -czf web-dist.tar.gz web/admin/dist web/home/dist
+        run: tar -czf web-dist.tar.gz web/admin/dist
 
       - uses: actions/upload-artifact@v4
         with:
