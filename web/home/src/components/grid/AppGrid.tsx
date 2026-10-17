@@ -35,10 +35,15 @@ export function AppGrid({
   apps,
   prefer = 'wanV4',
   onOpenMenu,
+  selection,
+  onToggleSelect,
 }: {
   apps: AppView[]
   prefer?: NetworkPrefer
   onOpenMenu?: (app: AppView, x: number, y: number) => void
+  /** 批量删除模式的选中集合；非空时卡片右上角出现勾选框 */
+  selection?: Set<string>
+  onToggleSelect?: (id: string) => void
 }) {
   const cols = useColumns()
 
@@ -67,6 +72,9 @@ export function AppGrid({
             prefer={prefer}
             placement={{ col: p.col, row: p.row, w: p.w, h: p.h }}
             onOpenMenu={onOpenMenu}
+            selectable={!!selection}
+            selected={selection?.has(app.id) ?? false}
+            onToggleSelect={onToggleSelect}
           />
         )
       })}

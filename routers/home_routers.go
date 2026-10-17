@@ -66,6 +66,12 @@ func HomeRoutersProtected(g *gin.RouterGroup) {
 		middleware.BindJsonMiddleware[home_api.AppDeleteRequest], app.AppDeleteView)
 	g.PUT("home/app/reorder",
 		middleware.BindJsonMiddleware[home_api.AppReorderRequest], app.AppReorderView)
+	// 改卡片尺寸（右键菜单「修改大小」）
+	g.PUT("home/app/resize",
+		middleware.BindJsonMiddleware[home_api.AppResizeRequest],
+		app.AppResizeView,
+	)
+
 	g.PUT("home/app/position",
 		middleware.BindJsonMiddleware[home_api.AppPositionsRequest], app.AppPositionView)
 	g.PUT("home/app/category",
