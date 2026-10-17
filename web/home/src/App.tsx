@@ -43,6 +43,9 @@ export default function App() {
 
 function HomePage() {
   const { state, reload, setActiveCategory, mutate, notify, toasts, dismissToast } = useHome()
+  // 壁纸和标题不依赖配置：加载中、加载失败也要有个能看的样子。
+  // 放在最前面 —— 模式判断（currentCatId 等）都依赖它
+  const cfg = state.config
   const [retrying, setRetrying] = useState(false)
   // 右键菜单
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -119,16 +122,30 @@ function HomePage() {
   // 翻页方向：给滑动动画用（往下翻 = 新内容从下滑入）
   const [pageDir, setPageDir] = useState<1 | -1>(1)
 
+  /**
+   * "当前在哪个分组"的唯一答案。
+   * stream 跟滚动走（spyActive），paged 跟点击走（state.activeCategory）。
+   * **翻页、内容渲染都必须用它** —— 之前翻页不生效就是因为这里
+   * 还在读 spyActive，而 paged 下没有滚动事件，它永远停在旧值。
+   */
+  const currentCatId = cfg?.pageMode === 'stream' ? spyActive : state.activeCategory
+
   const pageByWheel = useCallback(
     (dir: 1 | -1) => {
-      const i = catIds.indexOf(spyActive)
+      const i = catIds.indexOf(currentCatId)
       if (i < 0) return
       const next = Math.min(catIds.length - 1, Math.max(0, i + dir))
       if (next === i) return
       setPageDir(dir)
+      // paged 下没有"滚动到位置"这回事，直接切（内容替换就是反馈）
+      if (cfg?.pageMode !== 'stream') {
+        setPageDir(dir)
+        setActiveCategory(catIds[next])
+        return
+      }
       scrollToCategory(catIds[next])
     },
-    [catIds, spyActive, scrollToCategory],
+    [catIds, currentCatId, scrollToCategory, cfg, setActiveCategory],
   )
 
   /**
@@ -261,12 +278,9 @@ function HomePage() {
     [state.config, mutate],
   )
 
-  // 壁纸和标题不依赖配置：加载中、加载失败也要有个能看的样子
-  const cfg = state.config
-
   // hover: none 表示触屏设备 —— 那里不要滚轮翻页（触屏直接滑就行）
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
-  useWheelPaging(!isTouch && catIds.length > 1, currentSection, pageByWheel, cfg?.pageMode === 'paged')
+  useWheelPaging(!isTouch && catIds.length > 1, currentSection, pageByWheel, cfg?.pageMode !== 'stream')
 
   return (
     /**
@@ -349,8 +363,15 @@ function HomePage() {
             {state.load === 'ready' && cfg && (
               <Feed
                 canManage={!!cfg.authed}
-                pageMode={cfg.pageMode === 'paged' ? 'paged' : 'stream'}
-                activeId={spyActive}
+                pageMode={cfg.pageMode === 'stream' ? 'stream' : 'paged'}
+                /**
+                 * **两种模式的高亮来源不同，这不是可以统一的细节：**
+                 *   paged  → state.activeCategory（点击即切换，内容替换就是反馈）
+                 *   stream → spyActive（跟着滚动走，点了只是滚动过去）
+                 * paged 如果也用 spyActive，点击后没有滚动事件、spyActive 不更新，
+                 * 内容区就永远停在第一组 —— 这就是"点击分组进不去"的真正原因。
+                 */
+                activeId={currentCatId}
                 pageDir={pageDir}
                 onOpenMenu={(app, x, y) => setMenu({ app, x, y })}
                 onAddApp={openAddApp}
@@ -500,13 +521,15 @@ function Feed({
           <div key={cat.id} className={pageDir === 1 ? 'animate-page-next' : 'animate-page-prev'}>
             <h2 className="mb-2 px-1 text-[11px] font-medium tracking-wide text-white/55">{cat.name}</h2>
             {apps.length > 0 ? (
-              <AppGrid
-                apps={apps}
-                prefer={cfg.networkPrefer}
-                onOpenMenu={canManage ? onOpenMenu : undefined}
-              />
+              <AppGrid apps={apps} prefer={cfg.networkPrefer} onOpenMenu={canManage ? onOpenMenu : undefined} />
             ) : (
-              <p className="px-1 text-[11px] text-white/40">这个分组还没有应用</p>
+              /** 空态必须是**一块看得见的区域**，不能是一行小字 ——
+               *  否则点击分组后视口里啥也没变，用户以为没切换成功 */
+              <EmptyState
+                title={`「${cat.name}」还没有应用`}
+                hint="右键空白处可以新建；也可以把别的分组的卡片拖过来。"
+                action={canManage ? { label: '添加应用', onClick: onAddApp } : undefined}
+              />
             )}
           </div>
         )}
@@ -533,16 +556,21 @@ function Feed({
       {cats.map((cat) => {
         const apps = visibleApps(cfg, cat.id)
         /**
-         * 空分组**不渲染任何东西**。
+         * 空分组**必须渲染标题和一个可见的空态**。
          *
-         * 以前这里会写「「私密」还锁着，点左栏解锁」—— 但左栏那个锁图标
-         * 已经说得很清楚了，同一句话在内容区再写一遍，既占地方又打断流式节奏
-         * （几个空分组连着排，整条流看起来断断续续的）。
-         *
-         * 空分组仍然留在左栏里：它是"点过去解锁"的入口，不能没有。
+         * 有一版这里直接 return 了不渲染 —— 结果点击分组滚动到那个
+         * 0 高度的空 div，视口毫无变化，用户以为"进不去"。
+         * 滚动定位需要落点，落点必须可见。这个教训记住了。
          */
         if (apps.length === 0) {
-          return <Section key={cat.id} id={cat.id} title="" registerRef={registerRef}><span /></Section>
+          return (
+            <Section key={cat.id} id={cat.id} title={cat.name} registerRef={registerRef}>
+              <p className="rounded-xl border border-dashed border-white/20 px-3 py-4 text-center text-[11px] text-white/45">
+                这个分组还没有应用
+                {canManage ? '，右键这里可以新建' : ''}
+              </p>
+            </Section>
+          )
         }
         return (
           <Section key={cat.id} id={cat.id} title={cat.name} registerRef={registerRef}>

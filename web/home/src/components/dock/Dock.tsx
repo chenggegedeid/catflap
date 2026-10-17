@@ -53,24 +53,31 @@ export function Dock({
   canManage: boolean
 }) {
   /**
-   * 关键：**空的 Dock 也必须在拖拽期间渲染出来**，否则拖不进去。
+   * 关键：**空的 Dock 也必须常驻渲染出一个真实尺寸的区域**，否则拖不进去。
    *
-   * 这是个"鸡生蛋"问题：dnd-kit 的 droppable 要渲染了才注册得上，
-   * 而不渲染的判断又依赖 useDroppable 的 isOver —— 不渲染就永远没有 isOver，
-   * 于是空的 Dock 是个永远命中不了的落区。用户表现为"拖到下面没反应"。
+   * 之前用 `display: none` 隐藏空 Dock，结果永远拖不进去 —— 因为
+   * dnd-kit 是在**拖拽开始那一刻测量各落点矩形**的，那时 Dock 是 0×0，
+   * 之后就算显示了，dnd-kit 记的还是那个 0 尺寸，指针永远"落不进去"。
    *
-   * 解法：拖拽期间（无论空不空）都渲染，只靠 CSS 让它平时不可见。
+   * 改成常驻渲染 + 用透明度/指针穿透隐藏：dnd-kit 的命中判定是纯几何计算
+   * （指针坐标 vs 元素矩形），不看 pointer-events，所以这样既能命中又不挡卡片。
    */
   const drag = useDragState()
-  const showEmpty = items.length === 0 && drag?.kind === 'app'
+  const draggingApp = drag?.kind === 'app'
+  const empty = items.length === 0
+  // 空且没在拖 → 隐形但不消失（保留矩形，保证能被拖中）
+  const idle = empty && !draggingApp
 
   return (
     <div
       ref={dropRef}
-      // 空且没在拖 → 彻底移出交互（visibility:hidden 仍会挡住点击）
+      // HomeDnd 松手时靠这个标记现量一次矩形（见 HomeDnd 里的注释）
+      data-dock-drop=""
       style={{
         paddingBottom: 'calc(0.75rem + var(--safe-bottom))',
-        ...(items.length === 0 && !showEmpty ? { display: 'none' } : null),
+        // 不用 display:none —— 那会让矩形归零，拖拽永远命中不了（见上面注释）
+        opacity: idle ? 0 : 1,
+        pointerEvents: idle ? 'none' : 'auto',
       }}
       // 拖拽落区要能收到指针事件，但空 Dock 不该挡住下面的卡片：
       // pointer-events 由外层容器控制，这里保持 auto 让 useDroppable 生效

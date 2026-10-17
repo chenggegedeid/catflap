@@ -30,9 +30,15 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { DOCK_ID } from '../dock/Dock'
+
+/**
+ * Dock 上方再宽限几像素：手指/鼠标停在托盘边缘上方一点点也算命中。
+ * 太小会让"明明拖到托盘了却没反应"，太大会误吞排序操作。
+ */
+const DOCK_SLACK_PX = 12
 
 export type DragKind = 'app' | 'category'
 
@@ -84,6 +90,23 @@ export function HomeDnd({
 }) {
   const [dragging, setDragging] = useState<DragInfo | null>(null)
 
+  /**
+   * 松手时的指针位置。
+   *
+   * 为什么要自己记：判断"拖到底部托盘"最可靠的依据是**指针落在哪**，
+   * 而不是 dnd-kit 的 over —— over 依赖 Dock 那个 droppable 的矩形，
+   * 而矩形是拖拽开始那一刻测的，Dock 若当时不可见就永远是 0 尺寸，命中不了。
+   * 自己记指针位置就没有这个时序问题。
+   */
+  const pointer = useRef({ x: 0, y: 0 })
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      pointer.current = { x: e.clientX, y: e.clientY }
+    }
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [])
+
   const sensors = useSensors(
     // 移动超过 8px 才算拖 —— 点击不会被误判成拖动
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -101,8 +124,27 @@ export function HomeDnd({
       const overKind = (over.data.current?.kind as DragKind | undefined) ?? null
 
       // ① 放进 Dock：只对应用有意义（分组不该进 Dock）
-      if (over.id === DOCK_ID) {
-        if (kind === 'app') onDropToDock(activeId)
+      //
+      // 两个判据取其一：
+      //   a) dnd-kit 认出了 Dock 落点（over.id === DOCK_ID）
+      //   b) 松手时指针在屏幕底部区域（几何兜底）
+      // (b) 不能省 —— Dock 那个 droppable 的矩形是拖拽开始那一刻测的，
+      // 若当时它不可见（空 Dock 平时是隐形的），矩形就是 0，永远命中不了。
+      // 松手时**现量**一次 Dock 的矩形（不是用 dnd-kit 缓存的那份 ——
+      // 缓存是拖拽开始那一刻测的，Dock 当时可能是隐形的，矩形为 0）。
+      // 用实时矩形判断，就既精确又不会把"底部区域里本来就有的卡片"
+      // 误判成要进托盘。
+      const p = pointer.current
+      const dockEl = document.querySelector<HTMLElement>('[data-dock-drop]')
+      const inDock = (() => {
+        if (!dockEl) return false
+        const r = dockEl.getBoundingClientRect()
+        if (r.width === 0 || r.height === 0) return false
+        return p.x >= r.left && p.x <= r.right && p.y >= r.top - DOCK_SLACK_PX && p.y <= r.bottom
+      })()
+
+      if (kind === 'app' && (over.id === DOCK_ID || inDock)) {
+        onDropToDock(activeId)
         return
       }
 

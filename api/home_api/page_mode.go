@@ -23,7 +23,7 @@ func (HomeApi) PageModeUpdateView(c *gin.Context) {
 
 	mode := cr.Mode
 	if mode != "stream" && mode != "paged" {
-		mode = "stream"
+		mode = "paged"
 	}
 
 	err := home.Runtime.WithLock(func(cfg *home.Config) error {
