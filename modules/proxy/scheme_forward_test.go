@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"os"
 	"testing"
 
 	"github.com/chenggegedeid/catflap/modules/proxy/model"
@@ -163,59 +162,3 @@ func TestMigratePortForwardNoop(t *testing.T) {
 // 表现是"点过主页，编辑一次就没了"。
 //
 // 原则：**表单管不到的字段，保存时不该被动**。
-func TestSaveSiteKeepsShowOnHome(t *testing.T) {
-	// SaveSite 会落盘到 config/proxyConfig.json —— 必须切到临时目录，
-	// 否则会在源码树里留下 modules/proxy/config/（已经误提交过两次）。
-	dir := t.TempDir()
-	oldWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(oldWD)
-	// 切过去之后还要建 config/ —— SaveSite 直接写 config/proxyConfig.json，
-	// 不会自己建目录
-	if err := os.MkdirAll("config", 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := model.ProxyConfig{
-		// 端口用高位：SaveSite 会真的起监听，1024 以下要 root ——
-		// CI 的 runner 不是 root，绑 80 会直接失败（"没权限监听端口 80"）。
-		// 这个用例只关心 showOnHome 会不会被冲掉，端口是多少无所谓。
-		Enabled:   true,
-		HTTPPorts: []int{18080},
-		Sites: []model.Site{
-			{
-				ID:         1,
-				Hosts:      []string{"nas.example.com"},
-				Backend:    "192.168.1.20:5000",
-				Enabled:    true,
-				ShowOnHome: true, // 用户点了上主页
-			},
-		},
-	}
-	Runtime.Config = cfg
-
-	// 模拟前端「编辑保存」：带了表单字段，但不带 showOnHome
-	_, saveErr := SaveSite(model.Site{
-		ID:          1,
-		Hosts:       []string{"nas.example.com"},
-		Backend:     "192.168.1.20:5000",
-		Enabled:     true,
-		Description: "改了名字",
-	})
-	if saveErr != nil {
-		t.Fatalf("保存失败：%v", saveErr)
-	}
-
-	got := Runtime.Snapshot().Sites[0]
-	if !got.ShowOnHome {
-		t.Error("编辑保存后 showOnHome 被冲掉了（应保留旧值）")
-	}
-	if got.Description != "改了名字" {
-		t.Errorf("表单里的字段应该更新，实际 %q", got.Description)
-	}
-}

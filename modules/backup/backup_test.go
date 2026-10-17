@@ -54,7 +54,7 @@ func TestManifestRoundTrip(t *testing.T) {
 
 // 没有清单的包必须拒绝 —— 否则无法确认内容，盲覆盖太危险
 func TestPeekRejectsNoManifest(t *testing.T) {
-	raw := makeZip(t, map[string]string{"config/homeConfig.json": "{}"})
+	raw := makeZip(t, map[string]string{"config/stunConfig.json": "{}"})
 	if _, err := Peek(raw); err == nil {
 		t.Error("没有 manifest.json 的包应当被拒绝")
 	}
@@ -94,12 +94,12 @@ func TestImportRestoresModule(t *testing.T) {
 	body := `{"title":"from-backup"}`
 	mj, _ := marshalManifest(Manifest{
 		Version: ManifestVersion,
-		Modules: []Module{{Name: "home", Label: "导航页", File: "config/homeConfig.json", Exists: true}},
+		Modules: []Module{{Name: "home", Label: "导航页", File: "config/stunConfig.json", Exists: true}},
 	})
 
 	raw := makeZip(t, map[string]string{
 		"manifest.json":          string(mj),
-		"config/homeConfig.json": body,
+		"config/stunConfig.json": body,
 	})
 
 	out, err := Import(raw, ImportOptions{})
@@ -110,7 +110,7 @@ func TestImportRestoresModule(t *testing.T) {
 		t.Errorf("应记录恢复了 home 模块，实际 %v", out.RestoredModules)
 	}
 
-	got, err := os.ReadFile("config/homeConfig.json")
+	got, err := os.ReadFile("config/stunConfig.json")
 	if err != nil {
 		t.Fatalf("恢复后的文件读不到: %v", err)
 	}
@@ -133,14 +133,14 @@ func TestImportRollsBackOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	orig := `{"title":"original"}`
-	if err := os.WriteFile("config/homeConfig.json", []byte(orig), 0600); err != nil {
+	if err := os.WriteFile("config/stunConfig.json", []byte(orig), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	// 清单说有 home，但包里其实没有那个文件 → 解压时会失败
 	mj, _ := marshalManifest(Manifest{
 		Version: ManifestVersion,
-		Modules: []Module{{Name: "home", Label: "导航页", File: "config/homeConfig.json", Exists: true}},
+		Modules: []Module{{Name: "home", Label: "导航页", File: "config/stunConfig.json", Exists: true}},
 	})
 	raw := makeZip(t, map[string]string{"manifest.json": string(mj)})
 
@@ -149,7 +149,7 @@ func TestImportRollsBackOnFailure(t *testing.T) {
 	}
 
 	// 关键：失败后原配置还在
-	got, err := os.ReadFile("config/homeConfig.json")
+	got, err := os.ReadFile("config/stunConfig.json")
 	if err != nil {
 		t.Fatalf("回滚失败，原配置丢了: %v", err)
 	}

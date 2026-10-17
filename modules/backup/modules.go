@@ -12,7 +12,6 @@ import (
 	"github.com/chenggegedeid/catflap/modules/cert"
 	"github.com/chenggegedeid/catflap/modules/ddns"
 	"github.com/chenggegedeid/catflap/modules/device"
-	"github.com/chenggegedeid/catflap/modules/home"
 	"github.com/chenggegedeid/catflap/modules/notify"
 	"github.com/chenggegedeid/catflap/modules/proxy"
 	"github.com/chenggegedeid/catflap/modules/stun"
@@ -50,7 +49,6 @@ var MODULES = []struct {
 	Label string
 	File  string
 }{
-	{"home", "导航页", home.ConfigPath},
 	{"auth", "账号与登录", auth.ConfigPath},
 	{"proxy", "反向代理", proxy.ConfigPath},
 	{"stun", "穿透", stun.ConfigPath},

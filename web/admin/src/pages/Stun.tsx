@@ -1,30 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  AlertCircle,
-  ChevronRight,
-  ClipboardCopy,
-  Computer,
-  CornerUpRight,
-  ExternalLink,
-  FileText,
-  Gamepad2,
-  Globe,
-  Home as HomeIcon,
-  Info,
-  LoaderCircle,
-  Pencil,
-  Plus,
-  Radar,
-  Power,
-  RotateCw,
-  Server,
-  Send,
-  ShieldCheck,
-  Trash2,
-  TriangleAlert,
-  Wifi,
-  X,
-} from 'lucide-react'
+import {AlertCircle, ChevronRight, ClipboardCopy, Computer, CornerUpRight, ExternalLink, FileText, Gamepad2, Globe, Info, LoaderCircle, Pencil, Plus, Radar, Power, RotateCw, Server, Send, ShieldCheck, Trash2, TriangleAlert, Wifi, X, } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import { LanScanModal } from '../components/LanScanModal'
 import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
@@ -232,7 +207,6 @@ interface ServiceFormState {
    */
   internalHttps: boolean
   enabled: boolean
-  showOnHome: boolean
   description: string
   webhookconfig: WebhookConfig
   /** 选用的全局通知渠道 ID（渠道本身在通知页配置） */
@@ -372,7 +346,6 @@ const emptyService: ServiceFormState = {
   certId: '0',
   internalHttps: false,
   enabled: true,
-  showOnHome: false,
   description: '',
   webhookconfig: emptyWebhook,
   channelIds: defaultChannels(),
@@ -436,7 +409,7 @@ function normalizeWebhook(cfg?: Partial<WebhookConfig>): WebhookConfig {
 }
 
 /** 已存在的服务 → 表单。编辑和「复制」都从这儿取初值，省得两处各写一遍 */
-function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState {
+function serviceToForm(svc: StunService): ServiceFormState {
   return {
     name: svc.name,
     internalPort: String(svc.internalPort || ''),
@@ -450,7 +423,6 @@ function serviceToForm(svc: StunService, showOnHome: boolean): ServiceFormState 
     certId: String(svc.certId || 0),
     internalHttps: !!svc.backendHttps || !!svc.https,
     enabled: svc.enabled !== false,
-    showOnHome,
     description: svc.description || '',
     webhookconfig: normalizeWebhook(svc.webhookconfig),
     channelIds: [...(svc.channelIds ?? [])],  // 后端可能是 null，见 notify 的同类修复
@@ -511,7 +483,6 @@ function ServiceModal({
   onDeviceChange,
   initial,
   prefill,
-  initialShowOnHome,
   status,
   onCancel,
   onSubmit,
@@ -523,14 +494,13 @@ function ServiceModal({
   initial?: StunService
   /** 新建时的初值：扫描里点端口、或者复制现有服务带过来的。改的时候以 initial 为准 */
   prefill?: Partial<ServiceFormState>
-  initialShowOnHome: boolean
   status?: StunStatusEvent
   onCancel: () => void
   onSubmit: (form: ServiceFormState) => Promise<void>
   onToast: (text: string) => void
 }) {
   const [form, setForm] = useState<ServiceFormState>(() =>
-    initial ? serviceToForm(initial, initialShowOnHome) : { ...emptyService, ...prefill },
+    initial ? serviceToForm(initial) : { ...emptyService, ...prefill },
   )
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -1207,7 +1177,6 @@ function ServiceModal({
                     label: '启用 UPnP',
                     hint: form.protocol === 'UDP' ? 'UDP 目前不做 UPnP 映射，勾了不起作用' : '',
                   },
-                  { key: 'showOnHome' as const, label: '在导航主页显示', hint: '' },
                 ].map((opt) => (
                   <label
                     key={opt.key}
@@ -2299,7 +2268,6 @@ export function Stun() {
   const [config, setConfig] = useState<StunConfig | null>(null)
   const [loadErr, setLoadErr] = useState('')
   const [statusMap, setStatusMap] = useState<Record<string, StunStatusEvent>>({})
-  const [homeSet, setHomeSet] = useState<Set<string>>(new Set())
   const { toasts, show: toast } = useToast()
 
   const [deviceModal, setDeviceModal] = useState<{
@@ -2327,16 +2295,8 @@ export function Stun() {
 
   const refresh = useCallback(async () => {
     try {
-      const [cfg, home] = await Promise.all([api.getStunConfig(), api.getHomeConfig().catch(() => ({ apps: [] as api.HomeApp[] }))])
+      const cfg = await api.getStunConfig()
       setConfig(cfg)
-      const set = new Set<string>()
-      for (const app of home.apps) {
-        if (app.type === 'stun') {
-          const m = /^stun-(\d+)-(\d+)$/.exec(app.id || '')
-          if (m) set.add(`${m[1]}-${m[2]}`)
-        }
-      }
-      setHomeSet(set)
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e))
     }
@@ -2469,31 +2429,17 @@ export function Stun() {
         target: form.mcEntry.target.trim().toLowerCase(),
       },
     }
-    let serviceId: number | undefined
     try {
       if (serviceModal.initial) {
         await api.updateStunService({ ...payload, serviceId: serviceModal.initial.id })
-        serviceId = serviceModal.initial.id
         toast('服务保存成功')
       } else {
-        const res = await api.addStunService(payload)
-        serviceId = res?.id
+        await api.addStunService(payload)
         toast('服务添加成功')
       }
     } catch (e) {
       toast('保存失败: ' + (e instanceof Error ? e.message : ''))
       throw e  // 抛给 ServiceModal 内部，触发 busy=false 和显示错误
-    }
-    if (serviceId) {
-      const key = `${serviceModal.deviceId}-${serviceId}`
-      const wasShown = homeSet.has(key)
-      if (form.showOnHome !== wasShown) {
-        try {
-          await api.setStunShowOnHome(serviceModal.deviceId, serviceId, form.showOnHome)
-        } catch (e) {
-          toast('主页同步失败: ' + (e instanceof Error ? e.message : ''))
-        }
-      }
     }
     setServiceModal({ open: false, deviceId: 0 })
     await refresh()
@@ -2547,18 +2493,6 @@ export function Stun() {
       await refresh()
     } catch (e) {
       toast('删除失败: ' + (e instanceof Error ? e.message : ''))
-    }
-  }
-
-  const toggleHome = async (deviceId: number, serviceId: number) => {
-    const key = `${deviceId}-${serviceId}`
-    const current = homeSet.has(key)
-    try {
-      await api.setStunShowOnHome(deviceId, serviceId, !current)
-      toast(current ? '已从主页移除' : '已添加到主页')
-      await refresh()
-    } catch (e) {
-      toast('操作失败: ' + (e instanceof Error ? e.message : ''))
     }
   }
 
@@ -2654,7 +2588,6 @@ export function Stun() {
     // 配了对外域名就用域名——终结 TLS 时证书是按域名签的，用 IP 访问必然报证书错
     const externalHost = svc.domain || config.publicIP
     const fullAddr = externalPort > 0 && externalHost ? `${externalHost}:${externalPort}` : ''
-    const inHome = homeSet.has(key)
     const lastError = status?.lastError || ''
     const restartCount = status?.restartCount ?? 0
     const off = svc.enabled === false
@@ -2706,13 +2639,6 @@ export function Stun() {
               }`}
             >
               {busy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Power className="h-3 w-3" />}
-            </button>
-            <button
-              onClick={() => toggleHome(getDeviceId(dev), svc.id)}
-              title={inHome ? '从主页移除' : '添加到主页'}
-              className={`${iconBtn} ${inHome ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-            >
-              <HomeIcon className="h-3 w-3" />
             </button>
             <button
               onClick={() => setServiceModal({ open: true, deviceId: getDeviceId(dev), initial: svc })}
@@ -3043,11 +2969,6 @@ export function Stun() {
           }
           initial={serviceModal.initial}
           prefill={serviceModal.prefill}
-          initialShowOnHome={
-            serviceModal.initial
-              ? homeSet.has(`${serviceModal.deviceId}-${serviceModal.initial.id}`)
-              : false
-          }
           status={
             serviceModal.initial
               ? statusMap[`${serviceModal.deviceId}-${serviceModal.initial.id}`]

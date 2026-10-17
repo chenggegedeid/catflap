@@ -55,13 +55,6 @@ func SaveSite(in model.Site) (model.Site, error) {
 		}
 		for i := range cfg.Sites {
 			if cfg.Sites[i].ID == site.ID {
-				// **保留纯展示标记**：前端保存表单时不带 showOnHome
-				// （那是列表上的快捷开关，不属于编辑表单），
-				// 整体替换会把它冲成 false —— 表现是"点过主页，编辑一次就没了"。
-				//
-				// 这个坑实测踩到过：点上主页 → 编辑保存一次 → 标记丢失。
-				// 原则是"表单管不到的字段，保存时不该被动"。
-				site.ShowOnHome = cfg.Sites[i].ShowOnHome
 				cfg.Sites[i] = site
 				saved = site
 				return nil
