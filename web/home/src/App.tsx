@@ -329,7 +329,13 @@ function HomePage() {
               active={currentCatId}
               onSelect={(id) => {
                 const cat = visibleCategories(cfg).find((c) => c.id === id)
-                if (cat && cat.visibility === 'lock') {
+                /**
+                 * 只有「上锁**且还没解锁**」才弹解锁框。
+                 *
+                 * 之前写成 `visibility === 'lock'`，于是已经解锁的分组
+                 * 点一下又弹一次解锁 —— 用户明明刚输过口令。
+                 */
+                if (cat && cat.visibility === 'lock' && !cat.unlocked) {
                   setUnlocking(cat)
                   return
                 }

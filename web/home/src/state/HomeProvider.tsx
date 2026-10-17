@@ -139,8 +139,13 @@ export function HomeProvider({ children }: { children: ReactNode }) {
 
   const notify = useCallback((kind: 'ok' | 'error', text: string, retry?: () => void) => {
     const id = ++seq.current
-    setToasts((prev) => [...prev, { id, kind, text, retry }])
-    // 成功的自己消失；失败的留久一点，并且不自动消失（要留时间让人点重试）
+    /**
+     * 只留最近 3 条。
+     *
+     * 错误提示不会自动消失（要留时间让人点重试），如果不限量，
+     * 连续几个操作失败就会叠成一列挡住页面 —— 而它们说的往往是同一件事。
+     */
+    setToasts((prev) => [...prev.slice(-2), { id, kind, text, retry }])
     if (kind === 'ok') {
       setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 2200)
     }
