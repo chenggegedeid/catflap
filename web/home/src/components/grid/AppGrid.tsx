@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { normalize, rowsOf } from '../../lib/grid'
+import { normalize } from '../../lib/grid'
 import type { AppView, NetworkPrefer } from '../../types'
 import { AppCard } from '../card/AppCard'
 
@@ -35,52 +35,53 @@ export function AppGrid({
   apps,
   prefer = 'wanV4',
   onOpenMenu,
-  selection,
-  onToggleSelect,
 }: {
   apps: AppView[]
   prefer?: NetworkPrefer
   onOpenMenu?: (app: AppView, x: number, y: number) => void
-  /** 批量删除模式的选中集合；非空时卡片右上角出现勾选框 */
-  selection?: Set<string>
-  onToggleSelect?: (id: string) => void
 }) {
   const cols = useColumns()
 
-  // 排布交给 normalize：越界的会被夹回来、重叠的会顺延、没坐标的按顺序补位。
-  // 结果稳定可复现（同样的输入永远同样的输出），刷新不会跳。
+  /**
+   * 这里**只取尺寸，不用坐标**。
+   *
+   * 曾经按 normalize 算出的 row/col 显式定位（grid-row-start / grid-column-start），
+   * 结果是每张卡片各占一行、中间留一大片空白 —— 因为 CSS 网格的隐式行高是 auto，
+   * 一格里内容小，那一行就被别的卡片撑高，视觉上全散了。
+   *
+   * 流式布局本来就是"按顺序往下排"，顺序由 order 决定，坐标是**渲染结果**
+   * 而不是输入。所以交给 auto-placement：浏览器自己会贴着排满。
+   * normalize 仍然用来把 size 收敛成合法尺寸（越界/写错的尺寸会退成 1×1）。
+   */
   const placed = normalize(
     apps.map((a) => ({ id: a.id, size: a.size })),
     cols,
   )
-  const byId = new Map(placed.map((p) => [p.id, p]))
+  const sizeById = new Map(placed.map((p) => [p.id, { w: p.w, h: p.h }]))
 
   return (
     <div
       className="grid gap-3"
       style={{
         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-        gridAutoRows: 'minmax(5.5rem, auto)',
+        // auto-rows 给一个"能装下一张 1×1"的最小高度：
+        // 不给的话行高由内容决定，1×1 和 2×2 混排时行高会忽大忽小
+        gridAutoRows: 'minmax(6.5rem, max-content)',
+        gridAutoFlow: 'row dense',
       }}
     >
       {apps.map((app) => {
-        const p = byId.get(app.id) ?? { id: app.id, row: 0, col: 0, w: 1, h: 1 }
+        const sz = sizeById.get(app.id) ?? { w: 1, h: 1 }
         return (
           <AppCard
             key={app.id}
             app={app}
             prefer={prefer}
-            placement={{ col: p.col, row: p.row, w: p.w, h: p.h }}
+            placement={{ col: 0, row: 0, w: sz.w, h: sz.h }}
             onOpenMenu={onOpenMenu}
-            selectable={!!selection}
-            selected={selection?.has(app.id) ?? false}
-            onToggleSelect={onToggleSelect}
           />
         )
       })}
-
-      {/* 用行数撑一下底部，免得最后一排贴着屏幕边缘 */}
-      <div style={{ gridColumn: 1, gridRow: rowsOf(placed) + 1 }} aria-hidden />
     </div>
   )
 }

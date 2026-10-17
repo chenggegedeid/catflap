@@ -110,3 +110,36 @@ export function hasEntry(addr: AddressSet | null | undefined, kind: NetworkKind)
 export function openEntry(url: string): void {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
+
+/**
+ * 复制地址到剪贴板。
+ *
+ * **必须有降级**：navigator.clipboard 只在安全上下文（HTTPS 或 localhost）可用。
+ * 导航页经常是 http://192.168.1.10 这种内网地址 —— 那正好不是安全上下文，
+ * 只写 clipboard API 的话，内网用户点"复制"会静默失败。
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* 落到下面的降级 */
+  }
+  try {
+    const el = document.createElement('textarea')
+    el.value = text
+    // 不能用 display:none —— 隐藏元素选不中，复制会失败
+    el.style.position = 'fixed'
+    el.style.opacity = '0'
+    el.style.pointerEvents = 'none'
+    document.body.appendChild(el)
+    el.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(el)
+    return ok
+  } catch {
+    return false
+  }
+}

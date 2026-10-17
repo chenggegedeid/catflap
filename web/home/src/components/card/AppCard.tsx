@@ -1,19 +1,23 @@
 /**
  * 卡片。
  *
- * 尺寸决定信息量 —— 这是这次改版的核心取舍：
+ * 设计取向：**卡片只负责"看"和"点"，地址明细交给右键菜单**。
  *
- *   1×1  只有图标 + 名字（默认，极简）
- *   2×2  把三个入口（公网 v4 / v6 / 内网）常驻显示出来
+ * 以前的做法是在卡片下面标 `v4 · v6 · 内网`，再在悬停时浮出一排按钮 ——
+ * 这有两个毛病：标注区把卡片撑得很高、每一格都要重复一遍同样的信息；
+ * 而且浮层和右键菜单是两套交互，同一件事两条路。
  *
- * 小卡片不是"没有地址"，是**悬停或键盘聚焦时才浮出来**。
- * 手机上没有悬停 —— onContextMenu 在触摸端就是长按，所以长按同样能唤出。
+ * 现在：
+ *   - 卡片 = 图标 + 名字（干净，1×1 就这么大）
+ *   - 点 = 按网络偏好走默认入口（日常最常用的那一下）
+ *   - 右键 = 默认地址 / 内网地址各自的「打开」「复制」「新窗口」，外加编辑、删除
  *
- * 点卡片本体 = 按网络偏好走默认入口；点浮出来的某一项 = 指定走那个入口。
+ * 也就是说：**信息量交给菜单，卡片回到最小**。尺寸（1×1 / 2×2）只影响占几格，
+ * 不再影响显示多少东西 —— 用户不必为了"看到地址"而把卡片调大。
  */
 
 import { useState } from 'react'
-import { entriesOf, openEntry, preferredEntry } from '../../lib/addresses'
+import { preferredEntry, openEntry } from '../../lib/addresses'
 import type { AppView, NetworkPrefer } from '../../types'
 import { AppIcon } from './AppIcon'
 
@@ -41,24 +45,18 @@ export function AppCard({
   selected?: boolean
   onToggleSelect?: (id: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const entries = entriesOf(app.addresses)
+  const [hover, setHover] = useState(false)
   const url = preferredEntry(app.addresses, prefer)
 
-  // 只有 1×1 且不止一个入口时才用浮层：地方够的卡片直接显示，只有一个可选也没什么好挑的
-  const useFlyout = placement.w === 1 && placement.h === 1 && entries.length > 1
-  const showFlyout = useFlyout && open
+  // 大卡片图标也大一点：2×2 里放一个 4.5rem 的图标会显得很小气
+  const big = placement.w > 1 || placement.h > 1
 
   return (
     <div
       className={`relative rounded-2xl ${selected ? 'ring-2 ring-blue-400' : ''}`}
+      // 只给 span，不给起点 —— 起点交给 CSS 的自动排布（见 AppGrid 里的说明）
+      style={{ gridColumn: `span ${placement.w}`, gridRow: `span ${placement.h}` }}
       aria-selected={selectable ? selected : undefined}
-      style={{
-        gridColumnStart: placement.col + 1,
-        gridColumnEnd: `span ${placement.w}`,
-        gridRowStart: placement.row + 1,
-        gridRowEnd: `span ${placement.h}`,
-      }}
       onClickCapture={(e) => {
         // 批量删除模式下，点卡片 = 选中/取消，不打开链接
         if (selectable) {
@@ -67,20 +65,18 @@ export function AppCard({
           onToggleSelect?.(app.id)
         }
       }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onContextMenu={(e) => {
         if (!onOpenMenu) return
         e.preventDefault()
         onOpenMenu(app, e.clientX, e.clientY)
       }}
-      // 键盘用户的菜单入口：Shift+F10（Windows 惯例）或 Menu 键。
-      // 没有这条的话，不用鼠标的人连删除/改大小都够不着。
+      // 键盘用户的菜单入口：Shift+F10 / Menu 键（Windows 惯例），m 是好记的补充。
+      // 没有这条的话，不用鼠标的人连复制地址、改大小都够不着。
       onKeyDown={(e) => {
         if (!onOpenMenu) return
-        // Shift+F10 / Menu 键是 Windows 惯例；m 是好记的补充（卡片上没有输入框，不冲突）
-        const isMenuKey =
-          e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey) || e.key === 'm'
+        const isMenuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey) || e.key === 'm'
         if (!isMenuKey) return
         e.preventDefault()
         const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -90,20 +86,16 @@ export function AppCard({
       <button
         type="button"
         aria-disabled={!url}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
         onClick={() => {
           // 没有 url 就什么都不做，但按钮必须保持"活着" ——
           // disabled 会让整个元素收不到事件（包括右键），那样连菜单都出不来
           if (url) openEntry(url)
         }}
-        title={
-          url
-            ? `${app.name}（${titleOf(prefer)}）`
-            : `${app.name}：还没配地址`
-        }
+        title={url ? `${app.name}（${titleOf(prefer)}）` : `${app.name}：还没配地址，右键可编辑`}
         className={`flex h-full w-full flex-col items-center justify-center gap-2 rounded-2xl p-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${
-          url ? 'hover:-translate-y-0.5 hover:bg-white/15' : 'cursor-not-allowed opacity-60'
+          url ? 'hover:-translate-y-0.5 hover:bg-white/15' : 'opacity-60'
         }`}
       >
         {selectable && selected && (
@@ -114,39 +106,25 @@ export function AppCard({
             ✓
           </span>
         )}
-        <span className="aspect-square w-full max-w-[4.5rem] overflow-hidden rounded-[22%] shadow-sm ring-1 ring-black/5">
+
+        <span
+          className={`aspect-square w-full overflow-hidden rounded-[22%] shadow-sm ring-1 ring-black/5 ${
+            big ? 'max-w-[7rem]' : 'max-w-[4.5rem]'
+          }`}
+        >
           <AppIcon name={app.name} icon={app.icon} />
         </span>
 
         <span className="line-clamp-2 w-full text-xs font-medium leading-tight text-white drop-shadow">
           {app.name}
         </span>
-
-        {/* 地方够的卡片：入口常驻，不用藏 */}
-        {!useFlyout && entries.length > 0 && (
-          <span className="flex flex-wrap justify-center gap-1">
-            {entries.map((e) => (
-              <span key={e.kind} className="rounded bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold text-white/90">
-                {shortLabel(e.kind)}
-              </span>
-            ))}
-          </span>
-        )}
       </button>
 
-      {showFlyout && (
-        <div className="absolute inset-x-0 top-full z-30 mt-1 flex justify-center gap-1 rounded-xl bg-slate-900/90 px-2 py-1.5 text-[11px] shadow-lg backdrop-blur">
-          {entries.map((e) => (
-            <button
-              key={e.kind}
-              type="button"
-              onClick={() => openEntry(e.url)}
-              className="rounded-lg px-2 py-0.5 font-semibold text-white/90 transition hover:bg-white/20 hover:text-white"
-            >
-              {shortLabel(e.kind)}
-            </button>
-          ))}
-        </div>
+      {/* 没配地址：给一句极短的提示，且只在悬停时出现（不占常驻空间） */}
+      {!url && hover && (
+        <span className="pointer-events-none absolute inset-x-0 bottom-1 text-center text-[10px] text-white/70">
+          未配置地址
+        </span>
       )}
     </div>
   )
@@ -156,10 +134,4 @@ function titleOf(prefer: NetworkPrefer): string {
   if (prefer === 'lan') return '内网'
   if (prefer === 'wanV6') return '公网 v6'
   return '公网 v4'
-}
-
-function shortLabel(kind: string): string {
-  if (kind === 'wanV4') return 'v4'
-  if (kind === 'wanV6') return 'v6'
-  return '内网'
 }

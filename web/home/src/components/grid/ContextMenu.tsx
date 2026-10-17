@@ -1,20 +1,30 @@
 /**
- * 右键菜单。
+ * 右键菜单（照 Sun-Panel 的交互）。
  *
- * 三项：删除 / 批量删除 / 修改大小（1×1 ~ 2×4，参照极光Tab）。
+ * 结构：
+ *   ┌ 打开默认地址   [打开] [复制] [新窗口]
+ *   ├ 打开内网地址   [打开] [复制] [新窗口]
+ *   ├ ─────────────
+ *   └ 编辑 / 删除
  *
- * 定位有个容易翻车的点：**菜单打开后才知道自己多高**，
- * 在屏幕底部弹出来会被裁掉一半。所以先按鼠标位置渲染，
- * 渲染完量一次自己的高度，超出就把整个菜单往上翻。
+ * 三条规矩：
  *
- * 点外面 / Esc 关闭。关闭前把焦点还给触发它的卡片 ——
- * 否则键盘用户的焦点掉到 body 上，Tab 要从头再走一遍。
+ * 1. **没有的地址不显示那一组。** 没配内网就没有「打开内网地址」这一栏，
+ *    而不是给一组灰按钮 —— 灰按钮只会让人以为"坏了"，不会让人理解为"没配"。
+ *    访客被脱敏之后也自动走这条：他看不到内网栏，不需要额外逻辑。
+ *
+ * 2. 「默认地址」是按用户设置的网络偏好算出来的（可能是 v4/v6/内网），
+ *    「内网地址」是**明确指定**走内网。两个都要：默认那个是日常要用的，
+ *    内网那个是"我在家，想走局域网快点"。
+ *
+ * 3. 定位：先按鼠标位置渲染，渲染完量一次自己的高度，超出就往上翻 ——
+ *    在屏幕底部弹出来的菜单会被裁掉一半。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Trash2, Rows3 } from 'lucide-react'
-import { CARD_SIZES, parseSize } from '../../lib/grid'
-import type { AppView } from '../../types'
+import { Copy, ExternalLink, Pencil, SquareArrowOutUpRight, Trash2 } from 'lucide-react'
+import { copyText, entriesOf, preferredEntry } from '../../lib/addresses'
+import type { AppView, NetworkPrefer } from '../../types'
 
 export interface MenuState {
   app: AppView
@@ -24,26 +34,26 @@ export interface MenuState {
 
 export function ContextMenu({
   menu,
+  prefer,
   onClose,
   onDelete,
-  onBatchDelete,
-  onResize,
+  onEdit,
+  onNotify,
 }: {
   menu: MenuState
+  prefer: NetworkPrefer
   onClose: () => void
   onDelete: (id: string) => void
-  onBatchDelete: (id: string) => void
-  onResize: (id: string, size: string) => void
+  onEdit: (app: AppView) => void
+  onNotify: (kind: 'ok' | 'error', text: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: menu.x, top: menu.y })
 
-  // 渲染完量一次：超出屏幕底部就往上翻
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    const h = el.offsetHeight
-    const w = el.offsetWidth
+    const { offsetHeight: h, offsetWidth: w } = el
     let top = menu.y
     let left = menu.x
     if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8)
@@ -54,7 +64,6 @@ export function ContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      // 点在菜单里面不算"外面"
       if (ref.current?.contains(e.target as Node)) return
       onClose()
     }
@@ -72,75 +81,115 @@ export function ContextMenu({
     }
   }, [onClose])
 
-  const current = parseSize(menu.app.size)
+  const entries = entriesOf(menu.app.addresses)
+  const defURL = preferredEntry(menu.app.addresses, prefer)
+  const lanURL = menu.app.addresses.lan || ''
+  const hasAny = entries.length > 0
+
+  const doCopy = async (url: string, label: string) => {
+    const ok = await copyText(url)
+    onNotify(ok ? 'ok' : 'error', ok ? `已复制${label}` : '复制失败，请手动选择地址')
+    onClose()
+  }
+
+  const doOpen = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    onClose()
+  }
 
   return (
     <div
       ref={ref}
-      // tabIndex 让它能接收焦点（Esc 监听在 window 上，但焦点在菜单里语义才对）
       tabIndex={-1}
       role="menu"
       aria-label={`应用「${menu.app.name}」的操作`}
       style={{ left: pos.left, top: pos.top }}
-      className="fixed z-50 w-40 overflow-hidden rounded-xl bg-slate-900/95 py-1 text-sm text-white shadow-xl ring-1 ring-white/10 backdrop-blur focus:outline-none"
+      className="fixed z-50 w-64 overflow-hidden rounded-xl bg-slate-800/95 py-1.5 text-sm text-slate-100 shadow-2xl ring-1 ring-white/10 backdrop-blur focus:outline-none"
     >
-      <MenuItem
-        icon={<Trash2 className="h-3.5 w-3.5" />}
-        label="删除"
+      {hasAny && defURL ? (
+        <>
+          <AddressGroup
+            title="打开默认地址"
+            url={defURL}
+            onOpen={() => doOpen(defURL)}
+            onCopy={() => void doCopy(defURL, '默认地址')}
+          />
+          {/* 默认地址就是内网时不再重复一栏，否则同一个地址出现两次 */}
+          {lanURL && lanURL !== defURL && (
+            <AddressGroup title="打开内网地址" url={lanURL} onOpen={() => doOpen(lanURL)} onCopy={() => void doCopy(lanURL, '内网地址')} />
+          )}
+          <div className="my-1.5 border-t border-white/10" />
+        </>
+      ) : (
+        <div className="px-3 py-1.5 text-xs text-white/50">还没配地址，先编辑填一个</div>
+      )}
+
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          onClose()
+          onEdit(menu.app)
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition hover:bg-white/10"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+        编辑
+      </button>
+      <button
+        type="button"
+        role="menuitem"
         onClick={() => {
           onClose()
           onDelete(menu.app.id)
         }}
-      />
-      <MenuItem
-        icon={<Rows3 className="h-3.5 w-3.5" />}
-        label="批量删除"
-        onClick={() => {
-          onClose()
-          onBatchDelete(menu.app.id)
-        }}
-      />
+        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-rose-300 transition hover:bg-rose-500/20"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+        删除
+      </button>
+    </div>
+  )
+}
 
-      <div className="my-1 border-t border-white/10" />
-
-      <div className="px-3 pb-1 pt-0.5 text-[11px] text-white/50">修改大小</div>
-      <div className="grid grid-cols-5 gap-1 px-2 pb-1.5">
-        {CARD_SIZES.map((s) => {
-          const { w, h } = parseSize(s)
-          const active = w === current.w && h === current.h
-          return (
-            <button
-              key={s}
-              type="button"
-              role="menuitemradio"
-              aria-checked={active}
-              onClick={() => {
-                onClose()
-                onResize(menu.app.id, s)
-              }}
-              className={`rounded-lg py-1 text-[11px] font-semibold transition ${
-                active ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/80 hover:bg-white/20'
-              }`}
-            >
-              {s}
-            </button>
-          )
-        })}
+/** 一组地址：标题（点了直接打开）+ 两个动作按钮 */
+function AddressGroup({ title, url, onOpen, onCopy }: { title: string; url: string; onOpen: () => void; onCopy: () => void }) {
+  return (
+    <div className="px-3 py-1.5">
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onOpen}
+        className="block w-full truncate text-left text-[13px] font-semibold text-white/90 transition hover:text-white"
+        title={url}
+      >
+        {title}
+      </button>
+      <div className="mt-1.5 flex gap-1">
+        <ActionBtn label="打开" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={onOpen} />
+        <ActionBtn label="复制" icon={<Copy className="h-3.5 w-3.5" />} onClick={onCopy} />
+        <ActionBtn
+          label="新窗口打开"
+          icon={<SquareArrowOutUpRight className="h-3.5 w-3.5" />}
+          // 和「打开」同为新标签页：导航页点任何东西都不该把导航页自己顶掉，
+          // 否则跳过去想回来还得按返回。两个按钮的区别留给将来做"同窗口"。
+          onClick={onOpen}
+        />
       </div>
     </div>
   )
 }
 
-function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+function ActionBtn({ label, icon, onClick }: { label: string; icon: React.ReactNode; onClick: () => void }) {
   return (
     <button
       type="button"
-      role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-white/10"
+      title={label}
+      aria-label={label}
+      className="grid h-7 flex-1 place-items-center rounded-md bg-white/10 text-white/80 transition hover:bg-white/20 hover:text-white"
     >
       {icon}
-      {label}
     </button>
   )
 }
