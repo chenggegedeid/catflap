@@ -89,16 +89,41 @@ export function AppFormModal({
     }
   }
 
+  /**
+   * 抓取的地址来源：**优先用已填的地址**（公网 v4 / 内网 / v6），
+   * 都没填才让用户手输。
+   *
+   * 之前是必须再输入一遍站点地址 —— 地址明明就填在下面，让人重打一遍
+   * 纯属多余。多地址时依次试，第一个成功就用。
+   */
+  const fetchSources = [wanV4.trim(), lan.trim(), wanV6.trim()].filter(Boolean)
+  const canAutoFetch = fetchSources.length > 0
+
+  const tryFetch = async (urls: string[]): Promise<boolean> => {
+    for (const u of urls) {
+      try {
+        const { data } = await fetchIconFromURL(u)
+        if (data?.path) {
+          setIcon(data.path)
+          return true
+        }
+      } catch {
+        // 试下一个来源
+      }
+    }
+    return false
+  }
+
   const onFetch = async () => {
-    const u = fetchUrl.trim()
-    if (!u) return
+    const sources = canAutoFetch ? fetchSources : fetchUrl.trim() ? [fetchUrl.trim()] : []
+    if (sources.length === 0) {
+      onNotify('error', '先在下面填一个地址，或者手动上传图标')
+      return
+    }
     setBusy(true)
     try {
-      const { data } = await fetchIconFromURL(u)
-      if (data?.path) setIcon(data.path)
-      else onNotify('error', '没抓到图标')
-    } catch (e) {
-      onNotify('error', e instanceof Error ? e.message : '抓取失败')
+      const ok = await tryFetch(sources)
+      if (!ok) onNotify('error', '没抓到图标，可以手动上传')
     } finally {
       setBusy(false)
     }
@@ -200,7 +225,8 @@ export function AppFormModal({
                 <button
                   type="button"
                   onClick={() => void onFetch()}
-                  disabled={busy || !fetchUrl.trim()}
+                  disabled={busy || (!canAutoFetch && !fetchUrl.trim())}
+                  title={canAutoFetch ? `从 ${fetchSources[0]} 抓取` : '先在下面填地址，或手动上传'}
                   className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-40"
                 >
                   抓取
@@ -219,17 +245,25 @@ export function AppFormModal({
               }}
             />
 
-            <div className="mt-1.5 flex gap-1.5">
-              <input
-                value={fetchUrl}
-                onChange={(e) => setFetchUrl(e.target.value)}
-                placeholder="站点首页地址，用来抓 favicon"
-                className={`${fieldCls} text-xs`}
-              />
-            </div>
+            {/*
+              手输地址只在**没有任何已填地址**时出现 —— 有地址还让人重打一遍
+              纯属多余（用户实测反馈：抓取应该用地址栏里的地址）。
+            */}
+            {!canAutoFetch && (
+              <div className="mt-1.5 flex gap-1.5">
+                <input
+                  value={fetchUrl}
+                  onChange={(e) => setFetchUrl(e.target.value)}
+                  placeholder="站点首页地址，用来抓 favicon"
+                  className={`${fieldCls} text-xs`}
+                />
+              </div>
+            )}
 
             <p className="mt-1.5 text-[11px] text-slate-400">
-              留空就用名字首字当图标，不会白板。
+              {canAutoFetch
+                ? '会从上面填的地址抓取图标'
+                : '留空就用名字首字当图标，不会白板。'}
             </p>
           </div>
 

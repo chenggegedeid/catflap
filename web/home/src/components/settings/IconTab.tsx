@@ -19,11 +19,14 @@ import { useHome, visibleApps } from '../../state/HomeProvider'
 import { AppIcon } from '../card/AppIcon'
 import type { AppView } from '../../types'
 
+/** 抓 favicon 的候选地址：公网 v4 → 内网 → v6（应用里填了的才算） */
+const fetchSourcesOf = (app: AppView): string[] =>
+  [app.addresses.wanV4, app.addresses.lan, app.addresses.wanV6].filter(Boolean)
+
 export function IconTab() {
   const { state, mutate, notify } = useHome()
   const apps = visibleApps(state.config, '')
   const [busyId, setBusyId] = useState('')
-  const [urlFor, setUrlFor] = useState('')
   const [url, setUrl] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadTarget = useRef<string>('')
@@ -59,20 +62,34 @@ export function IconTab() {
     }
   }
 
+  /**
+   * 抓取用**应用已填的地址**（公网 v4 → 内网 → v6 依次试）。
+   * 之前要再手输一个地址 —— 地址就在应用里，重打一遍纯属多余。
+   * 全都失败才提示上传。
+   */
   const onFetchURL = async (app: AppView) => {
-    const u = url.trim()
-    if (!u) return
-    setBusyId(app.id)
-    try {
-      const { data } = await fetchIconFromURL(u)
-      if (data?.path) await setIcon(app, data.path)
-    } catch (e) {
-      notify('error', e instanceof Error ? e.message : '抓取失败，可以试试上传本地图标')
-    } finally {
-      setBusyId('')
-      setUrlFor('')
-      setUrl('')
+    const sources = url.trim() ? [url.trim()] : fetchSourcesOf(app)
+    if (sources.length === 0) {
+      notify('error', '这个应用还没有地址，先手填一个或上传图标')
+      return
     }
+    setBusyId(app.id)
+    let ok = false
+    for (const u of sources) {
+      try {
+        const { data } = await fetchIconFromURL(u)
+        if (data?.path) {
+          await setIcon(app, data.path)
+          ok = true
+          break
+        }
+      } catch {
+        // 试下一个来源
+      }
+    }
+    if (!ok) notify('error', '没抓到图标，可以试试上传本地图标')
+    setBusyId('')
+    setUrl('')
   }
 
   return (
@@ -124,39 +141,15 @@ export function IconTab() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setUrlFor(urlFor === a.id ? '' : a.id)
-                  setUrl('')
-                }}
-                className="flex-1 rounded-lg bg-slate-100 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200"
+                onClick={() => void onFetchURL(a)}
+                disabled={busyId === a.id}
+                title={fetchSourcesOf(a)[0] ? `从 ${fetchSourcesOf(a)[0]} 抓取` : '先给应用填地址'}
+                className="flex-1 rounded-lg bg-slate-100 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
               >
-                网址抓取
+                {busyId === a.id ? '抓取中…' : '抓取图标'}
               </button>
             </div>
 
-            {urlFor === a.id && (
-              <div className="mt-1.5 flex gap-1">
-                <input
-                  autoFocus
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void onFetchURL(a)
-                    if (e.key === 'Escape') setUrlFor('')
-                  }}
-                  placeholder="站点首页地址"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] focus:border-blue-400 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  disabled={busyId === a.id}
-                  onClick={() => void onFetchURL(a)}
-                  className="rounded-lg bg-blue-500 px-2 py-1 text-[11px] font-bold text-white transition hover:bg-blue-600 disabled:opacity-50"
-                >
-                  {busyId === a.id ? '…' : '抓'}
-                </button>
-              </div>
-            )}
           </li>
         ))}
       </ul>

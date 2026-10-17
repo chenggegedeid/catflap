@@ -26,7 +26,7 @@ import { AppFormModal } from './components/settings/AppFormModal'
 import { BlankContextMenu, type BlankMenuState } from './components/grid/BlankContextMenu'
 import { Section, useScrollSpy } from './components/grid/SectionedFeed'
 import { useWheelPaging } from './components/layout/useWheelPaging'
-import { HomeDnd } from './components/dnd/HomeDnd'
+import { HomeDnd, type DragInfo } from './components/dnd/HomeDnd'
 import { Dock, useDockDroppable } from './components/dock/Dock'
 import { SearchBar } from './components/search/SearchBar'
 import { SettingsPanel } from './components/settings/SettingsPanel'
@@ -57,6 +57,8 @@ function HomePage() {
   const [formFor, setFormFor] = useState<AppView | 'new' | null>(null)
   // 空白处右键的菜单（新建应用 / 新建分组 / 设置）
   const [blankMenu, setBlankMenu] = useState<BlankMenuState | null>(null)
+  // Dock 项的右键菜单（打开/复制/编辑/移除 —— 和卡片菜单同一套）
+  const [dockMenu, setDockMenu] = useState<MenuState | null>(null)
 
   const openAddApp = useCallback(() => setFormFor('new'), [])
 
@@ -121,6 +123,8 @@ function HomePage() {
    */
   // 翻页方向：给滑动动画用（往下翻 = 新内容从下滑入）
   const [pageDir, setPageDir] = useState<1 | -1>(1)
+  // 正在拖拽的信息 —— 拖动时禁用滚轮翻页（拖到一半页面跳走是很糟的体验）
+  const [dragInfo, setDragInfo] = useState<DragInfo | null>(null)
 
   /**
    * "当前在哪个分组"的唯一答案。
@@ -132,18 +136,31 @@ function HomePage() {
 
   const pageByWheel = useCallback(
     (dir: 1 | -1) => {
-      const i = catIds.indexOf(currentCatId)
+      /**
+       * 翻页**跳过上锁且未解锁的分组**。
+       * 用户明确要的：上锁的分组不参与翻页（翻到了也只是一块空态），
+       * 想进就自己在左栏点它解锁。这样翻页永远落在"能看的内容"上。
+       */
+      const skippable = new Set(
+        (cfg?.categories ?? [])
+          .filter((c) => c.visibility === 'lock' && !c.unlocked)
+          .map((c) => c.id),
+      )
+      const targets = catIds.filter((id) => !skippable.has(id))
+      if (targets.length < 2) return
+      const i = targets.indexOf(currentCatId)
       if (i < 0) return
-      const next = Math.min(catIds.length - 1, Math.max(0, i + dir))
+      const next = Math.min(targets.length - 1, Math.max(0, i + dir))
       if (next === i) return
+      const nextId = targets[next]
       setPageDir(dir)
       // paged 下没有"滚动到位置"这回事，直接切（内容替换就是反馈）
       if (cfg?.pageMode !== 'stream') {
         setPageDir(dir)
-        setActiveCategory(catIds[next])
+        setActiveCategory(nextId)
         return
       }
-      scrollToCategory(catIds[next])
+      scrollToCategory(nextId)
     },
     [catIds, currentCatId, scrollToCategory, cfg, setActiveCategory],
   )
@@ -280,7 +297,8 @@ function HomePage() {
 
   // hover: none 表示触屏设备 —— 那里不要滚轮翻页（触屏直接滑就行）
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
-  useWheelPaging(!isTouch && catIds.length > 1, currentSection, pageByWheel, cfg?.pageMode !== 'stream')
+  // 拖动中禁用翻页：拖拽本身就在用指针，滚轮这时翻页只会捣乱
+  useWheelPaging(!isTouch && catIds.length > 1 && !dragInfo, currentSection, pageByWheel, cfg?.pageMode !== 'stream')
 
   return (
     /**
@@ -294,6 +312,7 @@ function HomePage() {
       onReorderCategories={reorderCats}
       onDropToDock={dropToDock}
       onMoveToCategory={moveToCategory}
+      onDragStateChange={setDragInfo}
     >
       {/* min-h-dvh：移动端的 100vh 是"地址栏收起时"的高度，用它做满屏会被挡住一截 */}
       <div className="min-h-dvh">
@@ -440,8 +459,20 @@ function HomePage() {
         dropRef={dockRef}
         canManage={!!cfg?.authed}
         onOpenApp={(app) => setFormFor(app)}
-        onRemove={removeFromDock}
+        onOpenMenu={(app, x, y) => setDockMenu({ app, x, y })}
       />
+
+      {dockMenu && (
+        <ContextMenu
+          menu={dockMenu}
+          prefer={cfg?.networkPrefer ?? 'wanV4'}
+          onClose={() => setDockMenu(null)}
+          onDelete={removeFromDock}
+          deleteLabel="从托盘移除"
+          onEdit={setFormFor}
+          onNotify={notify}
+        />
+      )}
 
       <Toasts toasts={toasts} onDismiss={dismissToast} />
     </div>
