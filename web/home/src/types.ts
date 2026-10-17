@@ -1,10 +1,20 @@
-// 与后端 modules/home/model.go / hydrate.go 对应
+// 与后端 modules/home/model.go / hydrate.go / api/home_api 对应
+//
+// 这个文件是前后端的契约。**改这里要同步改 Go 那边的 struct**，
+// 反过来也一样 —— 两边字段名对不上时不会报错，只会静默变成 undefined。
 
-export type LayoutMode = 'paged-horizontal' | 'paged-vertical' | 'paged-free' | 'scroll'
 export type NetworkPrefer = 'wanV4' | 'wanV6' | 'lan'
 export type WallpaperMode = 'default' | 'bing' | 'custom'
 export type WallpaperResolution = '1080' | 'uhd'
 export type AppType = 'stun' | 'static'
+
+/**
+ * 卡片尺寸，宽×高。
+ *
+ * 1×2 = 宽 1 列高 2 行（竖长条），2×1 = 宽 2 列高 1 行（横扁条）。
+ * 和后端 modules/home/model.go 的 Size 字段一致。
+ */
+export type CardSize = '1x1' | '1x2' | '2x1' | '2x2' | '2x4'
 
 export interface Wallpaper {
   mode: WallpaperMode
@@ -26,12 +36,27 @@ export interface SearchEngine {
   order: number
 }
 
+/**
+ * 分组的可见性。
+ *
+ * - public 谁都能看（未登录也行）
+ * - login  登录后才能看
+ * - lock   即使登录了也要再输一次**分组独立口令**
+ *
+ * requireAuth 是老字段（true = 现在的 login），迁移后由 visibility 表达。
+ */
+export type Visibility = 'public' | 'login' | 'lock'
+
 export interface Category {
   id: string
   name: string
   order: number
-  /** 要登录后才看得见；未登录访客拿到的配置里不含这个分组和它下面的应用 */
+  /** 老字段：要登录后才看得见。新字段是 visibility，后端会迁移 */
   requireAuth?: boolean
+  visibility?: Visibility
+  /** visibility=lock 时，这个分组是否已经解锁（后端按解锁状态过滤内容） */
+  unlocked?: boolean
+  icon?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -48,27 +73,48 @@ export interface AppView {
   icon: string
   color: string
   categoryId: string
-  pagedOrder: number
-  scrollOrder: number
+  /** 排第几，1 开始。流式网格按它排，再按当前列数算位置 */
+  order: number
+  /** 卡片尺寸；空 = 1x1 */
+  size: string
   type: AppType
+  /** 未登录时后端会把内网地址留空 —— 见 get_home_config 的脱敏 */
   addresses: AppAddresses
   online?: boolean
   createdAt?: string
   updatedAt?: string
 }
 
+export interface SiteOption {
+  id: number
+  name: string
+  host: string
+}
+
 export interface HomeConfig {
   title: string
   showTime: boolean
   wallpaper: Wallpaper
-  layoutMode: LayoutMode
   networkPrefer: NetworkPrefer
   defaultSearchEngineId: string
   searchEngines: SearchEngine[]
   categories: Category[]
   apps: AppView[]
-  /** 因为要登录而被后端藏起来的分组 ID（未登录时才有） */
-  lockedCategoryIds?: string[]
+  /** 只给登录的人（后端过滤，未登录为 null） */
+  sites: SiteOption[] | null
+  /**
+   * 因为没权限而被后端藏起来的分组数量（可选：后端还没发这个字段时用 0）。
+   *
+   * **只有数量、没有名单** —— 连"你藏了几个"都不该让访客知道，
+   * 那本身也是信息。占位分组由前端据此渲染。
+   */
+  hiddenCategoryCount?: number
   /** 这次请求有没有登录态；只用于展示，真正的过滤在服务端 */
   authed?: boolean
+}
+
+/** 登录状态 */
+export interface AuthStatus {
+  authed: boolean
+  username?: string
 }
