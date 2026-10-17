@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { normalize } from '../../lib/grid'
 import type { AppView, NetworkPrefer } from '../../types'
 import { AppCard } from '../card/AppCard'
+import { DragGrid, SortableCard } from './DragGrid'
 
 /** 列数跟着宽度走，和 lib/grid 里 narrowCols=4 的判断保持一致 */
 function useColumns(): number {
@@ -35,13 +36,13 @@ export function AppGrid({
   apps,
   prefer = 'wanV4',
   onOpenMenu,
-  onAddApp,
+  onReorder,
 }: {
   apps: AppView[]
   prefer?: NetworkPrefer
   onOpenMenu?: (app: AppView, x: number, y: number) => void
-  /** 有值才显示末尾的「新增应用」虚线卡 */
-  onAddApp?: () => void
+  /** 有值才可拖拽 —— 只给登录的人，访客拖了也没地方存 */
+  onReorder?: (ids: string[]) => void
 }) {
   const cols = useColumns()
 
@@ -62,44 +63,57 @@ export function AppGrid({
   )
   const sizeById = new Map(placed.map((p) => [p.id, { w: p.w, h: p.h }]))
 
-  return (
+  const grid = (
     <div
-      className="grid gap-3"
+      // gap-2 而不是 gap-3：8 列时列间距要乘 7 遍，gap-3 加起来就吃掉半张卡片
+      className="relative grid gap-2"
       style={{
         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-        // auto-rows 给一个"能装下一张 1×1"的最小高度：
-        // 不给的话行高由内容决定，1×1 和 2×2 混排时行高会忽大忽小
-        gridAutoRows: 'minmax(6.5rem, max-content)',
-        gridAutoFlow: 'row dense',
+        /**
+         * 行高用 auto，**不要**给 minmax(6.5rem, ...)。
+         *
+         * 给一个较大的最小行高时，1×1 的卡片（图标 + 名字）撑不满，
+         * 剩下的空白全落在行里 —— 视觉上就是卡片之间隔着一大片。
+         * 1×1 那行由内容定高，2×2 那行自然就是它的两倍（grid-row: span 2）。
+         */
+        gridAutoRows: 'auto',
+        // 用 'row' 而不是 'row dense'：dense 会把后面的小卡片回填到前面的空洞里，
+        // 结果是"我以为排在第一个，实际被挤到了第二列"。顺序就是顺序，
+        // 不要为了填满而自作聪明地重排。
+        gridAutoFlow: 'row',
       }}
     >
       {apps.map((app) => {
         const sz = sizeById.get(app.id) ?? { w: 1, h: 1 }
+        const span = {
+          gridColumn: `span ${Math.min(sz.w, cols)}`,
+          gridRow: `span ${sz.h}`,
+        }
+        const card = (
+          <AppCard app={app} prefer={prefer} placement={{ col: 0, row: 0, w: sz.w, h: sz.h }} onOpenMenu={onOpenMenu} />
+        )
+
+        // 不可拖时少一层 DOM：访客不该看到"可拖动"的暗示
+        if (!onReorder) {
+          return (
+            <div key={app.id} style={span}>
+              {card}
+            </div>
+          )
+        }
         return (
-          <AppCard
-            key={app.id}
-            app={app}
-            prefer={prefer}
-            placement={{ col: 0, row: 0, w: sz.w, h: sz.h }}
-            onOpenMenu={onOpenMenu}
-          />
+          <SortableCard key={app.id} id={app.id}>
+            <div style={span}>{card}</div>
+          </SortableCard>
         )
       })}
-
-      {/* 末尾的 "+"：像 Sun-Panel 那样，点一下就近新增。
-          放在网格最后一个格子里，比在页面角落找一个按钮好找。 */}
-      {onAddApp && (
-        <button
-          type="button"
-          onClick={onAddApp}
-          title="新增应用"
-          aria-label="新增应用"
-          style={{ gridColumn: 'span 1', gridRow: 'span 1' }}
-          className="grid min-h-[5.5rem] w-full place-items-center rounded-2xl border-2 border-dashed border-white/35 text-2xl text-white/60 transition hover:border-white/60 hover:bg-white/10 hover:text-white"
-        >
-          +
-        </button>
-      )}
     </div>
+  )
+
+  if (!onReorder) return grid
+  return (
+    <DragGrid ids={apps.map((a) => a.id)} onReorder={onReorder}>
+      {grid}
+    </DragGrid>
   )
 }

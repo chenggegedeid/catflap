@@ -28,6 +28,7 @@ import {
 import * as api from '../api/home'
 import { clearToken } from '../api/token'
 import type { AppView, Category, HomeConfig } from '../types'
+import { resolveActive } from './view'
 
 /* ============ 状态 ============ */
 
@@ -58,10 +59,9 @@ function reducer(state: State, action: Action): State {
         config: action.config,
         load: 'ready',
         error: '',
-        // 选中的分类可能已经被删掉了，顺手校正
-        activeCategory: action.config.categories.some((c) => c.id === state.activeCategory)
-          ? state.activeCategory
-          : '',
+        // 选中的分类可能已经被删掉了 —— 落回**第一个**，不要落回空串
+        // （空串以前表示"全部"，现在没这个概念了）
+        activeCategory: resolveActive(action.config, state.activeCategory),
       }
     case 'failed':
       return { ...state, load: 'error', error: action.message }
@@ -230,9 +230,23 @@ export function useHome(): HomeStore {
  * 所以这里只管按选中的分类筛，不做任何权限判断 ——
  * 前端藏东西是假安全，翻源码就能看到。
  */
+/**
+ * 当前分组里的应用。
+ *
+ * `activeCategory` 为空时**返回空数组**，不是"全部"。
+ * 首页没有"全部"这一页 —— 具体理由见 state/view.ts 的注释。
+ * 真要全量列表的地方（搜索、设置里的图标管理）显式传 '*'。
+ */
 export function visibleApps(config: HomeConfig | null, activeCategory: string): AppView[] {
   if (!config) return []
-  const list = activeCategory ? config.apps.filter((a) => a.categoryId === activeCategory) : config.apps
+  let list: AppView[]
+  if (activeCategory === '*') {
+    list = config.apps
+  } else if (!activeCategory) {
+    list = []
+  } else {
+    list = config.apps.filter((a) => a.categoryId === activeCategory)
+  }
   return [...list].sort((a, b) => a.order - b.order)
 }
 

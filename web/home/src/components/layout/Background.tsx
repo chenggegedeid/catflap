@@ -76,8 +76,12 @@ export function Background({ wallpaper }: { wallpaper?: Wallpaper }) {
           />
         )}
 
-        {/* 压一层暗色，保证上面的白字在亮图上也读得清 */}
-        <div className="absolute inset-0 bg-slate-900/25" />
+        {/* 压一层暗色。
+            25% 太浅 —— 内置渐变是淡蓝白，白字压上去对比度只有 1.6:1 左右
+            （WCAG AA 要求 4.5:1），标题和卡片名几乎看不见。
+            45% 是淡渐变上实测能读清的最低值；自定义壁纸偏亮时也够用，
+            偏暗时也不至于被压黑。 */}
+        <div className="absolute inset-0 bg-slate-900/45" />
       </div>
     </>
   )

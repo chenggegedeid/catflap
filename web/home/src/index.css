@@ -23,8 +23,22 @@ body,
   overscroll-behavior: none;
 }
 
+/* 兜底色垫在 html 上：它在 body 之下，不会盖住 -z-10 的壁纸层 */
+html {
+  background: #eaf0fa;
+}
+
 body {
   margin: 0;
+  /*
+   * ⚠️ **不要给 body 设 background**。
+   *
+   * 壁纸层用了 `-z-10`；body 一旦有自己的背景色，那层就跑到它背后被盖住了，
+   * 表现是"遮罩和壁纸全都不见了，只剩一片浅色"。这个坑我踩过。
+   *
+   * 想垫底色就垫在 html 上（见下），别垫 body。
+   */
+  color-scheme: light;
 }
 
 button,
