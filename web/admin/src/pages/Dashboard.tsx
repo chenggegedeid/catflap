@@ -234,7 +234,7 @@ export function Dashboard() {
               </button>
             }
           />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl bg-surface-2 p-3">
               <div className="text-xs text-muted">公网 IP</div>
               <div className="mt-1 break-all font-mono text-sm font-bold text-content">
@@ -272,7 +272,7 @@ export function Dashboard() {
 
         <Card className="lg:col-span-5">
           <CardHeader title="快捷操作" />
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:grid-cols-5">
             {[
               { icon: ServerCog, label: '设备', tone: 'bg-blue-50 text-blue-600', page: 'stun' as PageKey },
               { icon: Workflow, label: '服务', tone: 'bg-emerald-50 text-emerald-600', page: 'stun' as PageKey },

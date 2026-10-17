@@ -321,7 +321,7 @@ function ForwardModal({
           {initial ? '编辑端口转发' : '添加端口转发'}
         </h3>
         <form onSubmit={submit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <div className="mb-1 text-xs font-semibold text-muted">本机监听端口</div>
               <input

@@ -289,7 +289,7 @@ function EntryModal({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="block">
           <div className={labelCls}>HTTP 端口</div>
           <input
@@ -714,7 +714,7 @@ function SiteModal({
 
 
       {/* 服务名称 + 后端端口：和内网穿透表单同一个两列排法 */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="col-span-2 block sm:col-span-1">
           {/* 这个字段就是"服务名称"：卡片、仪表盘都优先显示它（穿透的 name 对应物） */}
           <div className={labelCls}>服务名称</div>

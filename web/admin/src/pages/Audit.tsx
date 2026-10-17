@@ -208,7 +208,7 @@ export function Audit() {
       <AuditOverview hours={hours} onPickCountry={(name) => setKeyword(name)} />
 
       {/* 记录概况（累计口径，和上面「最近 N 小时」是两回事） */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <Metric label="已记录 IP（累计）" value={String(cfg?.totalIPs ?? 0)} />
         <Metric
           label="可疑 IP"
@@ -916,7 +916,7 @@ function SettingsCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
             <div className="mb-1 text-xs font-semibold text-muted">明细保留（天）</div>
             <input value={keepDays} onChange={(e) => setKeepDays(e.target.value)} className={cls} />
@@ -938,7 +938,7 @@ function SettingsCard({
             填进白名单（白名单里的地址永不封禁）。
           </div>
           {autoBlock && (
-            <div className="mt-2 grid grid-cols-2 gap-3">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="block">
                 <div className="mb-1 text-xs font-semibold text-muted">异常数门槛</div>
                 <input value={threshold} onChange={(e) => setThreshold(e.target.value)} className={cls} />

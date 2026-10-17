@@ -183,6 +183,14 @@ func addDirToZip(zw *zip.Writer, dir string) (int, int64, error) {
 }
 
 // 哪些模块含凭据 —— 备份包里有它们就要警告
+// IsSensitiveModule 这个模块的配置里是否含凭据（token / 密钥 / 口令哈希）。
+//
+// 导出的原因：界面要据此给模块标黄提示 —— 备份包是**明文**的整机凭据副本，
+// 用户得知道哪些模块带敏感信息，才不会随手把包发给别人。
+func IsSensitiveModule(name string) bool {
+	return isSensitiveModule(name)
+}
+
 func isSensitiveModule(name string) bool {
 	switch name {
 	case "auth", "ddns", "cert":

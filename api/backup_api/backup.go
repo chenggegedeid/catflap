@@ -2,6 +2,7 @@ package backup_api
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/backup"
@@ -80,6 +81,60 @@ func (BackupApi) ImportView(c *gin.Context) {
 
 // 备份包含配置 + 图标 + 壁纸，给足上限
 const maxBackupSize = 200 << 20
+
+/**
+ * 可备份的模块清单（给界面渲染勾选框用）。
+ *
+ * 这份清单的真相在 backup.MODULES 里，这里只是把它发给前端 ——
+ * 不让前端再抄一份模块名，否则加模块时两边会不一致。
+ *
+ * 顺带告诉前端每个模块现在**有没有配置文件**：没有的就别让用户勾
+ * （勾了也不会出错，但恢复时什么都没发生，容易以为坏了）。
+ */
+func (BackupApi) ModulesView(c *gin.Context) {
+	type item struct {
+		Name      string `json:"name"`
+		Label     string `json:"label"`
+		Exists    bool   `json:"exists"`
+		Sensitive bool   `json:"sensitive"`
+	}
+
+	out := make([]item, 0, len(backup.MODULES))
+	for _, m := range backup.MODULES {
+		_, err := os.Stat(m.File)
+		out = append(out, item{
+			Name:      m.Name,
+			Label:     m.Label,
+			Exists:    err == nil,
+			Sensitive: backup.IsSensitiveModule(m.Name),
+		})
+	}
+
+	assets := make([]item, 0, len(backup.ASSETS))
+	for _, a := range backup.ASSETS {
+		info, err := os.Stat(a.Dir)
+		has := err == nil && info.IsDir()
+		if has {
+			// 目录存在但里面没文件，也不算有内容
+			if entries, e := os.ReadDir(a.Dir); e != nil || len(entries) == 0 {
+				has = false
+			}
+		}
+		assets = append(assets, item{Name: a.Kind, Label: assetLabel(a.Kind), Exists: has})
+	}
+
+	res.OkWithData(gin.H{"modules": out, "assets": assets}, c)
+}
+
+func assetLabel(kind string) string {
+	switch kind {
+	case "icon":
+		return "图标"
+	case "wallpaper":
+		return "壁纸"
+	}
+	return kind
+}
 
 /**
  * 备份内容预览：上传一个包，先看清单再决定恢复哪些模块。

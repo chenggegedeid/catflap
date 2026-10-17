@@ -141,7 +141,7 @@ export function TrafficPanel() {
       </Card>
 
       {/* 累计与今日 */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="累计入站" value={fmtBytes(rt?.totals.totalIn ?? 0)} />
         <Metric label="累计出站" value={fmtBytes(rt?.totals.totalOut ?? 0)} />
         <Metric label="今日流量" value={fmtBytes((rt?.today.in ?? 0) + (rt?.today.out ?? 0))} />
