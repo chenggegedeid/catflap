@@ -13,6 +13,7 @@ import { useRef, type ReactNode } from 'react'
 import { Lock, Plus } from 'lucide-react'
 import type { Category, Visibility } from '../../types'
 import { DragList, SortableListItem } from '../grid/DragGrid'
+import { AppIcon } from '../card/AppIcon'
 import { useDroppable } from '@dnd-kit/core'
 
 /**
@@ -45,6 +46,7 @@ export interface RailEntry {
   id: string
   name: string
   vis: Visibility
+  icon?: string
 }
 
 export function CategoryRail({
@@ -73,6 +75,7 @@ export function CategoryRail({
     id: c.id,
     name: c.name,
     vis: visibilityOf(c),
+    icon: c.icon,
   }))
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -111,8 +114,17 @@ export function CategoryRail({
               selected ? 'bg-white/95 text-slate-800 shadow-md' : 'bg-white/20 text-white/85 hover:bg-white/35'
             }`}
           >
+            {/**
+             * 有图标就显示图标，没有才退回"名字前两字"。
+             * 之前这里不管有没有图标都只画文字，分组一多整列就是一排字，
+             * 看着像"图标不见了"。
+             */}
             {locked && !selected ? (
               <Lock className="h-4 w-4" />
+            ) : e.icon ? (
+              <span className="h-7 w-7 overflow-hidden rounded-[22%]">
+                <AppIcon name={e.name} icon={e.icon} />
+              </span>
             ) : (
               <span className="px-1 text-center">{firstChars(e.name)}</span>
             )}

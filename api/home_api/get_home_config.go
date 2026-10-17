@@ -80,7 +80,7 @@ func (HomeApi) GetHomeConfigView(c *gin.Context) {
 			Categories:            append([]home.Category{}, cfg.Categories...),
 			Apps:                  home.HydrateApps(cfg.Apps),
 			Authed:                authed,
-			PageMode:              cfg.PageMode,
+			PageMode:              normalizePageMode(cfg.PageMode),
 		}
 
 		// 托盘跟着"这次能看到的应用"走：访客的托盘里不该出现私密分组的应用。
@@ -233,4 +233,19 @@ func hydrateDock(ids []string, visible []home.AppView) []home.AppView {
 		}
 	}
 	return out
+}
+
+/**
+ * normalizePageMode 空串按 paged 处理。
+ *
+ * 老配置没有这个字段。默认值选 paged 而不是 stream 的原因：
+ * paged 下点击分组是**内容替换**，永远有即时反馈；
+ * stream 下点击是滚动，内容不足一屏时毫无反应 —— 用户会以为功能坏了。
+ * 宁可让喜欢流式的人去设置里切一下，也不能让默认路径看起来像坏的。
+ */
+func normalizePageMode(v string) string {
+	if v == "stream" {
+		return "stream"
+	}
+	return "paged"
 }
