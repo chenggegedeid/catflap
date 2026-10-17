@@ -22,7 +22,6 @@
 
 import { useDroppable } from '@dnd-kit/core'
 import { useDragState } from '../dnd/HomeDnd'
-import { X } from 'lucide-react'
 import type { AppView } from '../../types'
 import { openEntry, resolvedEntry } from '../../lib/addresses'
 import { AppIcon } from '../card/AppIcon'
@@ -41,7 +40,7 @@ export function Dock({
   isOver,
   dropRef,
   onOpenApp,
-  onRemove,
+  onOpenMenu,
   canManage,
 }: {
   items: AppView[]
@@ -49,7 +48,8 @@ export function Dock({
   isOver: boolean
   dropRef: (el: HTMLElement | null) => void
   onOpenApp: (app: AppView) => void
-  onRemove: (id: string) => void
+  /** 右键托盘项 → 弹出和卡片一样的菜单（打开/复制/编辑/移除） */
+  onOpenMenu?: (app: AppView, x: number, y: number) => void
   canManage: boolean
 }) {
   /**
@@ -104,11 +104,16 @@ export function Dock({
                   type="button"
                   onClick={() => (target ? openEntry(target.url) : onOpenApp(app))}
                   onContextMenu={(e) => {
-                    // 右键移除：没有这条，加错了就再也拿不掉
-                    if (!canManage) return
+                    /**
+                     * 右键弹出和卡片一样的菜单（打开地址组/复制/编辑/移除）。
+                     * 之前这里直接删除 —— 太危险：误触一下托盘项就没了，
+                     * 而且和卡片的交互不一致（卡片右键是菜单）。
+                     * 删除收进菜单里，还多了"编辑"的入口。
+                     */
+                    if (!onOpenMenu || !canManage) return
                     e.preventDefault()
                     e.stopPropagation()
-                    onRemove(app.id)
+                    onOpenMenu(app, e.clientX, e.clientY)
                   }}
                   title={app.name}
                   className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-white/10 transition hover:scale-105 hover:bg-white/25 active:scale-95"
@@ -123,16 +128,6 @@ export function Dock({
                   {app.name}
                 </span>
 
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(app.id)}
-                    aria-label={`从托盘移除 ${app.name}`}
-                    className="absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-rose-500 text-[9px] text-white group-hover:grid"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                )}
               </div>
             )
           })

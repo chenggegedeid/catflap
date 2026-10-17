@@ -78,6 +78,7 @@ export function HomeDnd({
   onReorderCategories,
   onDropToDock,
   onMoveToCategory,
+  onDragStateChange,
   children,
 }: {
   enabled: boolean
@@ -86,6 +87,8 @@ export function HomeDnd({
   onDropToDock: (appId: string) => void
   /** 把应用移到某个分组。不传就不支持"拖到分组按钮上" */
   onMoveToCategory?: (appId: string, categoryId: string) => void
+  /** 拖拽状态变化时回调。HomePage 在 provider 外层，要靠它感知"正在拖" */
+  onDragStateChange?: (info: DragInfo | null) => void
   children: ReactNode
 }) {
   const [dragging, setDragging] = useState<DragInfo | null>(null)
@@ -116,6 +119,7 @@ export function HomeDnd({
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
       setDragging(null)
+      onDragStateChange?.(null)
       const { active, over } = e
       if (!over) return
 
@@ -184,15 +188,17 @@ export function HomeDnd({
         }
       }
     },
-    [onReorderApps, onReorderCategories, onDropToDock, onMoveToCategory],
+    [onReorderApps, onReorderCategories, onDropToDock, onMoveToCategory, onDragStateChange],
   )
 
   const onDragStart = useCallback((e: DragStartEvent) => {
-    setDragging({
+    const info: DragInfo = {
       id: String(e.active.id),
       kind: (e.active.data.current?.kind as DragKind | undefined) ?? 'app',
-    })
-  }, [])
+    }
+    setDragging(info)
+    onDragStateChange?.(info)
+  }, [onDragStateChange])
 
   if (!enabled) return <>{children}</>
 
@@ -202,7 +208,10 @@ export function HomeDnd({
       collisionDetection={collision}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      onDragCancel={() => setDragging(null)}
+      onDragCancel={() => {
+        setDragging(null)
+        onDragStateChange?.(null)
+      }}
     >
       <DragStateContext.Provider value={dragging}>{children}</DragStateContext.Provider>
     </DndContext>

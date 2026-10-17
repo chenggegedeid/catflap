@@ -39,6 +39,7 @@ export function ContextMenu({
   onDelete,
   onEdit,
   onNotify,
+  deleteLabel = '删除',
 }: {
   menu: MenuState
   prefer: NetworkPrefer
@@ -46,6 +47,8 @@ export function ContextMenu({
   onDelete: (id: string) => void
   onEdit: (app: AppView) => void
   onNotify: (kind: 'ok' | 'error', text: string) => void
+  /** 托盘里叫"从托盘移除"，卡片里叫"删除" —— 同一个动作的不同说法 */
+  deleteLabel?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: menu.x, top: menu.y })
@@ -146,7 +149,7 @@ export function ContextMenu({
         className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-rose-300 transition hover:bg-rose-500/20"
       >
         <Trash2 className="h-3.5 w-3.5" />
-        删除
+        {deleteLabel}
       </button>
     </div>
   )

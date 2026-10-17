@@ -181,6 +181,20 @@ export function HomeProvider({ children }: { children: ReactNode }) {
         await request()
         if (!alive.current) return false
         if (okMsg) notify('ok', okMsg)
+
+        /**
+         * 没有乐观更新的操作，成功后**必须拉一次服务端真相**。
+         *
+         * 以前这里什么都不做 —— 结果"新增分组"这类操作（后端生成 id，
+         * 前端没法预知所以没法乐观更新）成功后界面纹丝不动，
+         * 用户必须刷新才能看到新分组。这不是"同步慢"，是根本没同步。
+         *
+         * 有 apply 的不需要：本地已经是新状态，服务端写盘只是落袋。
+         */
+        if (!apply) {
+          const fresh = await api.getConfig()
+          if (alive.current) dispatch({ type: 'replaceConfig', config: fresh })
+        }
         return true
       } catch (e) {
         if (!alive.current) return false

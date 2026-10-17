@@ -162,3 +162,16 @@ export function resolvedEntry(
   }
   return null
 }
+
+
+/**
+ * 挑一个用来抓 favicon 的地址。
+ *
+ * 顺序：公网 v4 → 内网 → v6。抓 favicon 的后端在 NAS 上，
+ * 内网地址对它来说往往更快；但很多服务只填了公网，所以 v4 放最前。
+ * 一个都没有返回 null —— 调用方据此把"抓取"按钮置灰并说清原因。
+ */
+export function pickFetchSource(addr?: AddressSet | null): string | null {
+  if (!addr) return null
+  return addr.wanV4 || addr.lan || addr.wanV6 || null
+}
