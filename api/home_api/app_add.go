@@ -18,7 +18,9 @@ type AppAddRequest struct {
 	Color      string            `json:"color"`
 	CategoryID string            `json:"categoryId"`
 	Addresses  home.AppAddresses `json:"addresses"`
-	// 翻页布局下的绝对槽位 (1-indexed,允许间隔)。0 或未提供时按 max+1 兜底
+	// Order 排在第几个（1 开始）。0 或未提供时排到最后
+	Order int `json:"order,omitempty"`
+	// 翻页布局下的绝对槽位（旧契约）。TODO(M4)：删
 	PagedOrder int `json:"pagedOrder,omitempty"`
 }
 
@@ -52,13 +54,29 @@ func (HomeApi) AppAddView(c *gin.Context) {
 		}
 		now := time.Now()
 		addrs := cr.Addresses
-		maxPaged, maxScroll := 0, 0
+		maxOrder, maxPaged, maxScroll := 0, 0, 0
 		for _, a := range cfg.Apps {
-			if a.PagedOrder > maxPaged {
-				maxPaged = a.PagedOrder
+			if a.Order > maxOrder {
+				maxOrder = a.Order
 			}
-			if a.CategoryID == cr.CategoryID && a.ScrollOrder > maxScroll {
-				maxScroll = a.ScrollOrder
+			if a.LegacyPagedOrder > maxPaged {
+				maxPaged = a.LegacyPagedOrder
+			}
+			if a.CategoryID == cr.CategoryID && a.LegacyScrollOrder > maxScroll {
+				maxScroll = a.LegacyScrollOrder
+			}
+		}
+		// 前端可以指定插入位置；没指定就排到最后。
+		// cr.Order 是 1 开始的位置（第几个），不是排序键。
+		order := cr.Order
+		if order <= 0 || order > maxOrder+1 {
+			order = maxOrder + 1
+		} else {
+			// 插到中间：把后面的整体后移一位，保持 1..N 连续
+			for i := range cfg.Apps {
+				if cfg.Apps[i].Order >= order {
+					cfg.Apps[i].Order++
+				}
 			}
 		}
 		pagedOrder := cr.PagedOrder
@@ -66,17 +84,19 @@ func (HomeApi) AppAddView(c *gin.Context) {
 			pagedOrder = maxPaged + 1
 		}
 		created = home.App{
-			ID:          fmt.Sprintf("app-%d", now.UnixNano()),
-			Name:        cr.Name,
-			Icon:        cr.Icon,
-			Color:       cr.Color,
-			CategoryID:  cr.CategoryID,
-			PagedOrder:  pagedOrder,
-			ScrollOrder: maxScroll + 1,
-			Type:        "static",
-			Addresses:   &addrs,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:                fmt.Sprintf("app-%d", now.UnixNano()),
+			Name:              cr.Name,
+			Icon:              cr.Icon,
+			Color:             cr.Color,
+			CategoryID:        cr.CategoryID,
+			Order:             order,
+			Size:              home.DefaultCardSize(),
+			LegacyPagedOrder:  pagedOrder,
+			LegacyScrollOrder: maxScroll + 1,
+			Type:              "static",
+			Addresses:         &addrs,
+			CreatedAt:         now,
+			UpdatedAt:         now,
 		}
 		cfg.Apps = append(cfg.Apps, created)
 		return nil

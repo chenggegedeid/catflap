@@ -21,6 +21,24 @@ func InitHome() error {
 	Runtime.Config = cfg
 	Runtime.mu.Unlock()
 
+	// 老布局（pagedOrder / scrollOrder）→ 流式网格（order / size）。
+	//
+	// **放在读完之后、任何业务逻辑之前**：后面所有代码都只认 Order/Size，
+	// 迁移跑晚了就会读到半新半旧的数据。
+	//
+	// 要落盘，否则迁移只在内存里生效 —— 下次启动又迁一遍，
+	// 而且用户每次看到的顺序还可能不一样（排序依据已被清掉）。
+	if migrateLayout(&cfg) {
+		Runtime.mu.Lock()
+		Runtime.Config = cfg
+		Runtime.mu.Unlock()
+		if err := UpdateConfig(cfg); err != nil {
+			// 迁移结果没写进去不算致命：内存里已经是新格式，这次能用。
+			// 但下一次启动还会再迁一次，所以要明确记出来
+			logrus.Errorf("[home] 布局迁移结果落盘失败（下次启动会重试）：%v", err)
+		}
+	}
+
 	// 图标目录
 	if err := os.MkdirAll("data/icon", 0755); err != nil {
 		logrus.Warn("创建 data/icon 失败：", err)

@@ -7,13 +7,17 @@ import (
 
 // AppView 给前端的统一视图,屏蔽 stun/static 来源差异
 type AppView struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Icon        string       `json:"icon"`
-	Color       string       `json:"color"`
-	CategoryID  string       `json:"categoryId"`
-	PagedOrder  int          `json:"pagedOrder"`
-	ScrollOrder int          `json:"scrollOrder"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Icon       string `json:"icon"`
+	Color      string `json:"color"`
+	CategoryID string `json:"categoryId"`
+	// Order / Size 流式网格用的排列顺序与卡片尺寸（新架构）
+	Order int    `json:"order"`
+	Size  string `json:"size"`
+	// TODO(M4)：新前端落地后删掉这两个 —— 它们只为了让旧版导航页在过渡期还能渲染
+	PagedOrder  int          `json:"pagedOrder,omitempty"`
+	ScrollOrder int          `json:"scrollOrder,omitempty"`
 	Type        string       `json:"type"`
 	Addresses   AppAddresses `json:"addresses"`
 	Online      *bool        `json:"online,omitempty"` // nil = 不展示绿点
@@ -37,8 +41,10 @@ func hydrateApp(app App) AppView {
 		Icon:        app.Icon,
 		Color:       app.Color,
 		CategoryID:  app.CategoryID,
-		PagedOrder:  app.PagedOrder,
-		ScrollOrder: app.ScrollOrder,
+		Order:       app.Order,
+		Size:        app.Size,
+		PagedOrder:  app.LegacyPagedOrder,
+		ScrollOrder: app.LegacyScrollOrder,
 		Type:        app.Type,
 	}
 	if !app.CreatedAt.IsZero() {

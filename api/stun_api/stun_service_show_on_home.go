@@ -53,25 +53,31 @@ func (StunApi) StunServiceShowOnHomeView(c *gin.Context) {
 		}
 		err := home.Runtime.WithLock(func(cfg *home.Config) error {
 			now := time.Now()
-			maxPaged, maxScroll := 0, 0
+			// 新架构只排 Order；旧的两个序一并给上，是为了旧版导航页在 M4 之前还能显示
+			maxOrder, maxPaged, maxScroll := 0, 0, 0
 			for _, a := range cfg.Apps {
-				if a.PagedOrder > maxPaged {
-					maxPaged = a.PagedOrder
+				if a.Order > maxOrder {
+					maxOrder = a.Order
 				}
-				if a.CategoryID == "" && a.ScrollOrder > maxScroll {
-					maxScroll = a.ScrollOrder
+				if a.LegacyPagedOrder > maxPaged {
+					maxPaged = a.LegacyPagedOrder
+				}
+				if a.CategoryID == "" && a.LegacyScrollOrder > maxScroll {
+					maxScroll = a.LegacyScrollOrder
 				}
 			}
 			cfg.Apps = append(cfg.Apps, home.App{
-				ID:            fmt.Sprintf("stun-%d-%d", cr.DeviceID, cr.ServiceID),
-				Name:          service.Name,
-				PagedOrder:    maxPaged + 1,
-				ScrollOrder:   maxScroll + 1,
-				Type:          "stun",
-				StunDeviceID:  cr.DeviceID,
-				StunServiceID: cr.ServiceID,
-				CreatedAt:     now,
-				UpdatedAt:     now,
+				ID:                fmt.Sprintf("stun-%d-%d", cr.DeviceID, cr.ServiceID),
+				Name:              service.Name,
+				Order:             maxOrder + 1,
+				Size:              home.DefaultCardSize(),
+				LegacyPagedOrder:  maxPaged + 1,
+				LegacyScrollOrder: maxScroll + 1,
+				Type:              "stun",
+				StunDeviceID:      cr.DeviceID,
+				StunServiceID:     cr.ServiceID,
+				CreatedAt:         now,
+				UpdatedAt:         now,
 			})
 			return nil
 		})

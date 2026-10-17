@@ -1,14 +1,108 @@
 package home
 
 import (
-	"github.com/chenggegedeid/catflap/utils/utilsFile"
 	"os"
+	"sort"
 	"time"
+
+	"github.com/chenggegedeid/catflap/utils/utilsFile"
 
 	"github.com/sirupsen/logrus"
 )
 
 const ConfigPath = "config/homeConfig.json"
+
+// LayoutSchemaV2 当前配置结构版本：流式网格（order / size）
+const LayoutSchemaV2 = 2
+
+// migrateLayout 把老布局（pagedOrder / scrollOrder）迁成流式网格（order / size）。
+//
+// 返回 true 表示改了东西，调用方要落盘 —— 否则迁移只在内存里生效，
+// 下次启动又迁一遍，用户每次看到的顺序还可能不一样。
+//
+// 老的两个序：
+//   - pagedOrder  翻页模式，page*pageSize+slot+1，1 开始
+//   - scrollOrder 整页模式，分类内序
+//
+// 迁移规则：**只保相对顺序**。老配置里这两个数字的含义完全不同（一个是格子、
+// 一个是序号），硬换算成新坐标没有意义。新布局是流式的，只要谁在前谁在后对，
+// 排出来就和以前看起来一致。
+func migrateLayout(cfg *Config) bool {
+	if cfg.SchemaVersion >= LayoutSchemaV2 {
+		// 已经迁过。但保险起见：用户手工改过配置、或者新增的应用没带 order 时，
+		// 顺序可能是 0 —— 全 0 的话前端排出来会互相抢位置，补上。
+		return fillMissingOrder(cfg)
+	}
+
+	// 按老顺序排序：两个序都有的话，翻页那个更能代表用户看到的顺序
+	// （默认布局模式就是 paged-free）
+	idx := make(map[string]int, len(cfg.Apps))
+	for i, a := range cfg.Apps {
+		idx[a.ID] = i
+	}
+	sort.SliceStable(cfg.Apps, func(i, j int) bool {
+		return legacyRank(cfg.Apps[i]) < legacyRank(cfg.Apps[j])
+	})
+	_ = idx
+
+	for i := range cfg.Apps {
+		cfg.Apps[i].Order = i + 1
+		if cfg.Apps[i].Size == "" {
+			cfg.Apps[i].Size = defaultCardSize
+		}
+	}
+
+	// 老布局模式不再有含义，清掉
+	cfg.LegacyLayoutMode = ""
+	cfg.SchemaVersion = LayoutSchemaV2
+	cfg.UpdatedAt = time.Now()
+
+	logrus.Infof("[home] 导航页布局已迁移到流式网格（%d 个应用）", len(cfg.Apps))
+	return true
+}
+
+// legacyRank 老配置里这个应用的排序依据。两个序都取 0 时按创建时间兜底，
+// 保证顺序是确定的（不然每次启动排序结果可能不同）
+func legacyRank(a App) int64 {
+	if a.LegacyPagedOrder > 0 {
+		return int64(a.LegacyPagedOrder)
+	}
+	if a.LegacyScrollOrder > 0 {
+		return int64(a.LegacyScrollOrder)
+	}
+	return 0
+}
+
+// fillMissingOrder 给没有 order（或 order 重复）的应用补上顺序
+func fillMissingOrder(cfg *Config) bool {
+	seen := make(map[int]bool, len(cfg.Apps))
+	need := false
+	for i := range cfg.Apps {
+		if cfg.Apps[i].Order <= 0 || seen[cfg.Apps[i].Order] {
+			need = true
+			break
+		}
+		seen[cfg.Apps[i].Order] = true
+		if cfg.Apps[i].Size == "" {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return false
+	}
+	for i := range cfg.Apps {
+		cfg.Apps[i].Order = i + 1
+		if cfg.Apps[i].Size == "" {
+			cfg.Apps[i].Size = defaultCardSize
+		}
+	}
+	cfg.UpdatedAt = time.Now()
+	return true
+}
+
+// defaultCardSize 默认卡片尺寸
+const defaultCardSize = "1x1"
 
 // ReadConfig 读取 home 配置，文件不存在则用默认值创建
 func ReadConfig() (Config, error) {
@@ -20,6 +114,8 @@ func ReadConfig() (Config, error) {
 		logrus.Error("Home Config 读取失败：", err)
 		return cfg, err
 	}
+	// 老版本配置没有 schemaVersion（= 0），在这里就地升级。
+	// 落盘的动作交给 init（ReadConfig 自己不写文件，保持"读就是读"）
 	return cfg, nil
 }
 
@@ -34,8 +130,9 @@ func createConfig() (Config, error) {
 			Resolution: "1080",
 			Blur:       0,
 		},
-		LayoutMode:    "paged-free",
 		NetworkPrefer: "wanV4",
+
+		SchemaVersion: LayoutSchemaV2,
 
 		DefaultSearchEngineID: "bing",
 		SearchEngines:         defaultSearchEngines(),

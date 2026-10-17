@@ -12,7 +12,20 @@ type Config struct {
 	Wallpaper Wallpaper `json:"wallpaper"`
 
 	// 布局
-	LayoutMode string `json:"layoutMode"` // paged-horizontal/paged-vertical/paged-free/scroll
+	//
+	// LayoutMode 旧版布局模式（左右翻页/上下翻页/自由翻页/整页滚动）。
+	// 新架构只有一种：**流式网格**（列数随窗口宽度变，往下排），所以这个字段不再有含义。
+	//
+	// 保留 json 名是为了读老配置；迁移完会被清空，之后不再写进文件
+	// （和 proxy 的 LegacyHTTPPort 一个套路）。
+	LegacyLayoutMode string `json:"layoutMode,omitempty"`
+
+	// SchemaVersion 配置结构版本。1 = 老布局（pagedOrder / scrollOrder），
+	// 2 = 流式网格（order / size）。ReadConfig 靠它判断要不要跑迁移。
+	//
+	// **为什么要有版本号而不是"看字段有没有值"**：老配置里 pagedOrder 可能全是 0
+	// （比如用户从来没拖过），光看值分不清"没迁移"和"迁移过但用户没排"。
+	SchemaVersion int `json:"schemaVersion"`
 
 	// 网络入口偏好
 	NetworkPrefer string `json:"networkPrefer"` // wanV4 / wanV6 / lan
@@ -80,8 +93,24 @@ type App struct {
 	Color      string `json:"color"`      // tailwind gradient,无图标时背景用
 	CategoryID string `json:"categoryId"` // 空 = 未分类
 
-	PagedOrder  int `json:"pagedOrder"`  // 翻页模式全局序
-	ScrollOrder int `json:"scrollOrder"` // 整页模式分类内序
+	// Order 排列顺序，从 1 开始，全局唯一。
+	//
+	// **存顺序而不是存网格坐标**：新布局是流式的，列数随窗口宽度变
+	// （宽屏 8 列、手机 4 列）。存死 row/col 的话，换个宽度卡片就跑到网格外了。
+	// 所以只存"谁在前谁在后"，具体落在第几行第几列由渲染时按当前列数算
+	// （见 web/home/src/lib/grid.ts 的 normalize）。
+	Order int `json:"order"`
+	// Size 卡片尺寸：1x1 / 1x2 / 2x1 / 2x2 / 2x4（宽×高）。空 = 1x1。
+	Size string `json:"size"`
+
+	// 下面两个是旧版字段，只用来读老配置。
+	// 迁移成上面的 Order/Size 后它们会一并清空，之后不再写进文件。
+	//
+	// TODO(M4)：新前端落地后把这两个字段和 home/layout 接口一起删掉。
+	// 现在之所以还留着值（而不是立刻清零），是因为旧版导航页还在用它们渲染 ——
+	// 直接清了会让公开页面在 M4 之前一直是坏的。
+	LegacyPagedOrder  int `json:"pagedOrder,omitempty"`
+	LegacyScrollOrder int `json:"scrollOrder,omitempty"`
 
 	Type string `json:"type"` // stun / static
 
@@ -112,3 +141,9 @@ type AppAddresses struct {
 	WANv6 string `json:"wanV6"` // 公网 IPv6 入口
 	LAN   string `json:"lan"`   // 内网 IPv4 入口
 }
+
+// DefaultCardSize 默认卡片尺寸。
+//
+// 新应用一律从 1×1 开始 —— 尺寸是用户**主动**想放大时才改的，
+// 系统不该替他决定"这个服务看起来重要，给个 2×2"。
+func DefaultCardSize() string { return defaultCardSize }

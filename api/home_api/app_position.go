@@ -15,8 +15,11 @@ type AppPositionsRequest struct {
 }
 
 type AppPositionItem struct {
-	ID         string `json:"id"`
-	PagedOrder int    `json:"pagedOrder"`
+	ID string `json:"id"`
+	// Order 排在第几个（1 开始）
+	Order int `json:"order"`
+	// 旧契约：翻页槽位。TODO(M4)：删
+	PagedOrder int `json:"pagedOrder,omitempty"`
 }
 
 func (HomeApi) AppPositionView(c *gin.Context) {
@@ -27,7 +30,10 @@ func (HomeApi) AppPositionView(c *gin.Context) {
 	}
 	index := make(map[string]int, len(cr.Positions))
 	for _, p := range cr.Positions {
-		if p.PagedOrder > 0 {
+		if p.Order > 0 {
+			index[p.ID] = p.Order
+		} else if p.PagedOrder > 0 {
+			// 旧契约：翻页槽位。新架构里它只是"排第几"
 			index[p.ID] = p.PagedOrder
 		}
 	}
@@ -38,7 +44,8 @@ func (HomeApi) AppPositionView(c *gin.Context) {
 	err := home.Runtime.WithLock(func(cfg *home.Config) error {
 		for i := range cfg.Apps {
 			if order, ok := index[cfg.Apps[i].ID]; ok {
-				cfg.Apps[i].PagedOrder = order
+				cfg.Apps[i].Order = order
+				cfg.Apps[i].LegacyPagedOrder = order
 			}
 		}
 		return nil
