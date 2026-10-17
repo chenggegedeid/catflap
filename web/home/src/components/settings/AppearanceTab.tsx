@@ -58,28 +58,60 @@ export function AppearanceTab() {
       <section>
         <h3 className="mb-2 text-xs font-semibold text-slate-700">壁纸</h3>
         <div className="space-y-1.5">
-          {MODES.map((m) => (
-            <button
-              key={m.value}
-              type="button"
-              onClick={() => save({ mode: m.value })}
-              className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition ${
-                wp.mode === m.value ? 'border-blue-400 bg-blue-50/60' : 'border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <span
-                className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
-                  wp.mode === m.value ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300'
-                }`}
-              >
-                {wp.mode === m.value && <Check className="h-2.5 w-2.5" />}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-xs font-semibold text-slate-800">{m.label}</span>
-                <span className="block text-[11px] text-slate-500">{m.hint}</span>
-              </span>
-            </button>
-          ))}
+          {MODES.map((m) => {
+            const selected = wp.mode === m.value
+            const inner = (
+              <>
+                <span
+                  className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                    selected ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300'
+                  }`}
+                >
+                  {selected && <Check className="h-2.5 w-2.5" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold text-slate-800">{m.label}</span>
+                  <span className="block text-[11px] text-slate-500">{m.hint}</span>
+                </span>
+              </>
+            )
+            const cls = `flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition ${
+              selected ? 'border-blue-400 bg-blue-50/60' : 'border-slate-200 hover:bg-slate-50'
+            }`
+
+            /**
+             * 「自己上传」这一项本身就是文件选择器（label 包 input）。
+             *
+             * 之前它是个普通按钮：点了先保存 `mode=custom` —— 但这时图还没传，
+             * 后端校验 `mode==custom && custom==""` 直接拒绝，弹"请先上传一张壁纸"。
+             * 用户还没机会选文件就被拦了，而且真正的上传入口藏在"选中之后"，
+             * 所以看起来就是"让我上传，却不知道传到哪"。
+             *
+             * 现在点它就弹文件选择器，选完 → 上传 → 一起保存，一个动作完成。
+             */
+            if (m.value === 'custom') {
+              return (
+                <label key={m.value} className={`${cls} cursor-pointer`}>
+                  {inner}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ''
+                      if (f) void onUpload(f)
+                    }}
+                  />
+                </label>
+              )
+            }
+            return (
+              <button key={m.value} type="button" onClick={() => save({ mode: m.value })} className={cls}>
+                {inner}
+              </button>
+            )
+          })}
         </div>
 
         {/*
@@ -87,7 +119,11 @@ export function AppearanceTab() {
           选了就生效，不用再点保存）。
         */}
         {wp.mode === 'preset' && (
-          <div className="mt-2 grid grid-cols-3 gap-1.5">
+          <div className="mt-2">
+            {!PRESET_WALLPAPERS.some((p) => wp.css === p.css) && (
+              <p className="mb-1.5 text-[11px] text-slate-400">在下面挑一套，点了就换：</p>
+            )}
+            <div className="grid grid-cols-3 gap-1.5">
             {PRESET_WALLPAPERS.map((p) => (
               <button
                 key={p.key}
@@ -104,6 +140,7 @@ export function AppearanceTab() {
                 </span>
               </button>
             ))}
+            </div>
           </div>
         )}
 
@@ -111,20 +148,23 @@ export function AppearanceTab() {
           <div className="mt-2 flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200">
               <Upload className="h-3 w-3" />
-              {uploading ? '上传中…' : wp.custom ? '换一张' : '选择图片'}
+              {uploading ? '上传中…' : '换一张'}
               <input
                 type="file"
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
-                  // 置空 value：否则同一个文件第二次选不中
                   e.target.value = ''
                   if (f) void onUpload(f)
                 }}
               />
             </label>
-            {wp.custom && <span className="truncate text-[10px] text-slate-400">{wp.custom}</span>}
+            {wp.custom ? (
+              <span className="truncate text-[10px] text-slate-400">{wp.custom}</span>
+            ) : (
+              <span className="text-[10px] text-slate-400">还没选图，点上面「自己上传」选一张</span>
+            )}
           </div>
         )}
 
