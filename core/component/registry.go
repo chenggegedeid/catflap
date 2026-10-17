@@ -202,6 +202,10 @@ func (r *Registry) Descriptors() []Descriptor {
 	var out []Descriptor
 	for _, c := range r.Components() {
 		d := Descriptor{Name: c.Name()}
+		if dc, ok := c.(Describer); ok {
+			d.Title = dc.Title()
+			d.Summary = dc.Summary()
+		}
 		if sp, ok := c.(SchemaProvider); ok {
 			s := sp.ConfigSchema()
 			d.Schema = &s

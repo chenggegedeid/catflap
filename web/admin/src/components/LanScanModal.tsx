@@ -73,13 +73,13 @@ export function LanScanModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-4 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">扫描局域网</div>
+          <div className="text-base font-bold text-content">扫描局域网</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
@@ -93,11 +93,11 @@ export function LanScanModal({
           <>
             <div className="flex items-end gap-2">
               <label className="min-w-0 flex-1">
-                <div className="mb-1 text-xs font-semibold text-slate-500">扫哪一段</div>
+                <div className="mb-1 text-xs font-semibold text-muted">扫哪一段</div>
                 <select
                   value={cidr}
                   onChange={(e) => setCidr(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
                 >
                   {subnets.map((s) => (
                     <option key={s.cidr} value={s.cidr}>
@@ -125,7 +125,7 @@ export function LanScanModal({
               扫不到的是防火墙设成「什么都不回」的机器，Windows 默认就这样。
               不说这句的话，用户会以为那台设备根本不在网里，转头去查网线。
             */}
-            <div className="mt-2 text-[11px] leading-5 text-slate-400">
+            <div className="mt-2 text-[11px] leading-5 text-muted">
               两三秒出结果。防火墙拦得严的机器（Windows 默认就是）扫不出来，这种只能自己填 IP。
             </div>
 
@@ -134,12 +134,12 @@ export function LanScanModal({
             {hosts && (
               <div className="mt-4">
                 <div className="mb-2 flex items-baseline gap-2">
-                  <span className="text-xs font-semibold text-slate-500">找到 {hosts.length} 台</span>
+                  <span className="text-xs font-semibold text-muted">找到 {hosts.length} 台</span>
                   {/* 端口能点这件事看不出来，得说一句 */}
-                  <span className="text-[11px] text-slate-400">已加过的设备，点端口直接建服务</span>
+                  <span className="text-[11px] text-muted">已加过的设备，点端口直接建服务</span>
                 </div>
                 {hosts.length === 0 ? (
-                  <div className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
+                  <div className="rounded-xl bg-surface-2 px-3 py-4 text-center text-xs text-muted">
                     一台都没扫到。换个网段试试，或者手动填 IP
                   </div>
                 ) : (
@@ -149,18 +149,18 @@ export function LanScanModal({
                       return (
                         <li
                           key={h.ip}
-                          className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2"
+                          className="rounded-xl border border-line bg-surface-2/60 px-3 py-2"
                         >
                           <div className="flex items-center gap-2">
-                            <Server className="h-4 w-4 shrink-0 text-slate-400" />
-                            <span className="truncate font-mono text-sm font-semibold text-slate-700">
+                            <Server className="h-4 w-4 shrink-0 text-muted" />
+                            <span className="truncate font-mono text-sm font-semibold text-content">
                               {h.ip}
                             </span>
                             {h.name && (
-                              <span className="truncate text-xs text-slate-400">{h.name}</span>
+                              <span className="truncate text-xs text-muted">{h.name}</span>
                             )}
                             {h.self && (
-                              <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                              <span className="shrink-0 rounded bg-fill px-1.5 py-0.5 text-[10px] font-semibold text-content">
                                 本机
                               </span>
                             )}
@@ -173,7 +173,7 @@ export function LanScanModal({
                               <button
                                 type="button"
                                 onClick={() => onPick(h)}
-                                className="shrink-0 rounded-md bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                                className="shrink-0 rounded-md bg-surface px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
                               >
                                 添加
                               </button>
@@ -203,7 +203,7 @@ export function LanScanModal({
                                     type="button"
                                     onClick={() => onPickPort(h, p)}
                                     title={`用 ${h.ip}:${p.port}`}
-                                    className="rounded bg-white px-1.5 py-0.5 text-[10px] text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
+                                    className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-content ring-1 ring-line transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
                                   >
                                     {p.port}
                                     {p.name && <span className="opacity-70"> {p.name}</span>}
@@ -226,7 +226,7 @@ export function LanScanModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             关闭
           </button>

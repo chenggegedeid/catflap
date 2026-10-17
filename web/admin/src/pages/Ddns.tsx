@@ -38,7 +38,7 @@ import type {
 const statusInfo: Record<DdnsRecordStatus, { label: string; tone: string; icon: LucideIcon }> = {
   success: { label: '正常', tone: 'bg-emerald-50 text-emerald-600', icon: CircleCheck },
   pending: { label: '等待同步', tone: 'bg-amber-50 text-amber-600', icon: RefreshCw },
-  skipped: { label: '无变化', tone: 'bg-slate-100 text-slate-500', icon: CircleCheck },
+  skipped: { label: '无变化', tone: 'bg-surface-2 text-muted', icon: CircleCheck },
   failed: { label: '同步失败', tone: 'bg-rose-50 text-rose-500', icon: TriangleAlert },
 }
 
@@ -179,37 +179,37 @@ function ProviderModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">{initial ? '编辑服务商' : '添加服务商'}</div>
+          <div className="text-base font-bold text-content">{initial ? '编辑服务商' : '添加服务商'}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-3">
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">服务商名称</div>
+            <div className="mb-1 text-xs font-semibold text-muted">服务商名称</div>
             <input
               autoFocus
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="如 我的 Cloudflare"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">服务商类型</div>
+            <div className="mb-1 text-xs font-semibold text-muted">服务商类型</div>
             <select
               value={form.type}
               disabled={isEdit || types.length === 0}
               onChange={(e) =>
                 setForm((p) => ({ ...p, type: e.target.value as DdnsProvider['type'], credential: {} }))
               }
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-500"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted"
             >
               {types.length === 0 && <option value="">正在读取服务商列表…</option>}
               {types.map((m) => (
@@ -218,7 +218,7 @@ function ProviderModal({
                 </option>
               ))}
             </select>
-            {isEdit && <div className="mt-1 text-[11px] text-slate-400">类型创建后不可更改</div>}
+            {isEdit && <div className="mt-1 text-[11px] text-muted">类型创建后不可更改</div>}
             {meta?.docsUrl && (
               <a
                 href={meta.docsUrl}
@@ -232,9 +232,9 @@ function ProviderModal({
           </label>
           {(meta?.fields ?? []).map((f) => (
             <label key={f.key} className="block">
-              <div className="mb-1 text-xs font-semibold text-slate-500">
+              <div className="mb-1 text-xs font-semibold text-muted">
                 {f.label}
-                {isEdit && <span className="ml-1 font-normal text-slate-400">（留空表示不修改）</span>}
+                {isEdit && <span className="ml-1 font-normal text-muted">（留空表示不修改）</span>}
               </div>
               <input
                 type={f.secret ? 'password' : 'text'}
@@ -243,9 +243,9 @@ function ProviderModal({
                   setForm((p) => ({ ...p, credential: { ...p.credential, [f.key]: e.target.value } }))
                 }
                 placeholder={isEdit ? '••••••••（已配置）' : f.placeholder ?? f.label}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
               />
-              {f.help && <div className="mt-1 text-[11px] leading-relaxed text-slate-400">{f.help}</div>}
+              {f.help && <div className="mt-1 text-[11px] leading-relaxed text-muted">{f.help}</div>}
             </label>
           ))}
           {err && <div className="text-xs text-rose-500">{err}</div>}
@@ -254,7 +254,7 @@ function ProviderModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -405,34 +405,34 @@ function RecordModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">{initial ? '编辑解析记录' : '添加解析记录'}</div>
+          <div className="text-base font-bold text-content">{initial ? '编辑解析记录' : '添加解析记录'}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">记录名称</div>
+            <div className="mb-1 text-xs font-semibold text-muted">记录名称</div>
             <input
               autoFocus
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="如 家庭宽带"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">服务商</div>
+            <div className="mb-1 text-xs font-semibold text-muted">服务商</div>
             <select
               value={form.providerId}
               onChange={(e) => setForm((p) => ({ ...p, providerId: e.target.value }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             >
               {providers.length === 0 && <option value="">请先添加服务商</option>}
               {providers.map((p) => (
@@ -443,33 +443,33 @@ function RecordModal({
             </select>
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">主域名</div>
+            <div className="mb-1 text-xs font-semibold text-muted">主域名</div>
             <input
               value={form.domain}
               onChange={(e) => setForm((p) => ({ ...p, domain: e.target.value }))}
               placeholder="如 example.com"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">子域名（@ 或留空表示主域名）</div>
+            <div className="mb-1 text-xs font-semibold text-muted">子域名（@ 或留空表示主域名）</div>
             <input
               value={form.subDomain}
               onChange={(e) => setForm((p) => ({ ...p, subDomain: e.target.value }))}
               placeholder="如 home"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
-            <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            <div className="mt-1 text-[11px] leading-relaxed text-muted">
               填 <span className="font-mono">*</span> 建一条通配记录，一次覆盖所有二级域名 ——
               之后加服务不用再来建解析
             </div>
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">记录类型</div>
+            <div className="mb-1 text-xs font-semibold text-muted">记录类型</div>
             <select
               value={form.recordType}
               onChange={(e) => setForm((p) => ({ ...p, recordType: e.target.value as DnsRecordType }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             >
               <option value="A">A (IPv4)</option>
               <option value="AAAA" disabled={ipv4Only}>
@@ -480,28 +480,28 @@ function RecordModal({
               </option>
             </select>
             {form.recordType === 'A+AAAA' && (
-              <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+              <div className="mt-1 text-[11px] leading-relaxed text-muted">
                 一条记录同时同步 A 和 AAAA 两条，不必建两次。
                 IP 来源选「本地网卡」最省事——双栈会分别取网卡上的 IPv4 与 IPv6。
               </div>
             )}
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">TTL（1 = 自动）</div>
+            <div className="mb-1 text-xs font-semibold text-muted">TTL（1 = 自动）</div>
             <input
               type="number"
               value={form.ttl}
               onChange={(e) => setForm((p) => ({ ...p, ttl: e.target.value }))}
               min={1}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">IP 来源</div>
+            <div className="mb-1 text-xs font-semibold text-muted">IP 来源</div>
             <select
               value={form.ipSource}
               onChange={(e) => setForm((p) => ({ ...p, ipSource: e.target.value as RecordFormState['ipSource'] }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             >
               <option value="stun">STUN 公网 IP</option>
               <option value="web">Web 查询</option>
@@ -511,12 +511,12 @@ function RecordModal({
             </select>
           </label>
           <label className="col-span-2 block sm:col-span-1">
-            <div className="mb-1 text-xs font-semibold text-slate-500">{argMeta.label}</div>
+            <div className="mb-1 text-xs font-semibold text-muted">{argMeta.label}</div>
             {form.ipSource === 'interface' ? (
               <select
                 value={form.ipSourceArg}
                 onChange={(e) => setForm((p) => ({ ...p, ipSourceArg: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
               >
                 <option value="">自动挑一块</option>
                 {(ifaces ?? []).map((n) => (
@@ -537,11 +537,11 @@ function RecordModal({
                 onChange={(e) => setForm((p) => ({ ...p, ipSourceArg: e.target.value }))}
                 disabled={!needArg}
                 placeholder={argMeta.placeholder}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted"
               />
             )}
             {form.ipSource === 'interface' && (
-              <div className="mt-1 text-[11px] text-slate-400">
+              <div className="mt-1 text-[11px] text-muted">
                 {ifaceErr ||
                   (ifaces === null
                     ? '正在读网卡...'
@@ -551,14 +551,14 @@ function RecordModal({
               </div>
             )}
             {form.ipSource === 'custom' && (
-              <div className="mt-1 text-[11px] text-slate-400">
+              <div className="mt-1 text-[11px] text-muted">
                 这条记录就固定指着你填的地址，不随公网 IP 变
               </div>
             )}
           </label>
 
           <div className="col-span-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs font-medium text-content">
               <input
                 type="checkbox"
                 checked={form.enabled}
@@ -568,7 +568,7 @@ function RecordModal({
               启用自动同步
             </label>
             {supportsProxied && (
-              <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs font-medium text-content">
                 <input
                   type="checkbox"
                   checked={form.proxied}
@@ -585,7 +585,7 @@ function RecordModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -644,23 +644,23 @@ function SettingsModal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">DDNS 设置</div>
+          <div className="text-base font-bold text-content">DDNS 设置</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <label className="block">
-          <div className="mb-1 text-xs font-semibold text-slate-500">全局同步间隔</div>
+          <div className="mb-1 text-xs font-semibold text-muted">全局同步间隔</div>
           <select
             value={sec}
             onChange={(e) => setSec(Number(e.target.value))}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
           >
             {intervalOptions.map((o) => (
               <option key={o.value} value={o.value}>
@@ -668,14 +668,14 @@ function SettingsModal({
               </option>
             ))}
           </select>
-          <div className="mt-1.5 text-[11px] text-slate-400">每条记录按此间隔检查 IP 是否变化并自动同步</div>
+          <div className="mt-1.5 text-[11px] text-muted">每条记录按此间隔检查 IP 是否变化并自动同步</div>
         </label>
         {err && <div className="mt-3 text-xs text-rose-500">{err}</div>}
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            className="rounded-xl bg-surface-2 px-4 py-2 text-sm font-semibold text-content transition hover:bg-fill"
           >
             取消
           </button>
@@ -879,7 +879,7 @@ export function Ddns() {
         <div className="py-12 text-center text-rose-500">
           <AlertCircle className="mx-auto h-8 w-8" />
           <div className="mt-2 text-sm font-semibold">数据加载失败</div>
-          <div className="mt-1 text-xs text-slate-500">{loadErr}</div>
+          <div className="mt-1 text-xs text-muted">{loadErr}</div>
           <button onClick={refresh} className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white">
             重试
           </button>
@@ -889,17 +889,17 @@ export function Ddns() {
   }
 
   if (!config) {
-    return <Card><div className="py-12 text-center text-sm text-slate-400">正在加载...</div></Card>
+    return <Card><div className="py-12 text-center text-sm text-muted">正在加载...</div></Card>
   }
 
   return (
     <div className="space-y-4">
       {/* 顶部标题 + 设置入口 */}
       <div className="flex items-center justify-between">
-        <div className="text-base font-bold text-slate-800">动态域名解析</div>
+        <div className="text-base font-bold text-content">动态域名解析</div>
         <button
           onClick={() => setSettingsOpen(true)}
-          className="flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+          className="flex items-center gap-1.5 rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-content ring-1 ring-line transition hover:bg-surface-2"
           title="DDNS 设置"
         >
           <Settings className="h-4 w-4" />
@@ -915,8 +915,8 @@ export function Ddns() {
               <Globe className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">解析记录</div>
-              <div className="text-2xl font-bold text-slate-800">{total}</div>
+              <div className="text-xs text-muted">解析记录</div>
+              <div className="text-2xl font-bold text-content">{total}</div>
             </div>
           </div>
         </Card>
@@ -926,8 +926,8 @@ export function Ddns() {
               <CircleCheck className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">正常解析</div>
-              <div className="text-2xl font-bold text-slate-800">{success}</div>
+              <div className="text-xs text-muted">正常解析</div>
+              <div className="text-2xl font-bold text-content">{success}</div>
             </div>
           </div>
         </Card>
@@ -937,8 +937,8 @@ export function Ddns() {
               <TriangleAlert className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">异常记录</div>
-              <div className="text-2xl font-bold text-slate-800">{failed}</div>
+              <div className="text-xs text-muted">异常记录</div>
+              <div className="text-2xl font-bold text-content">{failed}</div>
             </div>
           </div>
         </Card>
@@ -948,8 +948,8 @@ export function Ddns() {
               <Cloud className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-500">已接入服务商</div>
-              <div className="text-2xl font-bold text-slate-800">{providers.length}</div>
+              <div className="text-xs text-muted">已接入服务商</div>
+              <div className="text-2xl font-bold text-content">{providers.length}</div>
             </div>
           </div>
         </Card>
@@ -969,7 +969,7 @@ export function Ddns() {
           }
         />
         {providers.length === 0 ? (
-          <div className="py-6 text-center text-xs text-slate-400">尚未配置服务商，先添加一个 DNS 服务商凭证</div>
+          <div className="py-6 text-center text-xs text-muted">尚未配置服务商，先添加一个 DNS 服务商凭证</div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {providers.map((p) => (
@@ -982,14 +982,14 @@ export function Ddns() {
                 <span className="text-[10px] font-normal text-orange-400">({labelOfType(types, p.type)})</span>
                 <button
                   onClick={() => setProviderModal({ open: true, initial: p })}
-                  className="ml-1 grid h-5 w-5 place-items-center rounded-md text-orange-400 transition hover:bg-white hover:text-emerald-600"
+                  className="ml-1 grid h-5 w-5 place-items-center rounded-md text-orange-400 transition hover:bg-surface hover:text-emerald-600"
                   title="编辑"
                 >
                   <Pencil className="h-3 w-3" />
                 </button>
                 <button
                   onClick={() => removeProvider(p)}
-                  className="grid h-5 w-5 place-items-center rounded-md text-orange-400 transition hover:bg-white hover:text-rose-500"
+                  className="grid h-5 w-5 place-items-center rounded-md text-orange-400 transition hover:bg-surface hover:text-rose-500"
                   title="删除"
                 >
                   <Trash2 className="h-3 w-3" />
@@ -1002,20 +1002,20 @@ export function Ddns() {
 
       {/* 记录列表 */}
       <Card className="!p-0">
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-4">
-          <div className="text-sm font-bold text-slate-800">域名解析列表</div>
+        <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4">
+          <div className="text-sm font-bold text-content">域名解析列表</div>
           <div className="relative ml-auto w-64">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索域名或 IP"
-              className="h-8 w-full rounded-full border border-slate-200 bg-white pl-8 pr-3 text-xs outline-none focus:border-blue-400"
+              className="h-8 w-full rounded-full border border-line bg-surface pl-8 pr-3 text-xs outline-none focus:border-blue-400"
             />
           </div>
           <button
             type="button"
-            className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+            className="flex items-center gap-1 rounded-md bg-surface px-2 py-1 text-xs font-semibold text-content ring-1 ring-line hover:bg-surface-2"
             onClick={() =>
               setFilterStatus((p) =>
                 p === 'all' ? 'success' : p === 'success' ? 'pending' : p === 'pending' ? 'failed' : 'all',
@@ -1042,7 +1042,7 @@ export function Ddns() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-sm">
             <thead>
-              <tr className="bg-slate-50/60 text-xs text-slate-500">
+              <tr className="bg-surface-2/60 text-xs text-muted">
                 <th className="px-5 py-2.5 text-left font-medium">域名</th>
                 <th className="px-3 py-2.5 text-left font-medium">类型</th>
                 <th className="px-3 py-2.5 text-left font-medium">当前 IP</th>
@@ -1054,10 +1054,10 @@ export function Ddns() {
                 <th className="px-5 py-2.5 text-right font-medium">操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-line">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-5 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-5 py-8 text-center text-sm text-muted">
                     {records.length === 0 ? '暂无解析记录，点击右上角"添加域名"开始' : '没有匹配的记录'}
                   </td>
                 </tr>
@@ -1068,10 +1068,10 @@ export function Ddns() {
                 const fqdn = !r.subDomain || r.subDomain === '@' ? r.domain : `${r.subDomain}.${r.domain}`
                 const busy = syncingId === r.id
                 return (
-                  <tr key={r.id} className="text-slate-700 transition hover:bg-slate-50/60">
+                  <tr key={r.id} className="text-content transition hover:bg-surface-2/60">
                     <td className="px-5 py-3">
                       <div className="font-semibold">{fqdn}</div>
-                      <div className="text-[11px] text-slate-400">{r.name}</div>
+                      <div className="text-[11px] text-muted">{r.name}</div>
                     </td>
                     <td className="px-3 py-3">
                       <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-600">
@@ -1079,7 +1079,7 @@ export function Ddns() {
                       </span>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs">{r.lastIP || '-'}</td>
-                    <td className="px-3 py-3 text-xs text-slate-500">{ipSourceLabel[r.ipSource] ?? r.ipSource}</td>
+                    <td className="px-3 py-3 text-xs text-muted">{ipSourceLabel[r.ipSource] ?? r.ipSource}</td>
                     <td className="px-3 py-3 text-xs">{providerName.get(r.providerId) ?? '已删除'}</td>
                     <td className="px-3 py-3">
                       <span
@@ -1090,11 +1090,11 @@ export function Ddns() {
                         {s.label}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-xs text-slate-500">{fmtTime(r.lastSyncAt)}</td>
+                    <td className="px-3 py-3 text-xs text-muted">{fmtTime(r.lastSyncAt)}</td>
                     <td className="px-3 py-3">
                       <button onClick={() => toggleRecordEnabled(r)} className="flex items-center gap-1.5" title="切换自动同步">
-                        <span className={`inline-block h-2 w-2 rounded-full ${r.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className="text-xs text-slate-600">{r.enabled ? '已开启' : '已关闭'}</span>
+                        <span className={`inline-block h-2 w-2 rounded-full ${r.enabled ? 'bg-emerald-500' : 'bg-fill'}`} />
+                        <span className="text-xs text-content">{r.enabled ? '已开启' : '已关闭'}</span>
                       </button>
                     </td>
                     <td className="px-5 py-3 text-right">
@@ -1102,21 +1102,21 @@ export function Ddns() {
                         <button
                           onClick={() => syncRecord(r)}
                           disabled={busy}
-                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+                          className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
                           title="立即同步"
                         >
                           <RefreshCw className={`h-3 w-3 ${busy ? 'animate-spin' : ''}`} />
                         </button>
                         <button
                           onClick={() => setRecordModal({ open: true, initial: r })}
-                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
+                          className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-emerald-50 hover:text-emerald-600"
                           title="编辑"
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
                           onClick={() => removeRecord(r)}
-                          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                          className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-rose-50 hover:text-rose-500"
                           title="删除"
                         >
                           <Trash2 className="h-3 w-3" />
@@ -1130,7 +1130,7 @@ export function Ddns() {
           </table>
         </div>
 
-        <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">
+        <div className="border-t border-line px-5 py-3 text-xs text-muted">
           共 {filtered.length} 条记录
         </div>
       </Card>
@@ -1164,7 +1164,7 @@ export function Ddns() {
       {/* Toasts */}
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className="rounded-lg bg-slate-900/85 px-4 py-2 text-sm text-white shadow-lg">
+          <div key={t.id} className="rounded-lg bg-inverse/90 px-4 py-2 text-sm text-on-inverse shadow-lg">
             {t.text}
           </div>
         ))}

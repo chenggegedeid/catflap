@@ -39,10 +39,18 @@ func createConfig() (Config, error) {
 }
 
 // SaveConfig 写入磁盘（自带更新时间戳）
+//
+// 自己保证目录存在，不依赖「调用方之前已经 ReadConfig 过一次」：
+// ReadConfig 缺文件时会 createConfig 顺手建目录，于是这个隐含前提在生产路径上
+// 成立，但它是一条看不见的耦合 —— 换个调用顺序（或测试直接装一份配置）就会
+// 变成一句「保存失败」的日志，然后静默丢掉执行结果。
 func SaveConfig(cfg Config) error {
 	cfg.UpdatedAt = time.Now()
 	if cfg.Tasks == nil {
 		cfg.Tasks = []Task{}
+	}
+	if err := utilsFile.EnsurePrivateDir(path.Dir(ConfigPath)); err != nil {
+		return err
 	}
 	return utilsFile.WriteJsonFile(ConfigPath, cfg)
 }

@@ -132,11 +132,11 @@ export function Notify() {
       <Card className="!py-3.5">
         <div className="flex items-start gap-3">
           <Bell className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-          <div className="text-[12px] leading-relaxed text-slate-500">
+          <div className="text-[12px] leading-relaxed text-muted">
             渠道在这里配**一次**，之后在穿透服务、证书、域名解析那儿按名字选用 ——
             改 token / 换机器人 / 临时停用都只改这一处，所有引用它的地方立刻跟着变。
             {cfg?.migrated && (
-              <div className="mt-1 text-slate-400">
+              <div className="mt-1 text-muted">
                 已有 {channels.length} 个渠道（其中一部分是从原有服务的 Webhook 配置迁移来的，
                 内容相同的已自动合并成一个）。
               </div>
@@ -162,7 +162,7 @@ export function Notify() {
         </div>
         <div className="px-5 pb-5">
           {channels.length === 0 ? (
-            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+            <div className="rounded-xl bg-surface-2 px-4 py-6 text-center text-xs text-muted">
               还没有渠道。加一个之后，各服务就能选用它来发通知。
             </div>
           ) : (
@@ -170,12 +170,12 @@ export function Notify() {
               {channels.map((ch) => (
                 <div
                   key={ch.id}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200/70 px-3 py-2.5"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line/70 px-3 py-2.5"
                 >
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${ch.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${ch.enabled ? 'bg-emerald-500' : 'bg-fill'}`} />
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-700">{ch.name}</div>
-                    <div className="text-[11px] text-slate-400">
+                    <div className="text-sm font-semibold text-content">{ch.name}</div>
+                    <div className="text-[11px] text-muted">
                       {channelTypeLabels[ch.type] ?? ch.type}
                       {!ch.enabled && ' · 已停用'}
                       {ch.usedByRules.length > 0 && ` · 被 ${ch.usedByRules.length} 条规则使用`}
@@ -187,20 +187,20 @@ export function Notify() {
                       onClick={() => testChannel(ch)}
                       disabled={testing === ch.id}
                       title="发一条测试消息"
-                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-muted hover:bg-surface-2 disabled:opacity-50"
                     >
                       <Send className={`h-3 w-3 ${testing === ch.id ? 'animate-pulse' : ''}`} /> 测试
                     </button>
                     <button
                       onClick={() => setChannelModal({ open: true, initial: ch })}
-                      className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100"
+                      className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-surface-2"
                       title="编辑"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => removeChannel(ch)}
-                      className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-rose-100 hover:text-rose-600"
+                      className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-rose-100 hover:text-rose-600"
                       title="删除"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -230,11 +230,11 @@ export function Notify() {
         </div>
         <div className="px-5 pb-5">
           {channels.length === 0 ? (
-            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+            <div className="rounded-xl bg-surface-2 px-4 py-6 text-center text-xs text-muted">
               先在通知页添加渠道，再去穿透页开启服务通知。
             </div>
           ) : !cfg?.serviceRefs || cfg.serviceRefs.length === 0 ? (
-            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+            <div className="rounded-xl bg-surface-2 px-4 py-6 text-center text-xs text-muted">
               还没有任何穿透服务。在穿透页添加服务 → 选几个通知渠道 → 这里就会出现。
             </div>
           ) : (
@@ -245,16 +245,16 @@ export function Notify() {
                 return (
                   <div
                     key={`${r.deviceId}-${r.serviceId}`}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200/70 px-3 py-2 text-xs"
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line/70 px-3 py-2 text-xs"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-700">{r.serviceName || `服务 #${r.serviceId}`}</div>
-                      <div className="text-[11px] text-slate-400">设备 #{r.deviceId}</div>
+                      <div className="font-semibold text-content">{r.serviceName || `服务 #${r.serviceId}`}</div>
+                      <div className="text-[11px] text-muted">设备 #{r.deviceId}</div>
                     </div>
                     {chs.length > 0 ? (
-                      <div className="text-[11px] text-slate-500">发到：{chs.join('、')}</div>
+                      <div className="text-[11px] text-muted">发到：{chs.join('、')}</div>
                     ) : (
-                      <div className="text-[11px] text-slate-400">这个服务没选渠道</div>
+                      <div className="text-[11px] text-muted">这个服务没选渠道</div>
                     )}
                   </div>
                 )
@@ -282,11 +282,11 @@ export function Notify() {
         </div>
         <div className="px-5 pb-5">
           {channels.length === 0 ? (
-            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+            <div className="rounded-xl bg-surface-2 px-4 py-6 text-center text-xs text-muted">
               先添加渠道，再来配「什么时候通知你」。
             </div>
           ) : rules.length === 0 ? (
-            <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+            <div className="rounded-xl bg-surface-2 px-4 py-6 text-center text-xs text-muted">
               还没有规则 —— 没配规则的渠道不会收到任何通知。
             </div>
           ) : (
@@ -294,28 +294,28 @@ export function Notify() {
               {rules.map((r) => {
                 const meta = events.find((e) => e.type === r.event)
                 return (
-                  <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200/70 px-3 py-2.5">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${r.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line/70 px-3 py-2.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${r.enabled ? 'bg-emerald-500' : 'bg-fill'}`} />
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-700">
+                      <div className="text-sm font-semibold text-content">
                         {meta?.title ?? r.event}
-                        <span className="ml-2 text-[11px] font-normal text-slate-400">{meta?.group}</span>
+                        <span className="ml-2 text-[11px] font-normal text-muted">{meta?.group}</span>
                       </div>
-                      <div className="text-[11px] text-slate-400">
+                      <div className="text-[11px] text-muted">
                         发给：{r.channelIds.map(channelName).join('、') || '（无）'}
                       </div>
                     </div>
                     <div className="ml-auto flex items-center gap-1">
                       <button
                         onClick={() => setRuleModal({ open: true, initial: r })}
-                        className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100"
+                        className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-surface-2"
                         title="编辑"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={() => removeRule(r)}
-                        className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-rose-100 hover:text-rose-600"
+                        className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-rose-100 hover:text-rose-600"
                         title="删除"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -358,7 +358,7 @@ export function Notify() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-slate-800 px-4 py-2 text-xs font-medium text-white shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-inverse px-4 py-2 text-xs font-medium text-on-inverse shadow-lg">
           {toast}
         </div>
       )}
@@ -423,7 +423,7 @@ function ChannelModal({
           placeholder="如：我的 PushPlus / 家庭群"
           className={inputCls}
         />
-        <div className="mt-1 text-[11px] text-slate-400">各服务的下拉里显示的就是这个名字</div>
+        <div className="mt-1 text-[11px] text-muted">各服务的下拉里显示的就是这个名字</div>
       </label>
 
       <label className="block">
@@ -461,12 +461,12 @@ function ChannelModal({
       ))}
 
       {initial && (
-        <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+        <div className="rounded-xl bg-surface-2 px-3 py-2 text-[11px] leading-relaxed text-muted">
           显示为 <span className="font-mono">••••••</span> 的字段表示已保存过，留着不动就是不改。
         </div>
       )}
 
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-content">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
         启用（关掉后所有引用它的地方立刻停发）
       </label>
@@ -544,23 +544,23 @@ function RuleModal({
 
       <div>
         <div className={labelCls}>发给哪些渠道</div>
-        <div className="space-y-1.5 rounded-xl border border-slate-200 p-2.5">
+        <div className="space-y-1.5 rounded-xl border border-line p-2.5">
           {channels.map((ch) => (
             <label key={ch.id} className="flex cursor-pointer items-center gap-2 text-xs">
               <input type="checkbox" checked={picked.includes(ch.id)} onChange={() => toggle(ch.id)} />
-              <span className={ch.enabled ? 'text-slate-700' : 'text-slate-400'}>
+              <span className={ch.enabled ? 'text-content' : 'text-muted'}>
                 {ch.name}
                 {!ch.enabled && '（已停用，勾了也不会发）'}
               </span>
             </label>
           ))}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400">
+        <div className="mt-1 text-[11px] text-muted">
           同一事件在冷却窗口内只发一次，不会刷屏。渠道在「通知渠道」里统一管理。
         </div>
       </div>
 
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-content">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
         启用这条规则
       </label>
@@ -591,12 +591,12 @@ function Modal({
   submitText: string
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
-        <div className="mb-4 text-base font-bold text-slate-800">{title}</div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 dark:bg-black/70">
+      <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-5 shadow-2xl">
+        <div className="mb-4 text-base font-bold text-content">{title}</div>
         <div className="space-y-3">{children}</div>
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-xl px-4 py-2 text-sm text-slate-500 hover:bg-slate-100">
+          <button onClick={onCancel} className="rounded-xl px-4 py-2 text-sm text-muted hover:bg-surface-2">
             取消
           </button>
           <button
@@ -612,6 +612,6 @@ function Modal({
   )
 }
 
-const labelCls = 'mb-1 text-xs font-semibold text-slate-500'
+const labelCls = 'mb-1 text-xs font-semibold text-muted'
 const inputCls =
-  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400'
+  'w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400'

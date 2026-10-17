@@ -29,6 +29,12 @@ type stunComponent struct {
 
 func (stunComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (stunComponent) Title() string { return "STUN 内网穿透" }
+
+// Summary 见 core/component.Describer。
+func (stunComponent) Summary() string { return "没有公网 IP 也能把内网服务放出去" }
+
 func (stunComponent) Init(context.Context) error { return InitSTUN() }
 
 func init() {

@@ -21,7 +21,9 @@
 | Wails 源图 | `build/appicon.png` | 1024 |
 | 后台 favicon | `web/admin/public/favicon.png` | 128 |
 | 后台侧边栏 logo | `web/admin/src/assets/logo.png` | 128 |
-| 导航页 favicon | `web/home/public/favicon.png` | 128 |
+
+> 以前还有一行「导航页 favicon」指向 `web/home/public/favicon.png`，
+> 导航主页已在 v2.1.0 之后移除。
 
 ## 生成方法（本仓库实际用的那条）
 

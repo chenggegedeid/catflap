@@ -69,7 +69,7 @@ export function Forwards() {
           <CardHeader
             title={
               <span>
-                端口转发 <span className="ml-1 font-normal text-slate-400">{list.length}</span>
+                端口转发 <span className="ml-1 font-normal text-muted">{list.length}</span>
               </span>
             }
             action={
@@ -83,7 +83,7 @@ export function Forwards() {
           />
         </div>
         <div className="px-5 pb-5">
-          <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+          <div className="mb-3 rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted ring-1 ring-line/70">
             把本机某个端口收到的流量原样转到内网某台机器 —— 不看域名，收到什么转什么。
             适合数据库、游戏服务器、监控这类不是 HTTP 的服务。
             <br />
@@ -91,10 +91,10 @@ export function Forwards() {
           </div>
 
           {list.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center">
-              <ArrowRight className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-2 text-sm text-slate-500">还没有端口转发</p>
-              <p className="mt-1 text-[11px] text-slate-400">
+            <div className="rounded-xl border border-dashed border-line py-10 text-center">
+              <ArrowRight className="mx-auto h-8 w-8 text-muted" />
+              <p className="mt-2 text-sm text-muted">还没有端口转发</p>
+              <p className="mt-1 text-[11px] text-muted">
                 非 HTTP 的服务（数据库、游戏、监控）用这个
               </p>
               <button
@@ -173,12 +173,12 @@ function ForwardRow({
             onClick={onToggle}
             title={off ? '点一下启用' : '点一下停用'}
             className={`${iconBtn} ${
-              off ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+              off ? 'bg-fill text-muted hover:bg-fill' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
             }`}
           >
             <Power className="h-3 w-3" />
           </button>
-          <button onClick={onEdit} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="编辑">
+          <button onClick={onEdit} className={`${iconBtn} bg-surface-2 text-content hover:bg-fill`} title="编辑">
             <Pencil className="h-3 w-3" />
           </button>
           <button onClick={onRemove} className={`${iconBtn} bg-rose-50 text-rose-500 hover:bg-rose-100`} title="删除">
@@ -187,12 +187,12 @@ function ForwardRow({
         </>
       }
       subtitle={
-        <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs text-slate-500">
-          <span className="font-semibold text-slate-700">:{f.listenPort}</span>
-          <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
+        <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs text-muted">
+          <span className="font-semibold text-content">:{f.listenPort}</span>
+          <ArrowRight className="h-3 w-3 shrink-0 text-muted" />
           <span className="truncate">
             {dev ? dev.name : ip}
-            {port && <span className="text-slate-400">:{port}</span>}
+            {port && <span className="text-muted">:{port}</span>}
           </span>
         </span>
       }
@@ -314,29 +314,29 @@ function ForwardModal({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" onClick={onCancel}>
       <div
-        className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+        className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-3 text-sm font-bold text-slate-800">
+        <h3 className="mb-3 text-sm font-bold text-content">
           {initial ? '编辑端口转发' : '添加端口转发'}
         </h3>
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <div className="mb-1 text-xs font-semibold text-slate-500">本机监听端口</div>
+              <div className="mb-1 text-xs font-semibold text-muted">本机监听端口</div>
               <input
                 value={listenPort}
                 onChange={(e) => setListenPort(e.target.value)}
                 placeholder="8081"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
               />
             </label>
             <label className="block">
-              <div className="mb-1 text-xs font-semibold text-slate-500">协议</div>
+              <div className="mb-1 text-xs font-semibold text-muted">协议</div>
               <select
                 value={protocol}
                 onChange={(e) => setProtocol(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
               >
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
@@ -344,12 +344,12 @@ function ForwardModal({
             </label>
           </div>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">目标</div>
+            <div className="mb-1 text-xs font-semibold text-muted">目标</div>
             <div className="flex flex-wrap gap-2">
               <select
                 value={deviceId || ''}
                 onChange={(e) => pickDevice(Number(e.target.value) || 0)}
-                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
               >
                 <option value="">选择设备…</option>
                 {devices.map((d) => (
@@ -363,7 +363,7 @@ function ForwardModal({
                 onChange={(e) => setPort(e.target.value)}
                 placeholder="端口"
                 inputMode="numeric"
-                className="w-24 shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
+                className="w-24 shrink-0 rounded-xl border border-line bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-blue-400"
               />
               <button
                 type="button"
@@ -377,13 +377,13 @@ function ForwardModal({
               </button>
             </div>
             {hostPorts.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-slate-50 p-2">
+              <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-surface-2 p-2">
                 {hostPorts.map((p) => (
                   <button
                     key={p.port}
                     type="button"
                     onClick={() => setPort(String(p.port))}
-                    className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600"
+                    className="rounded bg-surface px-2 py-1 text-[11px] font-semibold text-content ring-1 ring-line transition hover:bg-blue-50 hover:text-blue-600"
                   >
                     {p.port}
                     {p.name && <span className="ml-1 opacity-70">{p.name}</span>}
@@ -391,20 +391,20 @@ function ForwardModal({
                 ))}
               </div>
             )}
-            <div className="mt-1 text-[11px] text-slate-400">
+            <div className="mt-1 text-[11px] text-muted">
               选设备 + 填端口。机器没在列表里就去「设备」页加一台。
             </div>
           </label>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-slate-500">备注（可选）</div>
+            <div className="mb-1 text-xs font-semibold text-muted">备注（可选）</div>
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="给外面的监控用"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
           </label>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
+          <label className="flex items-center gap-2 text-sm text-content">
             <input
               type="checkbox"
               checked={enabled}
@@ -418,7 +418,7 @@ function ForwardModal({
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-xl px-4 py-2 text-sm text-slate-500 transition hover:bg-slate-100"
+              className="rounded-xl px-4 py-2 text-sm text-muted transition hover:bg-surface-2"
             >
               取消
             </button>

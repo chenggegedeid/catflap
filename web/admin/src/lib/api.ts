@@ -3,6 +3,7 @@ import type {
   Certificate,
   AuditConfigView,
   AuditIPStat,
+  AuditOverview,
   AuditRecord,
   CertSource,
   ComponentsView,
@@ -55,6 +56,7 @@ interface ApiResponse<T> {
 }
 
 const TOKEN_KEY = 'catflap_token'
+const USERNAME_KEY = 'catflap_username'
 const DESKTOP_SECRET_KEY = 'catflap_desktop_secret'
 
 // captureDesktopSecret 桌面版首屏：从 URL 读 desktop_secret 存入 sessionStorage 并抹掉地址栏
@@ -74,6 +76,26 @@ captureDesktopSecret()
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t)
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+
+/**
+ * 当前登录的用户名。
+ *
+ * 存起来而不是每次问后端：顶栏头像要显示它，而顶栏在每个页面都在，
+ * 为一个字母多发一次请求不值得。**登录/初始化/改用户名**这三个会改它的
+ * 地方必须跟着 setUsername，否则界面会停在上一个名字上（这就是
+ * 「改了用户名、右上角还是 admin」的由来 —— 那边以前直接写死了字面量）。
+ */
+export const getUsername = () => localStorage.getItem(USERNAME_KEY) || ''
+export const setUsername = (u: string) => {
+  if (u) localStorage.setItem(USERNAME_KEY, u)
+  else localStorage.removeItem(USERNAME_KEY)
+  // 顶栏在另一棵子树里，改完得让它知道 —— 否则要等下次整页刷新才看得见
+  window.dispatchEvent(new Event(USERNAME_EVENT))
+}
+
+/** 用户名变化事件名。顶栏订阅它来重读名字 */
+export const USERNAME_EVENT = 'catflap:username'
+
 export const isDesktop = () => !!sessionStorage.getItem(DESKTOP_SECRET_KEY)
 
 // requestWithMsg 连后端那句话一起拿回来。
@@ -139,8 +161,10 @@ export const setupPassword = (username: string, password: string) =>
 // 后端 modules/auth/auth_config.go 里的两个常量是这里注释的依据。
 //
 // username 留空也能登：升级上来的老配置里不存在用户名，后端会放行。
+// 返回的 username 是**后端里实际生效的那个**（留空登录时是 admin），
+// 不是输入框里的原文，直接存下来给顶栏用。
 export const login = (username: string, password: string, remember = false) =>
-  request<{ token: string }>('/api/auth/login', {
+  request<{ token: string; username: string }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password, remember }),
   })
@@ -926,12 +950,40 @@ export const getTrafficTrend = (params: { hours?: number; days?: number } = {}) 
 
 export const getAuditConfig = () => request<AuditConfigView>('/api/audit/config')
 
-export const getAuditIPs = (params: { sort?: string; suspicious?: boolean; limit?: number } = {}) => {
+/** 概览：指标卡 + 趋势 + 攻击类型 + 地区 + 站点，一次拿齐 */
+export const getAuditOverview = (hours = 24) =>
+  request<AuditOverview>(`/api/audit/overview?hours=${hours}`)
+
+export const getAuditIPs = (
+  params: {
+    sort?: string
+    suspicious?: boolean
+    limit?: number
+    page?: number
+    /** 关键词：IP / 归属地 / 路径 / 主机名都能搜 */
+    q?: string
+    /** 只看这一天；留空 = 累计（跨天累加） */
+    day?: string
+  } = {},
+) => {
   const q = new URLSearchParams()
   if (params.sort) q.set('sort', params.sort)
   if (params.suspicious) q.set('suspicious', '1')
   if (params.limit) q.set('limit', String(params.limit))
-  return request<{ list: AuditIPStat[] }>(`/api/audit/ips?${q.toString()}`)
+  if (params.page) q.set('page', String(params.page))
+  if (params.q) q.set('q', params.q)
+  if (params.day) q.set('day', params.day)
+  return request<{
+    list: AuditIPStat[]
+    total: number
+    page: number
+    limit: number
+    /** 当前看的是哪天；空 = 累计 */
+    day: string
+    /** 有访问记录的日期，给「按日期查看」下拉用 */
+    days: string[]
+    geoEnabled: boolean
+  }>(`/api/audit/ips?${q.toString()}`)
 }
 
 export const getAuditRecords = (
@@ -974,6 +1026,20 @@ export const saveAuditSettings = (body: {
   trustedProxies: string[]
 }) => requestWithMsg<unknown>('/api/audit/settings', { method: 'POST', body: JSON.stringify(body) })
 
+/**
+ * 保存「永不封禁」名单（白名单）。
+ *
+ * 走独立的 /api/audit/whitelist：它只改名单与自动拉黑，
+ * 不碰保留天数、单天上限那些 —— 免得改名单时把整份设置覆盖回去。
+ */
+export const saveAuditWhitelist = (body: {
+  whitelist: string[]
+  autoBlock: boolean
+  autoBlockThreshold: number
+  autoBlockMinutes: number
+  trustedProxies?: string[]
+}) => requestWithMsg<unknown>('/api/audit/whitelist', { method: 'POST', body: JSON.stringify(body) })
+
 // ===================== 反代复用局域网扫描 =====================
 //
 // 和穿透那边是同一套后端实现（core/lanscan），只是填的字段不同：
@@ -998,14 +1064,25 @@ export const setProxySiteFlag = (id: number, flag: 'enabled', value: boolean) =>
   })
 
 /** 登录尝试（谁在试着进后台） */
-export const getAuditLogins = (params: { day?: string; ip?: string; limit?: number } = {}) => {
+export const getAuditLogins = (
+  params: { day?: string; ip?: string; limit?: number; page?: number } = {},
+) => {
   const q = new URLSearchParams()
   if (params.day) q.set('day', params.day)
   if (params.ip) q.set('ip', params.ip)
   if (params.limit) q.set('limit', String(params.limit))
-  return request<{ list: LoginEvent[]; day: string; summary: LoginSummary }>(
-    `/api/audit/logins?${q.toString()}`,
-  )
+  if (params.page) q.set('page', String(params.page))
+  return request<{
+    list: LoginEvent[]
+    /** 当前看的是哪天 */
+    day: string
+    /** 有登录记录的那些日期（给「按日期看」的下拉用） */
+    days: string[]
+    /** 当天总条数，给分页用 */
+    total: number
+    /** 当天汇总。**不随分页变化** —— 它回答的是"这天总共怎样" */
+    summary: LoginSummary
+  }>(`/api/audit/logins?${q.toString()}`)
 }
 
 // ===================== 设备（三个功能共用一份） =====================

@@ -65,8 +65,8 @@ export function Wol() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-slate-800">网络唤醒</h2>
-        <p className="mt-1 text-xs text-slate-500">
+        <h2 className="text-lg font-bold text-content">网络唤醒</h2>
+        <p className="mt-1 text-xs text-muted">
           发一个魔术包把局域网里的机器叫醒。需要先在目标机器的 BIOS / 网卡设置里打开 WOL。
         </p>
       </div>
@@ -84,15 +84,15 @@ export function Wol() {
 
       <Card>
         {loading ? (
-          <div className="px-4 py-8 text-center text-xs text-slate-400">加载中…</div>
+          <div className="px-4 py-8 text-center text-xs text-muted">加载中…</div>
         ) : sorted.length === 0 ? (
-          <div className="px-4 py-8 text-center text-xs text-slate-400">
+          <div className="px-4 py-8 text-center text-xs text-muted">
             还没有添加任何机器。点右上角「添加机器」开始。
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-xs text-slate-500">
+              <tr className="border-b border-line text-left text-xs text-muted">
                 <th className="px-4 py-2 font-semibold">名称</th>
                 <th className="px-4 py-2 font-semibold">MAC</th>
                 <th className="px-4 py-2 font-semibold">广播地址</th>
@@ -102,20 +102,20 @@ export function Wol() {
             </thead>
             <tbody>
               {sorted.map((t) => (
-                <tr key={t.id} className="border-b border-slate-50 last:border-0">
+                <tr key={t.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5">
-                    <div className="font-medium text-slate-700">{t.name}</div>
-                    {t.note && <div className="mt-0.5 text-xs text-slate-400">{t.note}</div>}
+                    <div className="font-medium text-content">{t.name}</div>
+                    {t.note && <div className="mt-0.5 text-xs text-muted">{t.note}</div>}
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{t.mac}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{t.broadcast}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">{t.port || 9}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-content">{t.mac}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-content">{t.broadcast}</td>
+                  <td className="px-4 py-2.5 text-xs text-content">{t.port || 9}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => void wake(t)}
-                        className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                        className="rounded-md border border-line px-2.5 py-1.5 text-xs font-semibold text-content transition hover:bg-surface-2"
                         title="发送唤醒包"
                       >
                         <Power className="h-3.5 w-3.5" />
@@ -124,7 +124,7 @@ export function Wol() {
                       <button
                         type="button"
                         onClick={() => void remove(t)}
-                        className="rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
+                        className="rounded-md border border-line px-2 py-1.5 text-xs text-muted transition hover:border-rose-200 hover:text-rose-600"
                         title="删除"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -198,8 +198,8 @@ function AddTargetModal({ onSaved }: { onSaved: () => void }) {
             if (e.target === e.currentTarget) setOpen(false)
           }}
         >
-          <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-2xl ring-1 ring-slate-200">
-            <div className="text-base font-bold text-slate-800">添加机器</div>
+          <div className="w-full max-w-lg rounded-lg bg-surface p-5 shadow-2xl ring-1 ring-line">
+            <div className="text-base font-bold text-content">添加机器</div>
 
             <div className="mt-4 space-y-3">
               <Field label="名称" value={name} onChange={setName} placeholder="书房台式机" />
@@ -228,7 +228,7 @@ function AddTargetModal({ onSaved }: { onSaved: () => void }) {
             )}
 
             <div className="mt-5 flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setOpen(false)} className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+              <button type="button" onClick={() => setOpen(false)} className="rounded-md border border-line px-2.5 py-1.5 text-xs font-semibold text-content transition hover:bg-surface-2">
                 取消
               </button>
               <button
@@ -262,14 +262,14 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-xs font-semibold text-slate-600">{label}</span>
+      <span className="text-xs font-semibold text-content">{label}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400"
+        className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none transition focus:border-blue-400"
       />
-      {hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
     </label>
   )
 }

@@ -72,9 +72,9 @@ func browserArgs() []string {
 // desktopAdminURL 在 admin URL 上附带 secret，前端首屏读取后存入 sessionStorage 并从地址栏抹掉。
 func desktopAdminURL() string {
 	if desktopSecret == "" {
-		return adminURL
+		return backendURL
 	}
-	return adminURL + "?desktop_secret=" + url.QueryEscape(desktopSecret)
+	return backendURL + "?desktop_secret=" + url.QueryEscape(desktopSecret)
 }
 
 func main() {
@@ -115,7 +115,7 @@ func newDesktopApp() *application.App {
 			ExitCode: 0,
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				if window != nil {
-					showWindow(window, adminURL)
+					showWindow(window, backendURL)
 				}
 			},
 		},
@@ -165,7 +165,7 @@ func newDesktopApp() *application.App {
 	}
 	tray.SetTooltip(appName)
 	tray.OnClick(func() {
-		showWindow(window, adminURL)
+		showWindow(window, backendURL)
 	})
 	tray.SetMenu(buildTrayMenu(app, window))
 
@@ -175,10 +175,7 @@ func newDesktopApp() *application.App {
 func buildTrayMenu(app *application.App, window application.Window) *application.Menu {
 	menu := app.NewMenu()
 	menu.Add("打开 Catflap").OnClick(func(ctx *application.Context) {
-		showWindow(window, adminURL)
-	})
-	menu.Add("打开导航主页").OnClick(func(ctx *application.Context) {
-		showWindow(window, homeURL)
+		showWindow(window, backendURL)
 	})
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(ctx *application.Context) {

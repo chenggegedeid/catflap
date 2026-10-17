@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { LockKeyhole, ShieldCheck, User } from 'lucide-react'
-import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, login, setupPassword, setToken } from '../lib/api'
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, login, setupPassword, setToken, setUsername as saveUsername } from '../lib/api'
 
 export function Login({ onSuccess }: { onSuccess: () => void }) {
   const [username, setUsername] = useState('')
@@ -20,8 +20,9 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
     try {
       // 用户名留空也允许：升级上来的老配置里没有"用户名"这个概念，
       // 后端会放行。这样老用户不会一升级就登不进去。
-      const { token } = await login(username, password, remember)
+      const { token, username: name } = await login(username, password, remember)
       setToken(token)
+      saveUsername(name)
       onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败')
@@ -39,12 +40,12 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       <form onSubmit={submit} className="space-y-4">
         <UsernameField value={username} onChange={setUsername} autoFocus />
         <PasswordField value={password} onChange={setPassword} placeholder="密码" />
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-500 select-none">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted select-none">
           <input
             type="checkbox"
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 accent-indigo-500"
+            className="h-4 w-4 rounded border-line accent-indigo-500"
           />
           记住我（7 天内免登录）
         </label>
@@ -79,8 +80,9 @@ export function Setup({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true)
     setError('')
     try {
-      const { token } = await setupPassword(username, password)
+      const { token, username: name } = await setupPassword(username, password)
       setToken(token)
+      saveUsername(name)
       onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : '设置失败')
@@ -122,14 +124,14 @@ function AuthLayout({
   children: ReactNode
 }) {
   return (
-    <div className="grid min-h-screen place-items-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200/70 bg-white p-8 shadow-sm shadow-slate-200/60">
+    <div className="grid min-h-screen place-items-center bg-surface-2 px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-line/70 bg-surface p-8 shadow-sm shadow-slate-200/60">
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-indigo-500">
             {icon}
           </div>
-          <h1 className="mt-4 text-lg font-bold text-slate-800">{title}</h1>
-          <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
+          <h1 className="mt-4 text-lg font-bold text-content">{title}</h1>
+          <p className="mt-1 text-sm text-muted">{subtitle}</p>
         </div>
         {children}
       </div>
@@ -154,7 +156,7 @@ function UsernameField({
 }) {
   return (
     <div className="relative">
-      <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
       <input
         type="text"
         value={value}
@@ -163,7 +165,7 @@ function UsernameField({
         maxLength={32}
         onChange={(e) => onChange(e.target.value)}
         placeholder="用户名（留空用 admin）"
-        className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+        className="w-full rounded-xl border border-line bg-surface-2 py-2.5 pl-10 pr-4 text-sm text-content outline-none transition focus:border-indigo-400 focus:bg-surface focus:ring-2 focus:ring-indigo-100"
       />
     </div>
   )
@@ -190,7 +192,7 @@ function PasswordField({
       maxLength={MAX_PASSWORD_LENGTH}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+      className="w-full rounded-xl border border-line bg-surface-2 px-4 py-2.5 text-sm text-content outline-none transition focus:border-indigo-400 focus:bg-surface focus:ring-2 focus:ring-indigo-100"
     />
   )
 }

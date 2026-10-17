@@ -14,14 +14,15 @@ import {
   saveExposeAdmin,
   setToken,
   setUpdateConfig,
+  setUsername as saveUsername,
   updateStunNetwork,
   uploadUpdate,
 } from '../lib/api'
 import type { NetworkMode, StunNetwork, UpdateSource, UpdateStatus } from '../types'
 
 const fieldCls =
-  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400'
-const labelCls = 'mb-1 text-xs font-semibold text-slate-500'
+  'w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none transition focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted'
+const labelCls = 'mb-1 text-xs font-semibold text-muted'
 
 export function Settings() {
   return (
@@ -80,12 +81,14 @@ function ChangePassword() {
       // 顺手回一个新的——不存下来这一页下一个请求就变成未登录了
       const res = await changePassword(oldPassword, newPassword, username)
       setToken(res.token)
+      // 顶栏头像旁边显示的是它。必须写回去，否则改了用户名界面纹丝不动
+      saveUsername(res.username)
       setOldPassword('')
       setNewPassword('')
       setConfirm('')
       setUsername('')
       setDone(
-        '改好了。其他设备上原来登着的都掉线了，要用新的用户名和密码重新登录',
+        '改好了，右上角的用户名已经跟着变。其他设备上原来登着的都掉线了，要用新的用户名和密码重新登录',
       )
     } catch (e) {
       setErr(e instanceof Error ? e.message : '修改失败')
@@ -98,7 +101,7 @@ function ChangePassword() {
     <Card>
       <CardHeader title="修改密码" />
 
-      <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+      <div className="mb-4 rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted ring-1 ring-line/70">
         登录要同时给用户名和密码。连续错 5 次会把来源 IP 封禁 1 小时（阈值和时长可在后台配置里改），
         **这个锁是按来源 IP 算的** —— 别人一直试只会把他自己挡住，你从别的地方照样能进来。
         被封的来源在「访问审计」页能手动解封；把你的出口 IP 填进「永不封禁」名单就永远不会被误封。
@@ -187,7 +190,12 @@ function ErrorPageSettings() {
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const [done, setDone] = useState('')
+  // 两块状态分开显示，跟着各自的操作走：
+  //   - 改「错误页」要点保存 → 提示显示在保存按钮下面
+  //   - 拨「远程管理」开关是**即时生效、没有保存按钮** → 提示要贴在那个开关下面，
+  //     否则用户看到开关下方一片绿，会以为那是「还没保存」的意思，跑去按钮下面找
+  const [done, setDone] = useState('') // 错误页保存成功
+  const [exposeDone, setExposeDone] = useState('') // 远程管理拨动结果
 
   useEffect(() => {
     getProxyConfig()
@@ -221,11 +229,13 @@ function ErrorPageSettings() {
     }
     setBusy(true)
     setErr('')
-    setDone('')
+    setExposeDone('')
     try {
       const { msg } = await saveExposeAdmin(next)
       setExposeAdmin(next)
-      setDone(msg || '已保存')
+      // 后端回的「已保存」换成说清楚结果的话：这个开关没有保存按钮，
+      // 提示得让用户知道「已经生效了」，而不是「存好了等你下次再点保存」。
+      setExposeDone(msg && !/已保存/.test(msg) ? msg : next ? '已打开，立即生效' : '已关闭，立即生效')
     } catch (e) {
       setErr(e instanceof Error ? e.message : '保存失败')
     } finally {
@@ -264,55 +274,80 @@ function ErrorPageSettings() {
     <Card>
       <CardHeader title="外网访问" />
 
-      <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+      <div className="mb-4 rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted ring-1 ring-line/70">
         别人访问到不存在的域名、或者后端连不上时看到的那页。
         <br />
-        <span className="font-semibold text-slate-600">默认那页什么都不透露</span>
+        <span className="font-semibold text-content">默认那页什么都不透露</span>
         ：不列你配了哪些域名、不说后端地址在哪、也不写这是什么软件 —— 谁都能请求到它，
         写多了等于替人枚举一遍站点。真要查为什么连不上，去「运行日志」看，那里每条都记着。
       </div>
 
       {loading ? (
-        <div className="py-6 text-center text-sm text-slate-400">正在加载…</div>
+        <div className="py-6 text-center text-sm text-muted">正在加载…</div>
       ) : (
-        <form onSubmit={submit} className="space-y-3">
-          <div>
-            <div className={labelCls}>显示方式</div>
-            <ModeSwitch
-              value={mode}
-              onChange={setMode}
-              options={[
-                { value: '', label: '默认（不透露）' },
-                { value: 'custom', label: '自定义 HTML' },
-              ]}
-            />
-            <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
-              {mode === 'custom'
-                ? '整页 HTML，支持两个占位符：{{status}}（404 / 502）、{{message}}（一句说明）。想伪装成什么站点都行。'
-                : '一张中性卡片，只说「没有找到」或「服务暂时不可用」，看不出是谁家的服务。'}
+        <>
+          <form onSubmit={submit} className="space-y-3">
+            <div>
+              <div className={labelCls}>显示方式</div>
+              <ModeSwitch
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: '', label: '默认（不透露）' },
+                  { value: 'custom', label: '自定义 HTML' },
+                ]}
+              />
+              <div className="mt-2 text-[11px] leading-relaxed text-muted">
+                {mode === 'custom'
+                  ? '整页 HTML，支持两个占位符：{{status}}（404 / 502）、{{message}}（一句说明）。想伪装成什么站点都行。'
+                  : '一张中性卡片，只说「没有找到」或「服务暂时不可用」，看不出是谁家的服务。'}
+              </div>
             </div>
-          </div>
 
-          {mode === 'custom' && (
-            <label className="block">
-              <div className={labelCls}>页面内容（HTML）</div>
-              <textarea
-                value={html}
-                onChange={(e) => setHtml(e.target.value)}
-                rows={7}
-                spellCheck={false}
-                placeholder={`<!DOCTYPE html>
+            {mode === 'custom' && (
+              <label className="block">
+                <div className={labelCls}>页面内容（HTML）</div>
+                <textarea
+                  value={html}
+                  onChange={(e) => setHtml(e.target.value)}
+                  rows={7}
+                  spellCheck={false}
+                  placeholder={`<!DOCTYPE html>
 <html><body style="font-family:system-ui;text-align:center;padding:4rem">
   <h1>{{status}}</h1>
   <p>{{message}}</p>
 </body></html>`}
-                className={`${fieldCls} font-mono text-xs`}
-              />
-            </label>
-          )}
+                  className={`${fieldCls} font-mono text-xs`}
+                />
+              </label>
+            )}
 
-          {/* 远程管理。和错误页放一张卡里：它们都是「对外暴露什么」 */}
-          <div className="border-t border-slate-100 pt-3">
+            {err && (
+              <div className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>
+            )}
+            {done && (
+              <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-600">
+                {done}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy || !dirty}
+              className="flex items-center gap-1.5 rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Save className="h-4 w-4" />
+              {busy ? '保存中…' : '保存'}
+            </button>
+          </form>
+
+          {/*
+            远程管理**不在上面那个 form 里**。它是拨一下就生效的开关，和
+            「改完再点保存」是两种交互；放在 form 里会让用户以为必须点一下
+            下面那个「保存」才作数（或者反过来，以为保存按钮也管它）。
+            和错误页放同一张卡，是因为它们回答的是同一个问题：对外暴露什么。
+          */}
+          <div className="mt-4 border-t border-line pt-3">
             <div className="flex items-start gap-3">
               <button
                 type="button"
@@ -322,45 +357,44 @@ function ErrorPageSettings() {
                 onClick={toggleExpose}
                 disabled={busy}
                 className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition ${
-                  exposeAdmin ? 'bg-blue-500' : 'bg-slate-300'
+                  exposeAdmin ? 'bg-blue-500' : 'bg-fill'
                 } ${busy ? 'opacity-60' : ''}`}
               >
                 <span
-                  className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  className={`h-5 w-5 rounded-full bg-surface shadow transition-transform ${
                     exposeAdmin ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
               </button>
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-700">允许通过反代暴露管理后台</div>
-                <div className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-content">
+                    允许通过反代暴露管理后台
+                  </span>
+                  {/* 明说是即时生效的，省得用户去找保存按钮 */}
+                  <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+                    拨动即生效
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] leading-relaxed text-muted">
                   关着的时候，站点后端不能填 Catflap 自己的后台端口 —— 那是防手滑用的。
                   打开后才能用「反代 → 后台」这条路从外面管理。
                   <br />
-                  <span className={exposeAdmin ? 'text-amber-600' : 'text-slate-500'}>
+                  <span className={exposeAdmin ? 'text-amber-600' : 'text-muted'}>
                     {exposeAdmin
                       ? '现在是开着的：登录页对对应站点可见。请确认审计页「永不封禁」名单里有你自己的出口 IP。'
                       : '打开后，登录失败 5 次会自动封禁来源（阈值和时长可在后台配置里改）。'}
                   </span>
                 </div>
+                {exposeDone && (
+                  <div className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-600">
+                    {exposeDone}
+                  </div>
+                )}
               </div>
             </div>
           </div>
-
-          {err && <div className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
-          {done && (
-            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-600">{done}</div>
-          )}
-
-          <button
-            type="submit"
-            disabled={busy || !dirty}
-            className="flex items-center gap-1.5 rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Save className="h-4 w-4" />
-            {busy ? '保存中…' : '保存'}
-          </button>
-        </form>
+        </>
       )}
     </Card>
   )
@@ -377,14 +411,14 @@ function ModeSwitch<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
+    <div className="inline-flex flex-wrap gap-1 rounded-xl bg-surface-2 p-1">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-            value === o.value ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            value === o.value ? 'bg-surface text-blue-600 shadow-sm' : 'text-muted hover:text-content'
           }`}
         >
           {o.label}
@@ -450,7 +484,7 @@ function NetworkSettings() {
     return (
       <Card>
         <CardHeader title="网络" />
-        <div className="py-6 text-center text-sm text-slate-400">{err || '正在加载…'}</div>
+        <div className="py-6 text-center text-sm text-muted">{err || '正在加载…'}</div>
       </Card>
     )
   }
@@ -462,7 +496,7 @@ function NetworkSettings() {
     <Card>
       <CardHeader title="网络" />
 
-      <div className="mb-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+      <div className="mb-4 rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted ring-1 ring-line/70">
         只管打洞这一块：查公网 IP、STUN、UPnP、NAT 检测。DDNS、证书、Webhook 照常走系统网络。
         <br />
         开着 Clash / sing-box 的 TUN 时，不指定出口的连接会被代理接走，查到的就是代理节点的 IP。保持「自动」就能绕开。
@@ -481,12 +515,12 @@ function NetworkSettings() {
               { value: 'custom', label: '指定网卡' },
             ]}
           />
-          <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          <div className="mt-2 text-[11px] leading-relaxed text-muted">
             {ifaceMode === '' &&
               (autoIface ? (
                 <>
                   挑关掉代理后系统本来会走的那张物理网卡，换了网络自动跟着换。现在会选{' '}
-                  <span className="font-mono text-slate-700">{autoIface.name}</span>（{autoIface.localIP}）。
+                  <span className="font-mono text-content">{autoIface.name}</span>（{autoIface.localIP}）。
                 </>
               ) : (
                 <span className="text-rose-500">挑关掉代理后系统本来会走的那张物理网卡。现在一张能用的都没有。</span>
@@ -505,7 +539,7 @@ function NetworkSettings() {
                 <label
                   key={i.name}
                   className={`flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2 text-xs transition ${
-                    iface === i.name ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200 hover:border-slate-300'
+                    iface === i.name ? 'border-blue-300 bg-blue-50/60' : 'border-line hover:border-line'
                   }`}
                 >
                   <input
@@ -515,9 +549,9 @@ function NetworkSettings() {
                     onChange={() => setIface(i.name)}
                     className="accent-blue-500"
                   />
-                  <span className="font-semibold text-slate-700">{i.name}</span>
-                  <span className="font-mono text-slate-500">{i.localIP}</span>
-                  {i.gateway && <span className="text-slate-400">网关 {i.gateway}</span>}
+                  <span className="font-semibold text-content">{i.name}</span>
+                  <span className="font-mono text-muted">{i.localIP}</span>
+                  {i.gateway && <span className="text-muted">网关 {i.gateway}</span>}
                   {i.auto && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-600">自动会选</span>}
                   {i.tunnel && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-600">隧道</span>}
                 </label>
@@ -544,10 +578,10 @@ function NetworkSettings() {
               { value: 'custom', label: '自定义' },
             ]}
           />
-          <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          <div className="mt-2 text-[11px] leading-relaxed text-muted">
             {dnsMode === '' && (
               <>
-                从出口网卡直接问 <span className="font-mono text-slate-700">{net.defaultDns.join('、')}</span>
+                从出口网卡直接问 <span className="font-mono text-content">{net.defaultDns.join('、')}</span>
                 ，绕开代理的 fake-ip。
               </>
             )}
@@ -567,10 +601,10 @@ function NetworkSettings() {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-slate-500">
-          <Network className="h-3.5 w-3.5 text-slate-400" />
+        <div className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted">
+          <Network className="h-3.5 w-3.5 text-muted" />
           现在从
-          <span className="font-mono text-slate-700">
+          <span className="font-mono text-content">
             {net.current.localIP ? `${net.current.name || '系统路由'}（${net.current.localIP}）` : '——'}
           </span>
           出去
@@ -588,7 +622,7 @@ function NetworkSettings() {
             <Save className="h-4 w-4" />
             {loading ? '保存中…' : '保存'}
           </button>
-          <span className="text-[11px] text-slate-400">保存后立刻生效，出口变了会把所有打洞服务重启一遍。</span>
+          <span className="text-[11px] text-muted">保存后立刻生效，出口变了会把所有打洞服务重启一遍。</span>
         </div>
       </form>
     </Card>
@@ -736,7 +770,7 @@ function SoftwareUpdate() {
     return (
       <Card>
         <CardHeader title="软件更新" />
-        <div className="py-6 text-center text-sm text-slate-400">{err || '正在加载…'}</div>
+        <div className="py-6 text-center text-sm text-muted">{err || '正在加载…'}</div>
       </Card>
     )
   }
@@ -754,7 +788,7 @@ function SoftwareUpdate() {
               href={st.releaseUrl}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
+              className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-muted ring-1 ring-line transition hover:bg-surface-2"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               Releases
@@ -774,8 +808,8 @@ function SoftwareUpdate() {
 
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <span className="text-slate-500">当前</span>
-          <span className="font-mono font-semibold text-slate-700">v{st.current}</span>
+          <span className="text-muted">当前</span>
+          <span className="font-mono font-semibold text-content">v{st.current}</span>
           {st.hasUpdate ? (
             <span className="rounded-md bg-rose-50 px-2 py-0.5 text-xs font-bold text-rose-500">
               有新版本 v{st.latest}
@@ -783,7 +817,7 @@ function SoftwareUpdate() {
           ) : (
             st.latest && <span className="text-xs text-emerald-600">已是最新</span>
           )}
-          <span className="text-[11px] text-slate-400">
+          <span className="text-[11px] text-muted">
             {st.checkedAt ? `上次检查 ${new Date(st.checkedAt).toLocaleString()}` : '每天自动检查一次'}
           </span>
         </div>
@@ -794,13 +828,13 @@ function SoftwareUpdate() {
 
         {busy === 'install' && (
           <div className="space-y-1">
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div
                 className="h-full bg-blue-500 transition-all"
                 style={{ width: `${job.state === 'restarting' ? 100 : percent}%` }}
               />
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-muted">
               {job.state === 'restarting'
                 ? '下载完成，正在重启，起来后页面会自动刷新…'
                 : `正在从 ${job.source || '…'} 下载 ${formatMB(job.done)} / ${formatMB(job.total)} MB（${percent}%）`}
@@ -816,10 +850,10 @@ function SoftwareUpdate() {
               </div>
             )}
             {!st.manualReason && busy === '' && (
-              <div className="text-[11px] text-slate-500">点「检查更新」确认后会自动下载并重启。</div>
+              <div className="text-[11px] text-muted">点「检查更新」确认后会自动下载并重启。</div>
             )}
             {st.notes && (
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-slate-50 px-3 py-2.5 font-sans text-[11px] leading-relaxed text-slate-600 ring-1 ring-slate-200/70">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface-2 px-3 py-2.5 font-sans text-[11px] leading-relaxed text-content ring-1 ring-line/70">
                 {st.notes}
               </pre>
             )}
@@ -841,7 +875,7 @@ function SoftwareUpdate() {
               { value: 'custom', label: '自定义' },
             ]}
           />
-          <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          <div className="mt-2 text-[11px] leading-relaxed text-muted">
             {source === '' && '依次试 ghfast.top、gh-proxy.com、gh.llkk.cc，都不通再直连 GitHub。这几个是第三方公益镜像，全失效了就换「自定义」。'}
             {source === 'official' && '只直连 GitHub。开着代理或者在海外用这个。'}
             {source === 'custom' && '填一个 GitHub 加速前缀，下载时拼在 GitHub 地址前面。'}
@@ -863,7 +897,7 @@ function SoftwareUpdate() {
                   !custom.trim() ||
                   (st.config.source === 'custom' && custom.trim() === st.config.custom)
                 }
-                className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-50"
+                className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-content ring-1 ring-line transition hover:bg-surface-2 disabled:opacity-50"
               >
                 <Save className="h-3.5 w-3.5" />
                 保存
@@ -876,7 +910,7 @@ function SoftwareUpdate() {
         <div>
           <div className={labelCls}>手动上传更新</div>
           {st.uploadReason ? (
-            <div className="text-[11px] text-slate-500">{st.uploadReason}</div>
+            <div className="text-[11px] text-muted">{st.uploadReason}</div>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               <input
@@ -893,12 +927,12 @@ function SoftwareUpdate() {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={busy !== ''}
-                className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-60"
+                className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-content ring-1 ring-line transition hover:bg-surface-2 disabled:opacity-60"
               >
                 <Upload className="h-3.5 w-3.5" />
                 {busy === 'upload' ? '处理中…' : '选择程序文件'}
               </button>
-              <span className="text-[11px] leading-relaxed text-slate-500">
+              <span className="text-[11px] leading-relaxed text-muted">
                 连不上 GitHub 或想退回老版本时用。只认这台机器能跑的 Catflap
                 {st.asset && (
                   <>

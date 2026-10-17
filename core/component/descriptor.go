@@ -7,8 +7,15 @@ package component
 //
 // 它由注册表从组件实例上探测可选接口**自动拼出来**，组件不需要自己实现 Descriptor。
 type Descriptor struct {
-	// Name 组件名。
+	// Name 组件名。机器名，与 config/components.json 里的键一致。
 	Name string `json:"name"`
+
+	// Title 给人看的名字（实现了 Describer 时非空）。没有对应页面的组件
+	// 靠它显示，否则界面上就只剩机器名了。
+	Title string `json:"title,omitempty"`
+
+	// Summary 一句话说明这个功能是干什么的（实现了 Describer 时非空）。
+	Summary string `json:"summary,omitempty"`
 
 	// Schema 配置结构；组件未实现 SchemaProvider 时为 nil。
 	Schema *Schema `json:"schema,omitempty"`

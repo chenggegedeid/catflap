@@ -134,6 +134,15 @@ func (s *Scheduler) loop() {
 
 // scan 从 Runtime 取配置快照，把到期（或强扫）的记录投递到对应服务商的队列
 func (s *Scheduler) scan(force bool) {
+	// 组件被关掉：一条都不投。
+	//
+	// 这里是 scan 而不是 loop，是为了把「定时扫」和「事件强制扫」两条路一起
+	// 挡住 —— 只挡一处的话，公网 IP 变化事件（Trigger）仍会漏进来同步一轮。
+	// 关掉之后具体为什么不动，见 ddns.Enabled 的注释。
+	if !Enabled() {
+		return
+	}
+
 	cfg := Runtime.Snapshot()
 	now := time.Now()
 	interval := normalInterval(cfg.IntervalSec)

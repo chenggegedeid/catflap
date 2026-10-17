@@ -1,13 +1,204 @@
 @import 'tailwindcss';
 
+/*
+ * 主题：语义色 + 色板兜底
+ *
+ * 深色挂在 .dark 类上（不是 prefers-color-scheme），因为要支持手动选三档：
+ * 跟随系统 / 浅色 / 深色。跟随系统那一档由 JS 决定要不要加 .dark。
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
-  color: #1e293b;
-  background: #f6f8fc;
+  /* ---- slate 色板：浅色 ----
+     现存代码里有一千多处 slate-*，逐个改代价太大。
+     这里把它们接到变量上，深色模式下整条色板反转 —— 不用改 tsx 就能适配。 */
+  --c-50: #f8fafc;
+  --c-100: #f1f5f9;
+  --c-200: #e2e8f0;
+  --c-300: #cbd5e1;
+  --c-400: #94a3b8;
+  --c-500: #64748b;
+  --c-600: #475569;
+  --c-700: #334155;
+  --c-800: #1e293b;
+  --c-900: #0f172a;
+  --c-950: #020617;
+
+  /* ---- 语义色：浅色 ----
+     新代码（以及按 C 计划重构的页面）用这些，不再写具体色号。 */
+  --c-bg: #f6f8fc;
+  --c-surface: #ffffff;
+  --c-surface-2: #f8fafc;
+  --c-content: #334155;
+  --c-muted: #94a3b8;
+  --c-line: #e2e8f0;
+  --c-fill: #e2e8f0;
+  /* inverse = 反色块（深色底上的白字，如 toast、深色徽章）。两个模式都保持深色底，
+     否则反转后白字会看不见。 */
+  --c-inverse: #1e293b;
+  --c-on-inverse: #ffffff;
+
+  /* ---- 状态色：浅色（= Tailwind 原值，接出来是为了深色下能反转） ---- */
+  --c-rose-50: #fff1f2;
+  --c-rose-100: #ffe4e6;
+  --c-rose-500: #f43f5e;
+  --c-rose-600: #e11d48;
+  --c-rose-700: #be123c;
+  --c-emerald-50: #ecfdf5;
+  --c-emerald-100: #d1fae5;
+  --c-emerald-500: #10b981;
+  --c-emerald-600: #059669;
+  --c-emerald-700: #047857;
+  --c-blue-50: #eff6ff;
+  --c-blue-100: #dbeafe;
+  --c-blue-500: #3b82f6;
+  --c-blue-600: #2563eb;
+  --c-blue-700: #1d4ed8;
+  --c-amber-50: #fffbeb;
+  --c-amber-100: #fef3c7;
+  --c-amber-600: #d97706;
+  --c-amber-700: #b45309;
+  --c-violet-50: #f5f3ff;
+  --c-violet-500: #8b5cf6;
+  --c-violet-600: #7c3aed;
+  --c-indigo-50: #eef2ff;
+  --c-indigo-400: #818cf8;
+  --c-indigo-500: #6366f1;
+  --c-sky-50: #f0f9ff;
+  --c-sky-200: #bae6fd;
+  --c-teal-50: #f0fdfa;
+  --c-orange-400: #fb923c;
+
+  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui,
+    sans-serif;
+  color: var(--c-content);
+  background: var(--c-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.dark {
+  /* ---- slate 色板：深色（反转） ----
+     50↔900、200（边框）↔700、700（正文）↔200。
+     这样 text-slate-700 在深色下自动变成浅色字，对比度就是对的。 */
+  --c-50: #0f172a;
+  --c-100: #1e293b;
+  --c-200: #334155;
+  --c-300: #475569;
+  --c-400: #64748b;
+  --c-500: #94a3b8;
+  --c-600: #cbd5e1;
+  --c-700: #e2e8f0;
+  --c-800: #f1f5f9;
+  --c-900: #f8fafc;
+  --c-950: #f8fafc;
+
+  /* ---- 语义色：深色 ---- */
+  --c-bg: #0b1220;
+  --c-surface: #1e293b;
+  --c-surface-2: #172033;
+  --c-content: #e2e8f0;
+  --c-muted: #94a3b8;
+  --c-line: #334155;
+  --c-fill: #334155;
+  --c-inverse: #334155;
+  --c-on-inverse: #ffffff;
+
+  /* ---- 状态色：深色 ----
+     浅底（50/100）变深、深字（600/700）变浅 —— 这样
+     "bg-rose-50 + text-rose-600" 这种组合在深色下变成深红底浅红字，
+     对比度和浅色模式一样是对的。 */
+  --c-rose-50: #4c0519;
+  --c-rose-100: #7f1d1d;
+  --c-rose-500: #fb7185;
+  --c-rose-600: #fb7185;
+  --c-rose-700: #fda4af;
+  --c-emerald-50: #022c22;
+  --c-emerald-100: #064e3b;
+  --c-emerald-500: #34d399;
+  --c-emerald-600: #34d399;
+  --c-emerald-700: #6ee7b7;
+  --c-blue-50: #172554;
+  --c-blue-100: #1e3a8a;
+  --c-blue-500: #60a5fa;
+  --c-blue-600: #60a5fa;
+  --c-blue-700: #93c5fd;
+  --c-amber-50: #451a03;
+  --c-amber-100: #78350f;
+  --c-amber-600: #fbbf24;
+  --c-amber-700: #fcd34d;
+  --c-violet-50: #2e1065;
+  --c-violet-500: #a78bfa;
+  --c-violet-600: #a78bfa;
+  --c-indigo-50: #1e1b4b;
+  --c-indigo-400: #a5b4fc;
+  --c-indigo-500: #818cf8;
+  --c-sky-50: #0c4a6e;
+  --c-sky-200: #7dd3fc;
+  --c-teal-50: #134e4a;
+  --c-orange-400: #fdba74;
+}
+
+/*
+ * inline 很关键：让工具类直接引用变量（而不是把值复制一份），
+ * 这样 .dark 一切换，整条色板和语义色就跟着变。
+ */
+@theme inline {
+  /* 兜底：把 Tailwind 内置的 slate 接到变量上 */
+  --color-slate-50: var(--c-50);
+  --color-slate-100: var(--c-100);
+  --color-slate-200: var(--c-200);
+  --color-slate-300: var(--c-300);
+  --color-slate-400: var(--c-400);
+  --color-slate-500: var(--c-500);
+  --color-slate-600: var(--c-600);
+  --color-slate-700: var(--c-700);
+  --color-slate-800: var(--c-800);
+  --color-slate-900: var(--c-900);
+  --color-slate-950: var(--c-950);
+
+  /* 语义色（C 计划的目标用法） */
+  --color-surface: var(--c-surface);
+  --color-surface-2: var(--c-surface-2);
+  --color-content: var(--c-content);
+  --color-muted: var(--c-muted);
+  --color-line: var(--c-line);
+  --color-fill: var(--c-fill);
+  --color-inverse: var(--c-inverse);
+  --color-on-inverse: var(--c-on-inverse);
+
+  /* 状态色：同样接到变量上 */
+  --color-rose-50: var(--c-rose-50);
+  --color-rose-100: var(--c-rose-100);
+  --color-rose-500: var(--c-rose-500);
+  --color-rose-600: var(--c-rose-600);
+  --color-rose-700: var(--c-rose-700);
+  --color-emerald-50: var(--c-emerald-50);
+  --color-emerald-100: var(--c-emerald-100);
+  --color-emerald-500: var(--c-emerald-500);
+  --color-emerald-600: var(--c-emerald-600);
+  --color-emerald-700: var(--c-emerald-700);
+  --color-blue-50: var(--c-blue-50);
+  --color-blue-100: var(--c-blue-100);
+  --color-blue-500: var(--c-blue-500);
+  --color-blue-600: var(--c-blue-600);
+  --color-blue-700: var(--c-blue-700);
+  --color-amber-50: var(--c-amber-50);
+  --color-amber-100: var(--c-amber-100);
+  --color-amber-600: var(--c-amber-600);
+  --color-amber-700: var(--c-amber-700);
+  --color-violet-50: var(--c-violet-50);
+  --color-violet-500: var(--c-violet-500);
+  --color-violet-600: var(--c-violet-600);
+  --color-indigo-50: var(--c-indigo-50);
+  --color-indigo-400: var(--c-indigo-400);
+  --color-indigo-500: var(--c-indigo-500);
+  --color-sky-50: var(--c-sky-50);
+  --color-sky-200: var(--c-sky-200);
+  --color-teal-50: var(--c-teal-50);
+  --color-orange-400: var(--c-orange-400);
 }
 
 * {
@@ -42,4 +233,11 @@ textarea {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(15, 23, 42, 0.22);
+}
+/* 深色下滚动条要反过来（浅色才看得见） */
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(248, 250, 252, 0.16);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(248, 250, 252, 0.28);
 }

@@ -29,6 +29,12 @@ type proxyComponent struct {
 
 func (proxyComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (proxyComponent) Title() string { return "反向代理" }
+
+// Summary 见 core/component.Describer。
+func (proxyComponent) Summary() string { return "按域名把请求转发到内网服务" }
+
 // Init 读配置、建站点表、开监听。
 //
 // 监听失败不算初始化失败（InitProxy 里已处理）：站点配置都在，用户到

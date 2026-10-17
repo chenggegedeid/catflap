@@ -2,13 +2,16 @@ package audit_api
 
 import (
 	"fmt"
+	"net"
 	"regexp"
+	"sort"
 
 	"strconv"
 	"strings"
 
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/audit"
+	"github.com/chenggegedeid/catflap/modules/audit/geo"
 	"github.com/chenggegedeid/catflap/modules/proxy"
 	proxymodel "github.com/chenggegedeid/catflap/modules/proxy/model"
 	"github.com/chenggegedeid/catflap/modules/stun"
@@ -72,20 +75,225 @@ func (AuditApi) AuditConfigView(c *gin.Context) {
 	}, c)
 }
 
-// AuditIPsView 按 IP 的统计列表
+// IPView IP 统计 + 归属地。
+//
+// 归属地是**查询时现算**的，不存进 ipstats.json：
+//   - 库每月更新，存下来就是一份会过期的副本；
+//   - 归属地不影响任何判定（封禁、可疑判定都只看 IP 自身），
+//     丢了一份假的反而更糟。
+//
+// 内嵌 IPStat 而不是把字段抄一遍：抄一遍的话以后给 IPStat 加字段，
+// 这里会静默漏掉，界面上就是某个数字永远为 0。
+type IPView struct {
+	audit.IPStat
+	// Geo 归属地，例如「江苏 · 南京」「美国」；私有地址是「内网」
+	Geo geo.Info `json:"geo"`
+	// Attack 这个 IP 最像哪一种攻击（按它扫过的路径判定）
+	Attack string `json:"attack"`
+}
+
+// AuditIPsView 按 IP 的统计列表。
+//
+// 支持分页：被扫的时候 IP 数能到几千，一屏塞不下，全塞进一张表既卡又没法看。
+// 返回 total 让界面能算页码。
 func (AuditApi) AuditIPsView(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort", "errors")
 	onlySuspicious := c.Query("suspicious") == "1"
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	if limit <= 0 {
-		limit = 100
+	keyword := strings.TrimSpace(c.Query("q"))
+	// 按哪天看。空 = 累计（跨天累加的那份），有值 = 只算那一天
+	day := strings.TrimSpace(c.Query("day"))
+	if day != "" && !validDay.MatchString(day) {
+		res.FailWithMsg("日期格式不对（应为 YYYY-MM-DD）", c)
+		return
 	}
 
-	list := audit.ListIPStats(sortBy, onlySuspicious, limit)
-	if list == nil {
-		list = []audit.IPStat{}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit <= 0 {
+		limit = 50
 	}
-	res.OkWithData(gin.H{"list": list}, c)
+	// 上限压住：界面上限是「全部」，但那也得有个头，不然一次拉一万条直接卡死
+	if limit > 1000 {
+		limit = 1000
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page <= 0 {
+		page = 1
+	}
+
+	// 先取全量（已经按 sortBy 排好），再做关键词过滤与分页。
+	// 为什么不把过滤下推到 ListIPStats：那张表按 IP 索引，按归属地/攻击类型
+	// 过滤它做不到 —— 归属地不在数据结构里。
+	// 两种来源：累计值（默认）或某一天的明细（传了 day）
+	var all []audit.IPStat
+	if day != "" {
+		var err error
+		if all, err = audit.ListIPStatsByDay(day, sortBy, onlySuspicious, 0); err != nil {
+			// 那天没有记录不是错误 —— 给空列表，界面显示"这天没有访问"
+			all = nil
+		}
+	} else {
+		all = audit.ListIPStats(sortBy, onlySuspicious, 0)
+	}
+
+	views := make([]IPView, 0, len(all))
+	for _, st := range all {
+		v := IPView{IPStat: st, Geo: geo.Lookup(st.IP)}
+		v.Attack = attackOfIP(st)
+		if keyword != "" && !matchIPView(v, keyword) {
+			continue
+		}
+		views = append(views, v)
+	}
+
+	total := len(views)
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	res.OkWithData(gin.H{
+		"list":  views[start:end],
+		"total": total,
+		"page":  page,
+		"limit": limit,
+		"day":   day,
+		// 有访问记录的那些日期，给「按日期查看」的下拉用
+		"days": audit.Days(),
+		// 归属地库没加载成功时界面要把这一列藏起来，而不是显示一列「未知」
+		"geoEnabled": geo.Enabled(),
+	}, c)
+}
+
+// attackOfIP 这个 IP 最像哪一类攻击。
+//
+// 看它扫过的路径：一个 IP 可能同时扫 .env 和 wp-login，按「最严重的那个」
+// 归类 —— 界面上一行只能显示一个标签，显示最该关注的那个。
+func attackOfIP(st audit.IPStat) string {
+	if st.Errors == 0 {
+		return ""
+	}
+	// 按危害从高到低找第一个命中的类别
+	best := audit.AttackOther
+	for _, p := range st.Paths {
+		k := audit.ClassifyAttack(audit.Record{Path: p, Status: 404})
+		if k == audit.AttackSecret || k == audit.AttackAdmin || k == audit.AttackInject {
+			return k.Label()
+		}
+		if k == audit.AttackScan {
+			best = audit.AttackScan
+		}
+	}
+	if st.Errors >= 50 {
+		// 错误多但路径都没特征：多半就是无差别扫描
+		return audit.AttackScan.Label()
+	}
+	return best.Label()
+}
+
+// matchIPView 关键词是否命中这个 IP 行。
+//
+// 支持搜 IP 本身、归属地、主机名、扫过的路径 —— 「哪个 IP 在扫 .env」
+// 和「有没有国内的 IP 在打我」都是很自然的问法。
+func matchIPView(v IPView, kw string) bool {
+	kw = strings.ToLower(kw)
+	if strings.Contains(strings.ToLower(v.IP), kw) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(v.Geo.Label), kw) ||
+		strings.Contains(strings.ToLower(v.Geo.Country), kw) {
+		return true
+	}
+	for _, p := range v.Paths {
+		if strings.Contains(strings.ToLower(p), kw) {
+			return true
+		}
+	}
+	for _, h := range v.Hosts {
+		if strings.Contains(strings.ToLower(h), kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// AuditOverviewView 页面顶部那一整块：指标卡 + 趋势 + 攻击类型 + 地区 + 站点。
+//
+// 合成一个接口而不是拆成五六个：
+//   - 它们要**同时**刷新，拆开会出现「指标卡是这一分钟的、趋势图是上一分钟的」
+//     这种对不上的画面；
+//   - 打开审计页就是一次请求，比分六次快得多。
+//
+// 代价是这个接口比别的重一点（要读最近 24 小时的明细来算唯一 IP 数）。
+// 已经做了两件事压住成本：按小时的聚合有缓存（缺了自动从明细重算），
+// 唯一 IP 只读跨度内的那 1–2 个文件。
+func (AuditApi) AuditOverviewView(c *gin.Context) {
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	if hours <= 0 || hours > 168 {
+		// 上限一周：再长就没什么意义，而且明细读得慢
+		hours = 24
+	}
+
+	// 地区分布：按 IP 的累计统计里取（那里已经有所有 IP），按国家聚合
+	countries := geoRanking()
+
+	res.OkWithData(gin.H{
+		"overview":    audit.BuildOverview(hours),
+		"trends":      audit.Trends(hours),
+		"attackKinds": audit.AttackKinds(hours),
+		"sites":       audit.TopSites(hours, 8),
+		"countries":   countries,
+		"geoEnabled":  geo.Enabled(),
+	}, c)
+}
+
+// CountryCount 一个国家/地区的访问量。
+type CountryCount struct {
+	Name     string `json:"name"`
+	Requests int64  `json:"requests"`
+	IPs      int64  `json:"ips"`
+}
+
+// geoRanking 按国家聚合。
+//
+// 用按 IP 的累计统计而不是最近 24 小时的明细：明细里一个 IP 会出现几万次，
+// 逐条查归属地太浪费；而「哪些国家在访问我」这种问题看累计值更合适。
+func geoRanking() []CountryCount {
+	stats := audit.ListIPStats("requests", false, 0)
+	agg := map[string]*CountryCount{}
+	for _, st := range stats {
+		info := geo.Lookup(st.IP)
+		name := info.Country
+		if name == "" {
+			// 内网 / 未知要单独成组，不能混进「未知」里跟国外流量一起算
+			name = "内网/未知"
+		}
+		c := agg[name]
+		if c == nil {
+			c = &CountryCount{Name: name}
+			agg[name] = c
+		}
+		c.Requests += st.Requests
+		c.IPs++
+	}
+
+	out := make([]CountryCount, 0, len(agg))
+	for _, c := range agg {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Requests != out[j].Requests {
+			return out[i].Requests > out[j].Requests
+		}
+		return out[i].Name < out[j].Name
+	})
+	if len(out) > 12 {
+		out = out[:12]
+	}
+	return out
 }
 
 // validDay 日期参数是否合法（YYYY-MM-DD）。
@@ -163,6 +371,19 @@ type BlockRequest struct {
 	Minutes int `json:"minutes"`
 }
 
+// WhitelistRequest 保存"永不封禁"名单。
+//
+// 这是**准入豁免**，不是"只准这些 IP 访问"—— 后者已经被移除了
+// （站点级访问控制取消，见 CHANGELOG 2.5.0）。
+// 含义：列在这里的来源即使触发了自动拉黑规则，也绝不会被封。
+type WhitelistRequest struct {
+	Whitelist          []string `json:"whitelist"`
+	AutoBlock          bool     `json:"autoBlock"`
+	AutoBlockThreshold int64    `json:"autoBlockThreshold"`
+	AutoBlockMinutes   int      `json:"autoBlockMinutes"`
+	TrustedProxies     []string `json:"trustedProxies"`
+}
+
 // AuditBlockView 封禁一个 IP（或网段）
 //
 // 封禁本身是**全局生效**的（proxy 入口会查 audit.IsBlocked，见 handler.go）。
@@ -184,8 +405,39 @@ func (AuditApi) AuditBlockView(c *gin.Context) {
 	res.OkWithMsg("已封禁", c)
 }
 
-// syncBlockToServices 把封禁的 IP 写进"它访问过的服务"的门禁规则。
+// AuditWhitelistView 保存"永不封禁"名单。
 //
+// 前端把名单整份传回来覆盖 —— 白名单是配置项（不是累计事件），
+// 整份覆盖最符合直觉：界面上删掉一条就是真的删了。
+//
+// 顺带保存自动拉黑的设置：它们在同一个表单里，一起存省得两次请求。
+func (AuditApi) AuditWhitelistView(c *gin.Context) {
+	cr := middleware.GetBindRequest[WhitelistRequest](c)
+
+	cleaned := nonNil(trimAll(cr.Whitelist))
+	// 网段要先校验：写错一个字符不报错的话，用户会以为"加了白名单怎么还是被封"
+	for _, w := range cleaned {
+		if _, _, e1 := net.ParseCIDR(w); e1 != nil && net.ParseIP(w) == nil {
+			res.FailWithMsg(fmt.Sprintf("这条不是合法的 IP 或网段：%s", w), c)
+			return
+		}
+	}
+
+	err := audit.Runtime.Update(func(cfg *audit.Config) error {
+		cfg.Whitelist = cleaned
+		cfg.AutoBlock = cr.AutoBlock
+		cfg.AutoBlockThreshold = cr.AutoBlockThreshold
+		cfg.AutoBlockMinutes = cr.AutoBlockMinutes
+		cfg.TrustedProxies = nonNil(trimAll(cr.TrustedProxies))
+		return nil
+	})
+	if err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithMsg("已保存", c)
+}
+
 // 只动两类服务：
 //   - 门禁模式为空（不限制）→ 改成黑名单模式并加入这条 IP
 //   - 已经是黑名单 → 追加这条 IP（去重）
@@ -466,6 +718,10 @@ func (AuditApi) AuditLoginsView(c *gin.Context) {
 	if limit <= 0 {
 		limit = 100
 	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page <= 0 {
+		page = 1
+	}
 	// 同 AuditRecordsView：日期要拼进文件路径，先校验再往下传
 	if day != "" && !validDay.MatchString(day) {
 		res.FailWithMsg("日期格式不对（应为 YYYY-MM-DD）", c)
@@ -481,14 +737,36 @@ func (AuditApi) AuditLoginsView(c *gin.Context) {
 		day = days[0]
 	}
 
-	list, err := audit.ReadLoginEvents(day, ip, limit)
+	// 先取当天全量再切片。
+	// ReadLoginEvents 的 limit 是"取前 N 条"，直接传 limit 的话翻到第 2 页
+	// 只会再拿到同一批前 N 条 —— 看起来像翻页没生效。
+	all, err := audit.ReadLoginEvents(day, ip, 0)
 	if err != nil {
 		// 那天没有登录记录，不是错误
-		res.OkWithData(gin.H{"list": []audit.LoginEvent{}, "day": day}, c)
+		res.OkWithData(gin.H{"list": []audit.LoginEvent{}, "day": day, "days": audit.LoginDays()}, c)
 		return
 	}
-	if list == nil {
-		list = []audit.LoginEvent{}
+	if all == nil {
+		all = []audit.LoginEvent{}
 	}
-	res.OkWithData(gin.H{"list": list, "day": day, "summary": audit.SummarizeLogins(day)}, c)
+
+	total := len(all)
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	res.OkWithData(gin.H{
+		"list":  all[start:end],
+		"day":   day,
+		"days":  audit.LoginDays(),
+		"total": total,
+		"page":  page,
+		"limit": limit,
+		// summary 是**当天**的汇总，不随分页变化 —— 它是"这天总共怎样"的答案
+		"summary": audit.SummarizeLogins(day),
+	}, c)
 }

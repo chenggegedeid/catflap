@@ -1,6 +1,8 @@
 package audit
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -25,17 +27,26 @@ const (
 	 */
 	ConfigPath = "config/audit.json"
 	configPath = ConfigPath
-	auditDir   = "data/access"
-	// ipStatsPath 按 IP 的聚合。这个要长期留着（累计值），不能按天删。
-	ipStatsPath = "data/access/ipstats.json"
 
 	defaultKeepDays  = 30
 	defaultMaxFileMB = 32
+
 	// maxPathsPerIP 每个 IP 最多记多少条路径。无上限的话被扫一次
 	// 就能让这个文件涨到几十 MB。
 	maxPathsPerIP = 30
 	maxHostsPerIP = 10
 	maxUAsPerIP   = 5
+)
+
+// 下面两个是 var 而不是 const：测试要把它们指到临时目录。
+//
+// 与 core/component.StatePath 同一个理由 —— 否则测试会在源码树里
+// 建 data/access/ 并写进真记录。生产代码不要改它们。
+var (
+	// auditDir 按天存放访问明细的目录
+	auditDir = "data/access"
+	// ipStatsPath 按 IP 的聚合。这个要长期留着（累计值），不能按天删。
+	ipStatsPath = "data/access/ipstats.json"
 )
 
 // ===================== 运行时 =====================
@@ -61,10 +72,24 @@ type runtime struct {
 	// ipStatsDirty 有变更待落盘
 	ipStatsDirty bool
 
-	// blocked 全局封禁表。**常驻内存且无锁读**（热路径上每个请求都要查）
+	// blocked 全局封禁表，按**单个 IP** 精确匹配。
+	// **常驻内存且无锁读**（热路径上每个请求都要查）。
 	blocked map[string]BlockEntry
+	// blockedNets 封禁表里那些写成**网段**的条目。
+	//
+	// 分开存是为了快：绝大部分封禁条目是自动拉黑产生的单个 IP（O(1) 命中），
+	// 只有用户手工填的网段才需要挨个 Contains（O(n)，但通常只有几条）。
+	// 以前这里只有 blocked 一个 map，把 "10.0.0.0/8" 当普通字符串 key 存进去，
+	// 匹配时拿 "10.0.0.5" 去查 → 永远查不到。**填网段会存进去但不生效**。
+	blockedNets []blockedNet
 	// whitelist 永不封禁的名单，同上
 	whitelist []*net.IPNet
+}
+
+// blockedNet 一条网段封禁
+type blockedNet struct {
+	net   *net.IPNet
+	entry BlockEntry
 }
 
 // Snapshot 配置快照
@@ -149,10 +174,21 @@ func ReadConfig() (Config, error) {
 // rebuildIndexes 把封禁表与白名单重建进内存索引
 func rebuildIndexes(cfg *Config) {
 	blocked := make(map[string]BlockEntry, len(cfg.Blocks))
+	var nets []blockedNet
 	now := time.Now()
 	for _, b := range cfg.Blocks {
 		if b.Expired(now) {
 			continue // 过期的直接不进索引（但配置里留着，用户能看到历史）
+		}
+		// 写成网段的（带 /）走 Contains 匹配，其余当单个 IP 精确匹配。
+		// 注意不能对所有条目都用 Contains：那样 "1.2.3.4" 会被当成
+		// 1.2.3.4/32，语义不变但白白多一次遍历；而真正的问题在下面 ——
+		// 网段必须走 Contains，否则封网段等于白封。
+		if strings.Contains(b.IP, "/") {
+			if n := parseCIDROrIP(b.IP); n != nil {
+				nets = append(nets, blockedNet{net: n, entry: b})
+				continue
+			}
 		}
 		blocked[b.IP] = b
 	}
@@ -166,6 +202,7 @@ func rebuildIndexes(cfg *Config) {
 
 	Runtime.mu.Lock()
 	Runtime.blocked = blocked
+	Runtime.blockedNets = nets
 	Runtime.whitelist = wl
 	Runtime.mu.Unlock()
 }
@@ -180,8 +217,22 @@ func IsBlocked(ip string) (BlockEntry, bool) {
 	if matchAny(Runtime.whitelist, ip) {
 		return BlockEntry{}, false
 	}
-	b, ok := Runtime.blocked[ip]
-	return b, ok
+
+	// 单个 IP 的封禁：绝大多数情况走这条路（自动拉黑都是单 IP），O(1)
+	if b, ok := Runtime.blocked[ip]; ok {
+		return b, true
+	}
+
+	// 网段封禁：只在上面没命中时才挨个比，通常就几条
+	if parsed := net.ParseIP(ip); parsed != nil {
+		for _, bn := range Runtime.blockedNets {
+			if bn.net.Contains(parsed) {
+				return bn.entry, true
+			}
+		}
+	}
+
+	return BlockEntry{}, false
 }
 
 // ===================== 写访问记录 =====================
@@ -199,6 +250,10 @@ func RecordAccess(r Record) {
 	}
 
 	updateIPStats(r)
+
+	// 同时累加按天/按小时的聚合。两个维度在同一处更新，
+	// 分开写迟早会出现「明细里有、趋势图里没有」这种对不上的情况
+	AddToDayStat(r)
 
 	Runtime.accumMu.Lock()
 	Runtime.accum = append(Runtime.accum, r)
@@ -271,6 +326,7 @@ func addCapped(list []string, v string, max int) []string {
 func Flush() {
 	flushRecords()
 	flushIPStats()
+	SaveDayStats()
 }
 
 func flushRecords() {
@@ -394,6 +450,81 @@ func ListIPStats(sortBy string, onlySuspicious bool, limit int) []IPStat {
 	}
 	Runtime.mu.RUnlock()
 
+	sortIPStats(out, sortBy)
+
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// ListIPStatsByDay 从**某一天的明细**聚合出按 IP 的统计。
+//
+// 和 ListIPStats 的区别：那个读的是累计值（ipstats.json，跨天累计），
+// 这个只读指定的那一天 —— 界面上的「按日期查看」要的是后者。
+//
+// 明细是真相，所以这里现算，不缓存：某天的数据不会变了，
+// 缓存一份反而要考虑失效问题。
+func ListIPStatsByDay(day string, sortBy string, onlySuspicious bool, limit int) ([]IPStat, error) {
+	recs, err := ReadDay(day, "", 0)
+	if err != nil {
+		return nil, err
+	}
+
+	acc := make(map[string]*IPStat, len(recs))
+	for _, r := range recs {
+		if r.IP == "" {
+			continue
+		}
+		st := acc[r.IP]
+		if st == nil {
+			st = &IPStat{IP: r.IP, FirstSeen: r.Time}
+			acc[r.IP] = st
+		}
+		st.LastSeen = r.Time
+		st.Requests++
+		st.BytesIn += r.BytesIn
+		st.BytesOut += r.BytesOut
+		if r.isError() {
+			st.Errors++
+		}
+		st.Paths = addCapped(st.Paths, r.Path, maxPathsPerIP)
+		st.Hosts = addCapped(st.Hosts, r.Host, maxHostsPerIP)
+		if r.UserAgent != "" {
+			st.UserAgents = addCapped(st.UserAgents, r.UserAgent, maxUAsPerIP)
+		}
+	}
+
+	out := make([]IPStat, 0, len(acc))
+	for _, st := range acc {
+		// 穿透访问没有 path/host/UA，一条都没记上时这三个是 nil ——
+		// 落盘成 null 前端取 .length 会崩（这个坑以前踩过）
+		if st.Paths == nil {
+			st.Paths = []string{}
+		}
+		if st.Hosts == nil {
+			st.Hosts = []string{}
+		}
+		if st.UserAgents == nil {
+			st.UserAgents = []string{}
+		}
+		if onlySuspicious && !st.Suspicious() {
+			continue
+		}
+		out = append(out, *st)
+	}
+
+	sortIPStats(out, sortBy)
+
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// sortIPStats 排序规则：累计和按天两种来源共用同一套，
+// 否则同一个「按异常数」在两种视图下顺序不一样，看着像错了。
+func sortIPStats(out []IPStat, sortBy string) {
 	switch sortBy {
 	case "requests":
 		sort.Slice(out, func(i, j int) bool { return out[i].Requests > out[j].Requests })
@@ -407,11 +538,6 @@ func ListIPStats(sortBy string, onlySuspicious bool, limit int) []IPStat {
 			return out[i].Requests > out[j].Requests
 		})
 	}
-
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out
 }
 
 // GetIPStat 查单个 IP
@@ -425,7 +551,20 @@ func GetIPStat(ip string) (IPStat, bool) {
 	return *st, true
 }
 
-// ReadDay 读某天的访问明细（给"展开看某个 IP 干了什么"用）
+// ReadDay 读某天的访问明细（给"展开看某个 IP 干了什么"用）。
+//
+// # 逐行解析，坏行跳过
+//
+// 以前这里是一个 json.Decoder 循环，遇到解析错误就 break。看起来没问题
+// （文件是自己写的，怎么会坏？），但实测踩到了：只要**某一行**的字段
+// 格式对不上（比如 time 少了时区，`2026-10-17T11:31:03.98` 而不是
+// `...+08:00`），decoder 就从那一行开始停住，**后面所有记录静默丢失**。
+//
+// 后果是「明细明明有、审计页只显示一半」，而且没有任何报错 ——
+// 这种问题几乎不可能从现象倒推原因。
+//
+// 现在按行扫，单行失败就记一笔日志然后继续。一行坏数据不该让一整天的
+// 记录都读不出来。
 func ReadDay(day string, ipFilter string, limit int) ([]Record, error) {
 	name := filepath.Join(auditDir, day+".jsonl")
 	f, err := os.Open(name)
@@ -435,16 +574,36 @@ func ReadDay(day string, ipFilter string, limit int) ([]Record, error) {
 	defer f.Close()
 
 	var out []Record
-	dec := json.NewDecoder(f)
-	for {
+	sc := bufio.NewScanner(f)
+	// 单条记录带着 UA、路径，正常几百字节；给到 1MB 足够，
+	// 超过这个基本是文件损坏而不是正常数据
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+
+	lineNo, badLines := 0, 0
+	var firstErr error
+	for sc.Scan() {
+		lineNo++
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
 		var r Record
-		if err := dec.Decode(&r); err != nil {
-			break
+		if err := json.Unmarshal(line, &r); err != nil {
+			badLines++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("第 %d 行：%w", lineNo, err)
+			}
+			continue
 		}
 		if ipFilter != "" && r.IP != ipFilter {
 			continue
 		}
 		out = append(out, r)
+	}
+
+	if badLines > 0 {
+		logrus.Warnf("[audit] %s 有 %d 行无法解析（已跳过，其余照常读出），第一条错误：%v",
+			day, badLines, firstErr)
 	}
 
 	// 新的在前

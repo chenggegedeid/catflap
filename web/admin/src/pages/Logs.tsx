@@ -25,8 +25,8 @@ const levelStyle: Record<string, string> = {
   warning: 'bg-amber-50 text-amber-600',
   warn: 'bg-amber-50 text-amber-600',
   info: 'bg-blue-50 text-blue-600',
-  debug: 'bg-slate-100 text-slate-500',
-  trace: 'bg-slate-100 text-slate-500',
+  debug: 'bg-surface-2 text-muted',
+  trace: 'bg-surface-2 text-muted',
 }
 
 const levelFilters = [
@@ -140,7 +140,7 @@ export function Logs() {
     <div className="space-y-5">
       <Card className="!p-0">
         <div className="px-5 pt-4">
-          <div className="mb-1 text-xs text-slate-400">按分类折叠，只显示异常数量；点开看详情</div>
+          <div className="mb-1 text-xs text-muted">按分类折叠，只显示异常数量；点开看详情</div>
           <CardHeader
             title="日志"
             action={
@@ -151,7 +151,7 @@ export function Logs() {
                     setDay(e.target.value)
                     setExpanded('')
                   }}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400"
+                  className="rounded-lg border border-line bg-surface px-2 py-1 text-xs outline-none focus:border-blue-400"
                 >
                   {days.length === 0 && <option value="">暂无日志</option>}
                   {days.map((d) => (
@@ -167,14 +167,14 @@ export function Logs() {
                     setExpanded('')
                   }}
                   title="「仅错误」是错误及以上级别的副本"
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400"
+                  className="rounded-lg border border-line bg-surface px-2 py-1 text-xs outline-none focus:border-blue-400"
                 >
                   <option value="info">全部</option>
                   <option value="err">仅错误</option>
                 </select>
                 <button
                   onClick={refresh}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-muted hover:bg-surface-2"
                 >
                   <RotateCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} /> 刷新
                 </button>
@@ -185,20 +185,20 @@ export function Logs() {
 
         {/* 总计一行 */}
         {summary && summary.total > 0 && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pb-2 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pb-2 text-xs text-muted">
             <span>
-              共 <span className="font-semibold text-slate-700">{summary.total}</span> 条
+              共 <span className="font-semibold text-content">{summary.total}</span> 条
             </span>
             {summary.warn > 0 && <span className="text-amber-600">警告 {summary.warn}</span>}
             {summary.error > 0 && <span className="text-rose-600">错误 {summary.error}</span>}
-            {summary.truncated && <span className="text-slate-400">（只统计了最近一段）</span>}
+            {summary.truncated && <span className="text-muted">（只统计了最近一段）</span>}
           </div>
         )}
 
         {/* 分类列表 */}
-        <div className="divide-y divide-slate-100 border-t border-slate-100">
+        <div className="divide-y divide-line border-t border-line">
           {!summary || summary.modules.length === 0 ? (
-            <div className="px-5 py-8 text-center text-xs text-slate-400">{err || '这一天没有日志'}</div>
+            <div className="px-5 py-8 text-center text-xs text-muted">{err || '这一天没有日志'}</div>
           ) : (
             summary.modules.map((m) => (
               <ModuleRow
@@ -264,25 +264,25 @@ function ModuleRow({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-slate-50"
+        className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-surface-2"
       >
         {open ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted" />
         )}
-        <span className="w-28 shrink-0 text-sm font-semibold text-slate-700">{moduleLabel(stat.module)}</span>
-        <span className="text-xs text-slate-500">{stat.total} 条</span>
+        <span className="w-28 shrink-0 text-sm font-semibold text-content">{moduleLabel(stat.module)}</span>
+        <span className="text-xs text-muted">{stat.total} 条</span>
 
         <span className="ml-auto flex items-center gap-3 text-xs">
           {stat.warn > 0 && <span className="text-amber-600">⚠ {stat.warn}</span>}
           {stat.error > 0 && <span className="font-semibold text-rose-600">✕ {stat.error}</span>}
-          {!hasIssue && <span className="text-slate-300">正常</span>}
+          {!hasIssue && <span className="text-muted">正常</span>}
         </span>
       </button>
 
       {open && (
-        <div className="bg-slate-50/60 px-5 pb-4 pt-1">
+        <div className="bg-surface-2/60 px-5 pb-4 pt-1">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <div className="flex gap-1">
               {levelFilters.map((f) => (
@@ -291,7 +291,7 @@ function ModuleRow({
                   type="button"
                   onClick={() => onLevelChange(f.value)}
                   className={`rounded-md px-2 py-0.5 text-[11px] font-semibold transition ${
-                    level === f.value ? 'bg-blue-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
+                    level === f.value ? 'bg-blue-500 text-white' : 'bg-surface text-content hover:bg-surface-2'
                   }`}
                 >
                   {f.label}
@@ -299,7 +299,7 @@ function ModuleRow({
               ))}
             </div>
             <div className="relative ml-auto">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted" />
               <input
                 value={search}
                 onChange={(e) => onSearchChange(e.target.value)}
@@ -307,34 +307,34 @@ function ModuleRow({
                   if (e.key === 'Enter') onSearchSubmit()
                 }}
                 placeholder="搜索内容，回车"
-                className="w-44 rounded-lg border border-slate-200 bg-white py-1 pl-7 pr-2 text-xs outline-none focus:border-blue-400"
+                className="w-44 rounded-lg border border-line bg-surface py-1 pl-7 pr-2 text-xs outline-none focus:border-blue-400"
               />
             </div>
           </div>
 
           {loading ? (
-            <div className="py-6 text-center text-xs text-slate-400">读取中…</div>
+            <div className="py-6 text-center text-xs text-muted">读取中…</div>
           ) : rows.length === 0 ? (
-            <div className="py-6 text-center text-xs text-slate-400">
+            <div className="py-6 text-center text-xs text-muted">
               没有匹配的日志{keyword && `（关键字：${keyword}）`}
             </div>
           ) : (
             <>
-              <div className="max-h-[26rem] space-y-0.5 overflow-y-auto rounded-lg bg-white p-2 ring-1 ring-slate-200/70">
+              <div className="max-h-[26rem] space-y-0.5 overflow-y-auto rounded-lg bg-surface p-2 ring-1 ring-line/70">
                 {rows.map((e, i) => (
                   <div
                     key={i}
-                    className="flex items-start gap-2 rounded px-1.5 py-1 font-mono text-[11px] hover:bg-slate-50"
+                    className="flex items-start gap-2 rounded px-1.5 py-1 font-mono text-[11px] hover:bg-surface-2"
                   >
-                    <span className="shrink-0 text-slate-400">{e.time.slice(11)}</span>
+                    <span className="shrink-0 text-muted">{e.time.slice(11)}</span>
                     <span
                       className={`shrink-0 rounded px-1 text-[10px] font-semibold uppercase ${
-                        levelStyle[e.level] ?? 'bg-slate-100 text-slate-500'
+                        levelStyle[e.level] ?? 'bg-surface-2 text-muted'
                       }`}
                     >
                       {e.level}
                     </span>
-                    <span className="whitespace-pre-wrap break-all text-slate-700">{e.message}</span>
+                    <span className="whitespace-pre-wrap break-all text-content">{e.message}</span>
                   </div>
                 ))}
               </div>

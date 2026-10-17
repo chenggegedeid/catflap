@@ -31,6 +31,11 @@ export interface ComponentInfo {
   /** 当前是否启用；不支持开关时该值无意义 */
   enabled: boolean
   /** 该组件声明的定时任务名 */
+  // 下面两个由后端 core/component.Describer 提供。界面上没有对应页面的组件
+  // （webhook / traffic / auth…）靠它们显示，否则列表里就只剩机器名，
+  // 用户看不出那是什么。
+  title?: string
+  summary?: string
   tasks?: string[]
   /** 是否提供健康状态 */
   healthAware: boolean
@@ -812,6 +817,53 @@ export interface AuditIPStat {
   blocked: boolean
   blockReason: string
   blockExpiresAt?: string
+  /**
+   * 归属地。**查询时现算的**，不随记录存库（库每月更新，存下来就是过期的副本）。
+   * 私有地址是「内网」，IPv6 与查不到的是「未知」。
+   */
+  geo?: AuditGeo
+  /** 这个 IP 最像哪一类攻击（按它扫过的路径判定）。没有异常时为空串 */
+  attack?: string
+}
+
+/** IP 归属地 */
+export interface AuditGeo {
+  country: string
+  province: string
+  city: string
+  isp: string
+  /** 一句话显示用，例如「江苏 · 南京」「美国」「内网」 */
+  label: string
+}
+
+/** 审计概览接口的返回 */
+export interface AuditOverview {
+  overview: {
+    requests: number
+    errors: number
+    blocked: number
+    uniqueIPs: number
+    attackIPs: number
+    avgDurMs: number
+    bytesIn: number
+    bytesOut: number
+    hours: number
+    errorRatio: number
+  }
+  trends: AuditTrendPoint[]
+  attackKinds: { kind: string; label: string; count: number }[]
+  sites: { site: string; count: number }[]
+  countries: { name: string; requests: number; ips: number }[]
+  geoEnabled: boolean
+}
+
+/** 趋势图上的一点 */
+export interface AuditTrendPoint {
+  label: string
+  time: string
+  requests: number
+  errors: number
+  blocked: number
 }
 
 /** 一次访问 */
@@ -828,6 +880,13 @@ export interface AuditRecord {
   durationMs: number
   userAgent: string
   siteId: number
+  /**
+   * 记录来源："http"（反代，默认）/"tunnel"（内网穿透）。
+   * 穿透不是 HTTP，method/host/path 没有意义，靠 ref 认服务。
+   */
+  kind?: string
+  /** 穿透服务标识："s<设备ID>-<服务ID>" */
+  ref?: string
 }
 
 export interface AuditConfigView {

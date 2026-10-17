@@ -46,21 +46,16 @@ tasks:
       - go build -trimpath -ldflags="-s -w" -o "{{.BIN_DIR}}/catflap" .
 
   # 前端构建：改过前端后先跑这个再 build
+  #
+  # 以前这里还要构建 web/home（导航主页），那个前端已随导航页一起移除。
   build:frontend:
-    summary: Builds the admin and home web frontends
+    summary: Builds the admin web frontend
     cmds:
       - task: build:admin
-      - task: build:home
 
   build:admin:
     summary: Builds the admin frontend
     dir: web/admin
-    cmds:
-      - npm run build
-
-  build:home:
-    summary: Builds the home frontend
-    dir: web/home
     cmds:
       - npm run build
 

@@ -34,7 +34,7 @@ class PageBoundary extends Component<{ children: ReactNode }, { err: Error | nul
           </p>
 
           {stack && (
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-white/70 p-2 font-mono text-[10px] leading-relaxed text-rose-600">
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-surface/70 p-2 font-mono text-[10px] leading-relaxed text-rose-600">
               {stack}
             </pre>
           )}

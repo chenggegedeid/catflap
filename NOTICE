@@ -61,12 +61,16 @@ merge 义务或预期 —— 但上述代码引用关系真实存在，特此声
     github.com/golang-jwt/jwt/v5        MIT          JWT
     github.com/huin/goupnp              BSD-3-Clause UPnP 客户端
     github.com/libp2p/go-reuseport      MIT          端口复用
+    github.com/lionsoul2014/ip2region   Apache-2.0   IP 归属地（离线库，双许可 OR MIT）
+      ⚠️ 本项目内嵌了它的 IPv4 数据文件 modules/audit/geo/ip2region_v4.xdb（11MB），
+         随二进制一起分发。数据版权归 ip2region 项目所有，许可全文见
+         modules/audit/geo/LICENSE.ip2region。
     github.com/pion/stun                MIT          STUN 协议
     github.com/sirupsen/logrus          MIT          日志
     github.com/wailsapp/wails/v3        MIT          桌面版外壳
     golang.org/x/{crypto,net,sync,sys}  BSD-3-Clause Go 官方扩展库
 
-  前端（web/admin 与 web/home，完整清单见各自的 package.json）：
+  前端（web/admin，完整清单见其 package.json）：
     react / react-dom                   MIT
     vite                                MIT
     tailwindcss                         MIT

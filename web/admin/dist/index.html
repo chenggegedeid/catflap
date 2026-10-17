@@ -5,8 +5,29 @@
     <link rel="icon" type="image/png" href="/catflap/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Catflap 管理后台</title>
-    <script type="module" crossorigin src="/assets/index-4sK-xO3s.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BV9fNmpr.css">
+    <!--
+      防白闪：必须在样式和组件渲染**之前**把主题定好。
+      否则深色用户每次刷新都会先看到一帧浅色，再跳成深色 —— 那一下闪得很难看。
+      这里只做"读偏好 + 加 class"这一件事，逻辑和 lib/theme.ts 保持一致。
+    -->
+    <script>
+      (function () {
+        try {
+          var m = localStorage.getItem('catflap.theme') || 'system'
+          var dark =
+            m === 'dark' ||
+            (m === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* 读不到就按浅色走，不影响使用 */
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-DaNdjVYW.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-g665Mfds.css">
   </head>
   <body>
     <div id="root"></div>

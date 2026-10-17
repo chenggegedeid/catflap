@@ -7,9 +7,10 @@
 Catflap：家宽内网穿透 / 自托管入口工具。STUN 打洞、UPnP、DDNS、ACME 证书、内建反向代理、导航主页、Webhook 通知。
 
 - 后端：Go 1.25 + gin + logrus，单一二进制，前端产物通过 `go:embed` 打进去
-- 前端：两个独立的 React 19 + Vite + Tailwind 4 + TypeScript 项目
-  - `web/admin` 管理后台，挂在 `/catflap/`，hash 路由
-  - `web/home` 导航主页，挂在 `/`
+- 前端：一个 React 19 + Vite + Tailwind 4 + TypeScript 项目
+  - `web/admin` 管理后台，挂在根路径 `/`（hash 路由，例如 `#/stun`）
+  - 以前还有个 `web/home` 导航主页挂在 `/`，v2.1.0 之后已移除；
+    清理仓库时若再看到 `web/home` 的引用，按遗留处理
 - 两个编译目标，靠 build tag 区分（详见 [BUILD.md](BUILD.md)）：
   - CLI 版：`main_cli.go`（`//go:build !desktop`）
   - 桌面版：`main_desktop.go`（`//go:build desktop`，Wails v3 beta）
@@ -27,7 +28,7 @@ modules/<模块>/                 业务逻辑与运行时状态，handler 不�
 modules/<模块>/model/           配置/数据结构
 core/                           日志、退出时保存
 utils/                          通用工具（res 统一响应、utilsFile 读写 JSON 等）
-web/admin, web/home             前端源码 + 已提交的 dist
+web/admin                       前端源码 + 已提交的 dist
 docs/                           面向用户的文档（中文）
 ```
 

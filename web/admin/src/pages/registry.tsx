@@ -81,7 +81,13 @@ export interface PageMeta {
   icon: LucideIcon
   /** 顶栏标题下面那行小字，可空 */
   subtitle?: string
-  /** 侧栏标签，例如 NEW */
+  /**
+   * 侧栏标签，例如 NEW。
+   *
+   * 目前没有页面在用了：给功能挂「NEW」的时期已经过去，几个小标签反而让侧栏
+   * 显得吵。保留这个字段是为了将来真需要（比如「测试中」）时不至于又要改三处 ——
+   * Sidebar 与 layout/nav.ts 的透传逻辑都还在。
+   */
   badge?: string
   /**
    * 归属的后端组件名（core/component 注册表里的 Name）。
@@ -114,6 +120,9 @@ export const pages = {
     label: '设备',
     icon: Server,
     subtitle: '内网里的机器，穿透 / 反代 / 端口转发共用这一份',
+    // 刻意不绑定组件：设备表是 proxy 与 stun 共用的，绑死任何一个都会出现
+    // 「只关了反向代理，设备页也跟着没了」——而穿透还在用它。
+    // 关掉其中一侧后，设备页里那一侧的操作会 404，这是能接受的代价。
     element: <PageBoundary key="devices"><Devices /></PageBoundary>,
   },
 
@@ -129,7 +138,6 @@ export const pages = {
     label: 'STUN 内网穿透',
     icon: Waves,
     subtitle: '基于 STUN 的内网穿透与连接质量检测',
-    badge: 'NEW',
     component: 'stun',
     element: <PageBoundary key="stun"><Stun /></PageBoundary>,
   },
@@ -156,7 +164,6 @@ export const pages = {
     label: '网络唤醒',
     icon: Power,
     subtitle: '发魔术包把局域网里的机器叫醒',
-    badge: 'NEW',
     component: 'wol',
     element: <PageBoundary key="wol"><Wol /></PageBoundary>,
   },
@@ -164,7 +171,6 @@ export const pages = {
     label: '计划任务',
     icon: CalendarClock,
     subtitle: '定时同步 DDNS 解析记录或唤醒机器',
-    badge: 'NEW',
     component: 'task',
     element: <PageBoundary key="task"><Task /></PageBoundary>,
   },
@@ -192,18 +198,21 @@ export const pages = {
     label: '访问审计',
     icon: ShieldAlert,
     subtitle: '谁在访问、谁在扫我',
+    component: 'audit',
     element: <PageBoundary key="audit"><Audit /></PageBoundary>,
   },
   tunnel: {
     label: 'Tunnel',
     icon: Cloud,
     subtitle: 'CGNAT 下不带端口的最干净出口',
+    component: 'tunnel',
     element: <PageBoundary key="tunnel"><Tunnel /></PageBoundary>,
   },
   notify: {
     label: '通知',
     icon: Bell,
     subtitle: '渠道全局配一次，各服务按名字选用',
+    component: 'notify',
     element: <PageBoundary key="notify"><Notify /></PageBoundary>,
   },
 } satisfies Record<string, PageMeta>

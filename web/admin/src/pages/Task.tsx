@@ -66,8 +66,8 @@ export function Task() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-slate-800">计划任务</h2>
-        <p className="mt-1 text-xs text-slate-500">
+        <h2 className="text-lg font-bold text-content">计划任务</h2>
+        <p className="mt-1 text-xs text-muted">
           定时做一件事：同步 DDNS 解析记录，或唤醒一台机器。调度精度是 30 秒。
         </p>
       </div>
@@ -85,15 +85,15 @@ export function Task() {
 
       <Card>
         {loading ? (
-          <div className="px-4 py-8 text-center text-xs text-slate-400">加载中…</div>
+          <div className="px-4 py-8 text-center text-xs text-muted">加载中…</div>
         ) : tasks.length === 0 ? (
-          <div className="px-4 py-8 text-center text-xs text-slate-400">
+          <div className="px-4 py-8 text-center text-xs text-muted">
             还没有计划任务。点下面「新建任务」添加一个。
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-xs text-slate-500">
+              <tr className="border-b border-line text-left text-xs text-muted">
                 <th className="px-4 py-2 font-semibold">名称</th>
                 <th className="px-4 py-2 font-semibold">动作</th>
                 <th className="px-4 py-2 font-semibold">周期</th>
@@ -103,12 +103,12 @@ export function Task() {
             </thead>
             <tbody>
               {tasks.map((t) => (
-                <tr key={t.id} className="border-b border-slate-50 last:border-0">
+                <tr key={t.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-700">{t.name}</span>
+                      <span className="font-medium text-content">{t.name}</span>
                       {!t.enabled && (
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                        <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">
                           已停用
                         </span>
                       )}
@@ -117,18 +117,18 @@ export function Task() {
                       <div className="mt-0.5 text-xs text-rose-600">{t.lastError}</div>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">
+                  <td className="px-4 py-2.5 text-xs text-content">
                     {t.action === 'ddns' ? '同步 DDNS' : t.action === 'wol' ? '唤醒机器' : t.action}
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">
+                  <td className="px-4 py-2.5 text-xs text-content">
                     {t.kind === 'interval'
                       ? `每 ${t.intervalMin} 分钟`
                       : `每天 ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`}
                     {t.nextRun && (
-                      <div className="mt-0.5 text-slate-400">下次 {t.nextRun}</div>
+                      <div className="mt-0.5 text-muted">下次 {t.nextRun}</div>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">
+                  <td className="px-4 py-2.5 text-xs text-content">
                     {t.lastRun ? (
                       <>
                         <div>{t.lastRun}</div>
@@ -137,7 +137,7 @@ export function Task() {
                         </div>
                       </>
                     ) : (
-                      <span className="text-slate-400">未执行</span>
+                      <span className="text-muted">未执行</span>
                     )}
                   </td>
                   <td className="px-4 py-2.5">
@@ -145,7 +145,7 @@ export function Task() {
                       <button
                         type="button"
                         onClick={() => void run(t)}
-                        className="flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                        className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1.5 text-xs font-semibold text-content transition hover:bg-surface-2"
                         title="立刻执行一次"
                       >
                         <Play className="h-3.5 w-3.5" />
@@ -154,7 +154,7 @@ export function Task() {
                       <button
                         type="button"
                         onClick={() => void remove(t)}
-                        className="rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
+                        className="rounded-md border border-line px-2 py-1.5 text-xs text-muted transition hover:border-rose-200 hover:text-rose-600"
                         title="删除"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -244,22 +244,22 @@ function NewTaskModal({ onSaved }: { onSaved: () => void }) {
             if (e.target === e.currentTarget) setOpen(false)
           }}
         >
-          <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-2xl ring-1 ring-slate-200">
-            <div className="text-base font-bold text-slate-800">新建计划任务</div>
+          <div className="w-full max-w-lg rounded-lg bg-surface p-5 shadow-2xl ring-1 ring-line">
+            <div className="text-base font-bold text-content">新建计划任务</div>
 
             <div className="mt-4 space-y-3">
               <label className="block">
-                <span className="text-xs font-semibold text-slate-600">名称</span>
+                <span className="text-xs font-semibold text-content">名称</span>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="每天凌晨同步解析"
-                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-blue-400"
                 />
               </label>
 
               <div>
-                <span className="text-xs font-semibold text-slate-600">周期</span>
+                <span className="text-xs font-semibold text-content">周期</span>
                 <div className="mt-1 flex gap-2">
                   {(['interval', 'daily'] as const).map((k) => (
                     <button
@@ -269,7 +269,7 @@ function NewTaskModal({ onSaved }: { onSaved: () => void }) {
                       className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
                         kind === k
                           ? 'border-blue-400 bg-blue-50 text-blue-700'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          : 'border-line text-content hover:bg-surface-2'
                       }`}
                     >
                       {k === 'interval' ? '每隔' : '每天'}
@@ -281,25 +281,25 @@ function NewTaskModal({ onSaved }: { onSaved: () => void }) {
                     value={intervalMin}
                     onChange={(e) => setIntervalMin(e.target.value)}
                     placeholder="60"
-                    className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+                    className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-blue-400"
                   />
                 ) : (
                   <input
                     type="time"
                     value={timeOfDay}
                     onChange={(e) => setTimeOfDay(e.target.value)}
-                    className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+                    className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-blue-400"
                   />
                 )}
                 {kind === 'daily' && (
-                  <span className="mt-1 block text-xs text-slate-400">
+                  <span className="mt-1 block text-xs text-muted">
                     当天这个时刻已经过了就顺延到第二天，不会补跑
                   </span>
                 )}
               </div>
 
               <div>
-                <span className="text-xs font-semibold text-slate-600">做什么</span>
+                <span className="text-xs font-semibold text-content">做什么</span>
                 <div className="mt-1 flex gap-2">
                   {(['ddns', 'wol'] as const).map((a) => (
                     <button
@@ -309,7 +309,7 @@ function NewTaskModal({ onSaved }: { onSaved: () => void }) {
                       className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
                         action === a
                           ? 'border-blue-400 bg-blue-50 text-blue-700'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          : 'border-line text-content hover:bg-surface-2'
                       }`}
                     >
                       {a === 'ddns' ? '同步 DDNS' : '唤醒机器'}
@@ -320,7 +320,7 @@ function NewTaskModal({ onSaved }: { onSaved: () => void }) {
                   <select
                     value={target}
                     onChange={(e) => setTarget(e.target.value)}
-                    className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+                    className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-blue-400"
                   >
                     <option value="">选择一台机器…</option>
                     {wolTargets.map((t) => (
@@ -348,7 +348,7 @@ function NewTaskModal({ onSaved }: { onSaved: () => void }) {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                className="rounded-md border border-line px-3 py-2 text-xs font-semibold text-content transition hover:bg-surface-2"
               >
                 取消
               </button>

@@ -103,6 +103,27 @@ type Schedulable interface {
 	Tasks() []Task
 }
 
+// Describer 给组件一个给人看的名字和一句说明。
+//
+// # 为什么需要它
+//
+// 「功能管理」页列出全部组件，其中有一半（webhook / traffic / update / auth…）
+// 在前端没有对应页面，只能拿机器名（Name()）顶上。机器名是给日志和
+// config/components.json 用的，摆在界面上用户看不出那是什么。
+//
+// 名字由组件自己提供而不是前端再维护一张映射表：那条映射是第二个真相源，
+// 加了新模块忘了补就退化成机器名，而退化不会报错。
+//
+// 做成**可选**接口是为了让存量模块能一个个补：没实现的照旧显示机器名，
+// 不会编译不过。scripts/check_component_bindings.py 会盯着谁还没补。
+type Describer interface {
+	// Title 界面上显示的名字，例如「Webhook 通知」。
+	Title() string
+	// Summary 一句话说明这个功能是干什么的。控制在 20 字以内，
+	// 显示在列表的第二行，太长会把状态标签挤到下一行。
+	Summary() string
+}
+
 // SchemaProvider 声明自己的配置结构，前端据此自动生成表单。
 //
 // 实现了本接口的组件，前端**不需要为它手写任何表单代码**。

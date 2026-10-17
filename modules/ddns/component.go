@@ -28,6 +28,12 @@ type ddnsComponent struct {
 
 func (ddnsComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (ddnsComponent) Title() string { return "DDNS 域名解析" }
+
+// Summary 见 core/component.Describer。
+func (ddnsComponent) Summary() string { return "把变动的公网 IP 同步到域名" }
+
 // Init 读配置、装 IP 源、建立公网 IP 订阅、启动同步调度器。
 func (ddnsComponent) Init(context.Context) error { return DDNSInit() }
 
@@ -65,3 +71,19 @@ func init() {
 		LocalSwitch: component.NewLocalSwitch(Name),
 	})
 }
+
+// Enabled 报告 DDNS 功能当前是否开启。
+//
+// # 为什么调度器要看它
+//
+// 关掉组件做的是两件事：接口返回 404、侧栏入口消失。但 Init 时起来的
+// 同步循环（Scheduler.loop）并不会因此停下 —— 组件开关只翻了
+// config/components.json 里的一个位，没人去取消那个 goroutine。
+//
+// 结果就是界面上写着「DDNS 已关闭」，后台却还在按 interval 去调服务商接口
+// 同步解析记录。用户从任何一处都看不出来，只能等下个月的服务商调用量对不上
+// 才发现。所以调度器的 scan 入口上要挡一道。
+//
+// 这里走 component.IsEnabled 而不是另存一份 atomic：开关的真相源只有
+// config/components.json 一个，多存一份就多一处会不一致的地方。
+func Enabled() bool { return component.IsEnabled(Name) }

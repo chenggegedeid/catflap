@@ -31,7 +31,6 @@ import type {
 } from '../types'
 import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
 import { DomainInput } from '../components/DomainInput'
-import { AccessControlEditor } from '../components/AccessControlEditor'
 import { AccessLogModal } from '../components/AccessLogModal'
 
 // ===================== 小工具 =====================
@@ -146,9 +145,9 @@ export function siteURL(entry: ProxyEntry | undefined, site: ProxySite): string 
 // 不能写成 `${inputCls} w-24`——Tailwind 的 w-full 在样式表里排在 w-24 后面，
 // 类名写在后面也不管用，只会把整行撑满、把后面的输入框顶出弹窗。
 const fieldCls =
-  'rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400'
+  'rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:bg-surface-2 disabled:text-muted'
 const inputCls = `w-full ${fieldCls}`
-const labelCls = 'mb-1 text-xs font-semibold text-slate-500'
+const labelCls = 'mb-1 text-xs font-semibold text-muted'
 
 function Modal({
   title,
@@ -168,13 +167,13 @@ function Modal({
         if (e.target === e.currentTarget) onCancel()
       }}
     >
-      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 text-slate-700 shadow-2xl ring-1 ring-slate-200">
+      <div className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-6 text-content shadow-2xl ring-1 ring-line">
         <div className="mb-5 flex items-center justify-between">
-          <div className="text-base font-bold text-slate-800">{title}</div>
+          <div className="text-base font-bold text-content">{title}</div>
           <button
             type="button"
             onClick={onCancel}
-            className="grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="grid h-7 w-7 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-content"
           >
             <X className="h-4 w-4" />
           </button>
@@ -256,7 +255,7 @@ function EntryModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl px-4 py-2 text-sm text-slate-500 transition hover:bg-slate-100"
+            className="rounded-xl px-4 py-2 text-sm text-muted transition hover:bg-surface-2"
           >
             取消
           </button>
@@ -271,14 +270,14 @@ function EntryModal({
         </>
       }
     >
-      <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+      <div className="rounded-xl bg-surface-2 px-3 py-2.5 text-[11px] leading-relaxed text-muted ring-1 ring-line/70">
         没单独指定端口的服务都挂在这两个端口上，靠域名区分——
         就是 nginx 里一堆 server 块共用 <span className="font-mono">listen 80</span> /{' '}
         <span className="font-mono">listen 443 ssl</span> 的那个意思
       </div>
 
-      <div className="rounded-xl bg-blue-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 ring-1 ring-blue-200/70">
-        <div className="mb-1 font-semibold text-slate-700">想「只开一个端口」就填这儿</div>
+      <div className="rounded-xl bg-blue-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-content ring-1 ring-blue-200/70">
+        <div className="mb-1 font-semibold text-content">想「只开一个端口」就填这儿</div>
         把 HTTPS 端口填成一个固定的高位端口（比如 <span className="font-mono">8443</span>），
         所有二级域名的服务都不指定端口、挂上来按域名分发 —— 对外就只有这一个端口要放通。
         <div className="mt-1.5">
@@ -311,7 +310,7 @@ function EntryModal({
           />
         </label>
       </div>
-      <div className="-mt-1 text-[11px] leading-relaxed text-slate-400">
+      <div className="-mt-1 text-[11px] leading-relaxed text-muted">
         留空表示不开这个入口，两个都留空就没入口了。1024 以下的端口要管理员权限
       </div>
 
@@ -322,7 +321,7 @@ function EntryModal({
         <label className="block">
           <div className={labelCls}>默认证书</div>
           <CertSelect value={certId} certs={certs} onChange={setCertId} />
-          <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+          <div className="mt-1 text-[11px] leading-relaxed text-muted">
             自动匹配会按访问的域名挑证书。指定一张就是所有站点都用它，证书得盖住全部域名——
             <span className="font-mono">*.{baseDomain.trim() || 'example.com'}</span> 这种通配最省事
           </div>
@@ -337,7 +336,7 @@ function EntryModal({
           placeholder="example.com"
           className={`${inputCls} font-mono`}
         />
-        <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+        <div className="mt-1 text-[11px] leading-relaxed text-muted">
           填了之后加站点只写前缀：<span className="font-mono">nas</span> 就是{' '}
           <span className="font-mono">nas.{baseDomain.trim() || 'example.com'}</span>。写全域名的照样认
         </div>
@@ -364,8 +363,6 @@ interface SiteFormState {
   certId: string
   enabled: boolean
   description: string
-  accessMode: '' | 'allow' | 'deny'
-  accessRules: string
 }
 
 function SiteModal({
@@ -397,8 +394,6 @@ function SiteModal({
     certId: String(initial?.certId ?? 0),
     enabled: initial?.enabled ?? true,
     description: initial?.description ?? '',
-    accessMode: initial?.access?.mode ?? '',
-    accessRules: (initial?.access?.rules ?? []).join('\n'),
   }))
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -559,14 +554,10 @@ function SiteModal({
     certId: form.https ? Number(form.certId) || 0 : 0,
     enabled: form.enabled,
     description: form.description.trim(),
-    // 一行一条规则；空行和多余空格丢掉，后端只认干净的 IP / CIDR
-    access: {
-      mode: form.accessMode,
-      rules: form.accessRules
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    },
+    // 站点级 IP 名单已废弃：过滤统一走全局封禁表 / 白名单。
+    // 这里显式传「不限制」，是为了兼容仍在读这个字段的旧配置 ——
+    // 老配置里如果还存着 deny 规则，不能让它继续生效（否则用户改不掉）。
+    access: { mode: '', rules: [] },
   })
 
   const runTest = async () => {
@@ -588,7 +579,26 @@ function SiteModal({
     setErr('')
     setBusy(true)
     try {
-      await onSubmit(payload())
+      const p = payload()
+      // 保存前先拨一次后端：**连不通就不存**。
+      //
+      // 以前是「先存后测」，结果是用户点保存看到「已保存」，转头访问却 502，
+      // 又得回来改配置。现在反过来：不通就挡在这儿，把提示留在界面上，
+      // 顺手把后端 HTTPS 那个勾探正 —— 探测发现后端说的是 TLS 而我们没勾，
+      // 就直接存成勾上，省得存完还是连不上。
+      const r = await api.testProxySite(p)
+      if (!r.reachable) {
+        setErr(r.message || '后端连不上，没有保存')
+        setBusy(false)
+        return
+      }
+      if (r.mismatch) {
+        const fixed = { ...p, backendHttps: r.scheme === 'https' }
+        setForm((prev) => ({ ...prev, backendHttps: r.scheme === 'https' }))
+        await onSubmit(fixed)
+      } else {
+        await onSubmit(p)
+      }
     } catch (e) {
       setErr(errText(e))
       setBusy(false)
@@ -606,7 +616,7 @@ function SiteModal({
             type="button"
             onClick={runTest}
             disabled={testing || !form.backend.trim()}
-            className="mr-auto flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100 disabled:opacity-40"
+            className="mr-auto flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-surface-2 disabled:opacity-40"
           >
             <Zap className={`h-3.5 w-3.5 ${testing ? 'animate-pulse' : ''}`} />
             {testing ? '测试中...' : '测试后端'}
@@ -614,7 +624,7 @@ function SiteModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl px-4 py-2 text-sm text-slate-500 transition hover:bg-slate-100"
+            className="rounded-xl px-4 py-2 text-sm text-muted transition hover:bg-surface-2"
           >
             取消
           </button>
@@ -630,17 +640,17 @@ function SiteModal({
       }
     >
       {/* 这条服务在干什么，一眼看完 */}
-      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs ring-1 ring-slate-200/70">
+      <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2.5 text-xs ring-1 ring-line/70">
         <Globe className="h-3.5 w-3.5 shrink-0 text-blue-500" />
-        <span className="truncate font-mono text-slate-700">
+        <span className="truncate font-mono text-content">
           {shownHttps ? 'https://' : 'http://'}
           {hosts.length > 0 ? fullHost(hosts[0]) : portForward ? '任意域名' : '域名'}
-          {shownPort > 0 && <span className="text-slate-400">{portText(shownHttps, shownPort)}</span>}
-          {hosts.length > 1 && <span className="text-slate-400"> 等 {hosts.length} 个域名</span>}
+          {shownPort > 0 && <span className="text-muted">{portText(shownHttps, shownPort)}</span>}
+          {hosts.length > 1 && <span className="text-muted"> 等 {hosts.length} 个域名</span>}
         </span>
-        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted" />
         <HardDrive className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-        <span className="truncate font-mono text-slate-700">
+        <span className="truncate font-mono text-content">
           {form.backendHttps ? 'https://' : 'http://'}
           {form.backend.trim() || '内网服务'}
         </span>
@@ -651,7 +661,7 @@ function SiteModal({
           最后才是对外怎么访问（域名、HTTPS、证书）。
           "代理地址"其实就是 设备 + 端口，所以并进这一块。 */}
       {/* ==== 后端这一侧 ==== */}
-      <div className="!mt-5 border-t border-slate-100 pt-4">
+      <div className="!mt-5 border-t border-line pt-4">
         <div className={labelCls}>设备</div>
         <div className="flex flex-wrap gap-2">
           {/* 设备：只选，不手填 IP */}
@@ -682,13 +692,13 @@ function SiteModal({
         </div>
 
         {hostPorts.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-slate-50 p-2">
+          <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-surface-2 p-2">
             {hostPorts.map((p) => (
               <button
                 key={p.port}
                 type="button"
                 onClick={() => setBackendPort(String(p.port))}
-                className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
+                className="rounded bg-surface px-2 py-1 text-[11px] font-semibold text-content ring-1 ring-line transition hover:bg-blue-50 hover:text-blue-600 hover:ring-blue-300"
               >
                 {p.port}
                 {p.name && <span className="ml-1 opacity-70">{p.name}</span>}
@@ -697,7 +707,7 @@ function SiteModal({
           </div>
         )}
 
-        <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+        <div className="mt-1 text-[11px] leading-relaxed text-muted">
           选设备 + 填端口就好，不用记 IP。机器没在列表里就去「设备」页加一台。
         </div>
       </div>
@@ -715,16 +725,39 @@ function SiteModal({
             className={inputCls}
           />
         </label>
-        <label className="col-span-2 block sm:col-span-1">
+        {/* 内网端口 + 后端是否 HTTPS：两个控件挨着，因为它们说的是同一台内网机器 */}
+        <div className="col-span-2 sm:col-span-1">
           <div className={labelCls}>内网端口</div>
-          <input
-            value={form.backendPort}
-            onChange={(e) => setBackendPort(e.target.value)}
-            placeholder="8080"
-            inputMode="numeric"
-            className={`${inputCls} font-mono`}
-          />
-        </label>
+          <div className="flex items-center gap-2">
+            <input
+              value={form.backendPort}
+              onChange={(e) => setBackendPort(e.target.value)}
+              placeholder="8080"
+              inputMode="numeric"
+              className={`${inputCls} font-mono`}
+            />
+            {/*
+              **后端（内网那台机器）是不是 HTTPS。**
+              以前界面上**根本没有这个入口** —— 只能靠探测自动改。于是探测提示
+              「请勾上『后端是 HTTPS』」，而用户根本找不到那个勾（界面上唯一一个
+              HTTPS 勾管的是对外那一侧）。这就是那个 BUG。
+              现在补上，并放在内网端口旁边：它属于内网那一侧，不该跟对外的证书混在一起。
+            */}
+            <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-surface px-2.5 py-2 text-[11px] font-semibold whitespace-nowrap text-content ring-1 ring-line transition hover:bg-surface-2">
+              <input
+                type="checkbox"
+                checked={form.backendHttps}
+                onChange={(e) => setForm((p) => ({ ...p, backendHttps: e.target.checked }))}
+                className="h-3.5 w-3.5"
+              />
+              HTTPS
+            </label>
+          </div>
+          {/* 提示紧贴在这一行下面，说的是「后端是不是 HTTPS」 */}
+          <div className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            内网那台服务本身走 HTTPS 就勾上（自签证书也算）。点了「测试后端」会自动探
+          </div>
+        </div>
       </div>
 
       {/* ==== 对外这一侧：域名 + 端口 + 协议 + 证书 ==== */}
@@ -746,7 +779,7 @@ function SiteModal({
                 <button
                   type="button"
                   onClick={() => dropHost(i)}
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-rose-50 hover:text-rose-500"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -763,7 +796,7 @@ function SiteModal({
           添加域名
         </button>
 
-        <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
+        <div className="mt-1 text-[11px] leading-relaxed text-muted">
           {portForward ? (
             form.https ? (
               <>
@@ -786,44 +819,56 @@ function SiteModal({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="block">
-          <div className={labelCls}>端口</div>
+      {/* 外网端口 + 对外是否加证书：这两个也是一对，管的是浏览器到 Catflap 这一侧 */}
+      <div>
+        <div className={labelCls}>外网端口</div>
+        <div className="flex items-center gap-2">
           <input
             value={form.listenPort}
             onChange={(e) => setForm((p) => ({ ...p, listenPort: e.target.value }))}
             placeholder={shownPort > 0 ? String(shownPort) : '端口'}
             className={`${inputCls} font-mono`}
           />
-        </label>
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-surface px-2.5 py-2 text-[11px] font-semibold whitespace-nowrap text-content ring-1 ring-line transition hover:bg-surface-2">
+            <input
+              type="checkbox"
+              checked={form.https}
+              onChange={(e) => setForm((p) => ({ ...p, https: e.target.checked }))}
+              className="h-3.5 w-3.5"
+            />
+            加证书（HTTPS）
+          </label>
+        </div>
+        {/* 端口的提示，紧跟端口那一行 */}
+        <div className="mt-1.5 text-[11px] leading-relaxed text-muted">
+          {portHint}
+        </div>
+
+        {portBlocked(customPort) && (
+          <div className="mt-2">
+            <BlockedPortWarn label="外网端口" port={customPort} />
+          </div>
+        )}
+
+        {/* 证书选择器收进这一块里：只有勾了「加证书」才需要挑证书，
+            放在紧下面才不会让人以为它是个独立设置 */}
+        {form.https && (
+          <div className="mt-3">
+            <label className="block">
+              <div className={labelCls}>证书</div>
+              <CertSelect
+                value={form.certId}
+                certs={certs}
+                onChange={(v) => setForm((p) => ({ ...p, certId: v }))}
+              />
+              {/* 证书的提示，紧跟证书选择 */}
+              <div className="mt-1 text-[11px] leading-relaxed text-muted">
+                自动匹配就是按访问用的域名挑证书，一般不用动
+              </div>
+            </label>
+          </div>
+        )}
       </div>
-      {/* 协议不再用下拉选：和内网穿透同一个样子 —— 一个「加 HTTPS 证书」开关。
-          勾上就按域名配证书（自动匹配即可），不勾就是明文 HTTP。 */}
-      <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200">
-        <input
-          type="checkbox"
-          checked={form.https}
-          onChange={(e) => setForm((p) => ({ ...p, https: e.target.checked }))}
-          className="mt-0.5 h-3.5 w-3.5"
-        />
-        <span>
-          <span className="block text-xs font-semibold text-slate-700">HTTPS（加证书）</span>
-          <span className="block text-[11px] text-slate-400">
-            勾了按域名配证书对外走 HTTPS；不勾就是明文 HTTP
-          </span>
-        </span>
-      </label>
-      <div className="!mt-1.5 text-[11px] leading-relaxed text-slate-400">{portHint}</div>
-
-      {portBlocked(customPort) && <BlockedPortWarn label="端口" port={customPort} />}
-
-      {form.https && (
-        <label className="block">
-          <div className={labelCls}>证书</div>
-          <CertSelect value={form.certId} certs={certs} onChange={(v) => setForm((p) => ({ ...p, certId: v }))} />
-          <div className="mt-1 text-[11px] leading-relaxed text-slate-400">自动匹配就是按访问的域名挑，一般不用动</div>
-        </label>
-      )}
 
       {noCertWithoutDomain && (
         <Warn>
@@ -849,7 +894,7 @@ function SiteModal({
         </div>
       )}
 
-      <label className="!mt-5 block border-t border-slate-100 pt-4">
+      <label className="!mt-5 block border-t border-line pt-4">
         <div className={labelCls}>路径（可选）</div>
         <input
           value={form.pathPrefix}
@@ -861,7 +906,7 @@ function SiteModal({
 
       {!!form.pathPrefix.trim() && (
         <>
-          <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface-2 px-3 py-2.5 text-xs text-content">
             <input
               type="checkbox"
               checked={form.stripPrefix}
@@ -880,16 +925,14 @@ function SiteModal({
       )}
 
 
-      {/* ===================== 访问控制 =====================
-           用共用组件（components/AccessControlEditor）—— 和穿透同一套模板，
-           并且能从访问审计里抓到的 IP 一键加入名单（IPv4 / IPv6 都支持）。 */}
-      <AccessControlEditor
-        mode={form.accessMode}
-        rules={form.accessRules}
-        onChange={(next) =>
-          setForm((p) => ({ ...p, accessMode: next.mode, accessRules: next.rules }))
-        }
-      />
+      {/*
+        站点级 IP 名单已移除。
+        理由见 CHANGELOG 2.5.0：面向互联网的服务**没法提前知道谁会来**，
+        提前配网段没有意义；真正起作用的是全局黑名单（支持网段）+ 自动拉黑。
+        过滤统一走一处（审计页的封禁列表 / 白名单），不再每个服务各配一份。
+
+        Access 字段仍在数据模型里保留，老配置读进来不会报错，只是不再生效。
+      */}
 
       {err && <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>}
     </Modal>
@@ -907,7 +950,7 @@ function ListenerChip({ l, certName }: { l: ProxyListener; certName: string }) {
     <span
       title={l.tls ? `证书：${certName}` : undefined}
       className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] ring-1 ${
-        l.running ? 'bg-white text-slate-600 ring-slate-200' : 'bg-rose-50 text-rose-600 ring-rose-200'
+        l.running ? 'bg-surface text-content ring-line' : 'bg-rose-50 text-rose-600 ring-rose-200'
       }`}
     >
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.running ? 'bg-emerald-500' : 'bg-rose-500'}`} />
@@ -918,9 +961,9 @@ function ListenerChip({ l, certName }: { l: ProxyListener; certName: string }) {
           HTTPS
         </span>
       ) : (
-        <span className="text-slate-400">HTTP</span>
+        <span className="text-muted">HTTP</span>
       )}
-      <span className="text-slate-400">{l.siteCount} 站点</span>
+      <span className="text-muted">{l.siteCount} 站点</span>
     </span>
   )
 }
@@ -1195,7 +1238,7 @@ export function ReverseProxy() {
         <div className="py-12 text-center text-rose-500">
           <AlertCircle className="mx-auto h-8 w-8" />
           <div className="mt-2 text-sm font-semibold">数据加载失败</div>
-          <div className="mt-1 text-xs text-slate-500">{loadErr}</div>
+          <div className="mt-1 text-xs text-muted">{loadErr}</div>
           <button onClick={refresh} className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-white">
             重试
           </button>
@@ -1207,7 +1250,7 @@ export function ReverseProxy() {
   if (!cfg || !entry) {
     return (
       <Card>
-        <div className="py-12 text-center text-sm text-slate-400">正在加载...</div>
+        <div className="py-12 text-center text-sm text-muted">正在加载...</div>
       </Card>
     )
   }
@@ -1225,9 +1268,9 @@ export function ReverseProxy() {
         ? '运行中'
         : `${failed.length} 个端口没起来`
   const stateDot = !entry.enabled
-    ? 'bg-slate-300'
+    ? 'bg-fill'
     : listeners.length === 0
-      ? 'bg-slate-300'
+      ? 'bg-fill'
       : failed.length === 0
         ? 'bg-emerald-500'
         : 'bg-amber-400'
@@ -1235,8 +1278,8 @@ export function ReverseProxy() {
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-base font-bold text-slate-800">反向代理</div>
-        <div className="mt-1 text-xs text-slate-500">
+        <div className="text-base font-bold text-content">反向代理</div>
+        <div className="mt-1 text-xs text-muted">
           在本机监听端口，按域名把请求转给内网的机器。就是 nginx 干的活
         </div>
       </div>
@@ -1245,17 +1288,17 @@ export function ReverseProxy() {
       <Card className="!py-3.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className={`h-2 w-2 shrink-0 rounded-full ${stateDot}`} />
-          <span className="text-sm font-semibold text-slate-700">{stateText}</span>
+          <span className="text-sm font-semibold text-content">{stateText}</span>
 
-          {entry.baseDomain && <span className="font-mono text-[11px] text-slate-400">*.{entry.baseDomain}</span>}
+          {entry.baseDomain && <span className="font-mono text-[11px] text-muted">*.{entry.baseDomain}</span>}
 
           <button
             onClick={toggleAccessLog}
             title="点一下开关访问日志"
             className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold transition ${
               entry.accessLog
-                ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                : 'text-slate-300 hover:bg-slate-100 hover:text-slate-500'
+                ? 'bg-fill text-content hover:bg-fill'
+                : 'text-muted hover:bg-surface-2 hover:text-muted'
             }`}
           >
             访问日志
@@ -1264,13 +1307,13 @@ export function ReverseProxy() {
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={toggleRunning}
-              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-muted hover:bg-surface-2"
             >
               {entry.enabled ? '停止' : '启动'}
             </button>
             <button
               onClick={() => setEntryModal(true)}
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-muted hover:bg-surface-2"
             >
               <Settings2 className="h-3 w-3" /> 默认入口
             </button>
@@ -1298,13 +1341,13 @@ export function ReverseProxy() {
         )}
 
         {entry.enabled && listeners.length === 0 && sites.length > 0 && (
-          <div className="mt-2 text-[11px] text-slate-400">
+          <div className="mt-2 text-[11px] text-muted">
             站点都停用了，或者默认入口两个端口都没填——点右上角「默认入口」看看
           </div>
         )}
 
         {listeners.length > 0 && failed.length === 0 && (
-          <div className="mt-2 text-[11px] text-slate-400">
+          <div className="mt-2 text-[11px] text-muted">
             要让外网也能访问：到 STUN 页给这些端口各加一条 TCP 服务
           </div>
         )}
@@ -1317,7 +1360,7 @@ export function ReverseProxy() {
           <CardHeader
             title={
               <span>
-                服务 <span className="ml-1 font-normal text-slate-400">{sites.length}</span>
+                服务 <span className="ml-1 font-normal text-muted">{sites.length}</span>
               </span>
             }
             action={
@@ -1340,28 +1383,28 @@ export function ReverseProxy() {
                   <div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-500">
                     <Globe className="h-5 w-5" />
                   </div>
-                  <div className="break-all text-center font-mono text-[11px] text-slate-500">{example}</div>
-                  <div className="text-[10px] text-slate-400">浏览器</div>
+                  <div className="break-all text-center font-mono text-[11px] text-muted">{example}</div>
+                  <div className="text-[10px] text-muted">浏览器</div>
                 </div>
 
-                <ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted" />
 
                 <div className="flex w-28 flex-col items-center gap-1.5">
-                  <div className="grid h-11 w-11 place-items-center rounded-2xl bg-slate-900 text-[10px] font-bold text-white">
+                  <div className="grid h-11 w-11 place-items-center rounded-2xl bg-inverse text-[10px] font-bold text-on-inverse">
                     LS
                   </div>
-                  <div className="font-mono text-[11px] text-slate-500">{entryPort ? `:${entryPort}` : '未设端口'}</div>
-                  <div className="text-[10px] text-slate-400">Catflap</div>
+                  <div className="font-mono text-[11px] text-muted">{entryPort ? `:${entryPort}` : '未设端口'}</div>
+                  <div className="text-[10px] text-muted">Catflap</div>
                 </div>
 
-                <ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted" />
 
                 <div className="flex w-28 flex-col items-center gap-1.5">
                   <div className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-50 text-emerald-500">
                     <HardDrive className="h-5 w-5" />
                   </div>
-                  <div className="break-all text-center font-mono text-[11px] text-slate-500">192.168.1.20:5000</div>
-                  <div className="text-[10px] text-slate-400">内网服务</div>
+                  <div className="break-all text-center font-mono text-[11px] text-muted">192.168.1.20:5000</div>
+                  <div className="text-[10px] text-muted">内网服务</div>
                 </div>
               </div>
 
@@ -1371,7 +1414,7 @@ export function ReverseProxy() {
               >
                 添加第一个服务
               </button>
-              <div className="mt-2.5 text-[11px] text-slate-400">
+              <div className="mt-2.5 text-[11px] text-muted">
                 一个服务一个域名，域名解析到本机就行。要单独的端口、单独的证书也行
               </div>
             </div>
@@ -1402,26 +1445,26 @@ export function ReverseProxy() {
                   e.preventDefault()
                   if (dragDev && g.device) void commitDeviceOrder(dragDev, g.device.id)
                 }}
-                className={`rounded-xl border border-slate-200/70 bg-white transition ${
+                className={`rounded-xl border border-line/70 bg-surface transition ${
                   g.device && overDev === g.device.id && dragDev !== g.device.id
                     ? 'ring-2 ring-blue-300'
                     : ''
                 } ${g.device && dragDev === g.device.id ? 'opacity-40' : ''}`}
               >
                 {/* 设备头：和穿透页的设备卡片同一套样式 */}
-                <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                <div className="flex items-center gap-2 border-b border-line px-3 py-2">
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-500">
                     <HardDrive className="h-3.5 w-3.5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-bold text-slate-800">
+                    <p className="truncate text-[13px] font-bold text-content">
                       {g.device?.name ?? '未归到设备'}
                     </p>
-                    <p className="font-mono text-[10px] text-slate-400">
+                    <p className="font-mono text-[10px] text-muted">
                       {g.device?.ip ?? '这台机器还没加进设备列表'}
                     </p>
                   </div>
-                  <span className="shrink-0 text-[11px] text-slate-400">
+                  <span className="shrink-0 text-[11px] text-muted">
                     {g.sites.length} 个服务
                   </span>
                   {/* 和穿透页设备头同一个按钮：在这台设备下直接加服务，表单里预选好设备 */}
@@ -1505,7 +1548,7 @@ export function ReverseProxy() {
 
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className="rounded-lg bg-slate-900/85 px-4 py-2 text-sm text-white shadow-lg">
+          <div key={t.id} className="rounded-lg bg-inverse/90 px-4 py-2 text-sm text-on-inverse shadow-lg">
             {t.text}
           </div>
         ))}
@@ -1564,16 +1607,16 @@ function SiteCard({
             disabled={flagBusy === s.id}
             title={off ? '点一下启用' : '点一下停用'}
             className={`${iconBtn} disabled:opacity-40 ${
-              off ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+              off ? 'bg-fill text-muted hover:bg-fill' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
             }`}
           >
             <Power className="h-3 w-3" />
           </button>
-          <button onClick={onEdit} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="编辑">
+          <button onClick={onEdit} className={`${iconBtn} bg-surface-2 text-content hover:bg-fill`} title="编辑">
             <Pencil className="h-3 w-3" />
           </button>
           {/* 访问日志：谁访问过这个站点。数据来自访问审计，和穿透同一个弹窗 */}
-          <button onClick={onLogs} className={`${iconBtn} bg-slate-100 text-slate-600 hover:bg-slate-200`} title="访问日志（谁访问过它）">
+          <button onClick={onLogs} className={`${iconBtn} bg-surface-2 text-content hover:bg-fill`} title="访问日志（谁访问过它）">
             <FileText className="h-3 w-3" />
           </button>
           <button onClick={onRemove} className={`${iconBtn} bg-rose-50 text-rose-500 hover:bg-rose-100`} title="删除">
@@ -1587,28 +1630,28 @@ function SiteCard({
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-w-0 items-center gap-1 font-mono text-xs font-semibold text-slate-700 hover:text-blue-600"
+            className="inline-flex min-w-0 items-center gap-1 font-mono text-xs font-semibold text-content hover:text-blue-600"
           >
             <span className="truncate">
               {s.hosts?.[0]}
-              {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
-              {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
+              {addr && <span className="text-muted">{portText(addr.https, addr.port)}</span>}
+              {s.pathPrefix && <span className="text-muted">{s.pathPrefix}</span>}
             </span>
-            <ExternalLink className="h-3 w-3 shrink-0 text-slate-300" />
+            <ExternalLink className="h-3 w-3 shrink-0 text-muted" />
           </a>
         ) : (
-          <span className="font-mono text-xs font-semibold text-slate-700">
-            {s.hosts?.[0] ?? <span className="text-slate-400">任意域名</span>}
-            {addr && <span className="text-slate-400">{portText(addr.https, addr.port)}</span>}
-            {s.pathPrefix && <span className="text-slate-400">{s.pathPrefix}</span>}
+          <span className="font-mono text-xs font-semibold text-content">
+            {s.hosts?.[0] ?? <span className="text-muted">任意域名</span>}
+            {addr && <span className="text-muted">{portText(addr.https, addr.port)}</span>}
+            {s.pathPrefix && <span className="text-muted">{s.pathPrefix}</span>}
           </span>
         )
       }
       meta={
         <>
           {/* 后端：只显示端口（IP 已经在设备头上了，不用重复） */}
-          <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-slate-500">
-            <ArrowRight className="h-3 w-3 shrink-0 text-slate-300" />
+          <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-muted">
+            <ArrowRight className="h-3 w-3 shrink-0 text-muted" />
             <span className="truncate">:{String(s.backend ?? '').split(':')[1] ?? s.backend}</span>
           </span>
           {s.backendHttps && <CardBadge tone="emerald" title="内网服务本身是 HTTPS">TLS</CardBadge>}
@@ -1622,7 +1665,7 @@ function SiteCard({
           <button
             onClick={onTest}
             disabled={testingId === s.id}
-            className="ml-auto grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+            className="ml-auto grid h-5 w-5 shrink-0 place-items-center rounded text-muted hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
             title="测试后端能不能连上"
           >
             <Zap className={`h-3 w-3 ${testingId === s.id ? 'animate-pulse' : ''}`} />

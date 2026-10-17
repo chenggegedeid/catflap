@@ -36,13 +36,14 @@ import (
 
 const appName = "Catflap"
 
-// 三个地址都由 core 给出的回环 URL 拼出来（core/listen.go）：
+// 服务器地址由 core 给出的回环 URL 拼出来（core/listen.go）：
 // 端口只有一处定义，改端口不会漏掉「探测后端在不在」那一步。
-var (
-	backendURL = core.LoopbackURL()
-	adminURL   = backendURL + "/catflap/"
-	homeURL    = backendURL + "/"
-)
+//
+// 导航页移除后，**管理后台就挂在根路径**，所以这里只有一个地址了。
+// 以前是 adminURL = backendURL + "/catflap/"、homeURL = backendURL + "/"，
+// 那套双前端的路由已经不存在 —— 留着会让启动日志打出「导航主页运行在 …」，
+// 用户照着点进去其实还是后台。
+var backendURL = core.LoopbackURL()
 
 //go:embed web/admin/dist
 var webFS embed.FS
@@ -132,7 +133,7 @@ func isBackendReady() bool {
 	_ = conn.Close()
 
 	client := http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(adminURL)
+	resp, err := client.Get(backendURL)
 	if err != nil {
 		return false
 	}

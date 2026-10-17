@@ -29,6 +29,12 @@ type systemComponent struct{}
 
 func (systemComponent) Name() string { return Name }
 
+// Title 见 core/component.Describer。
+func (systemComponent) Title() string { return "系统信息" }
+
+// Summary 见 core/component.Describer。
+func (systemComponent) Summary() string { return "面板基础设置、版本与运行状态" }
+
 // Init 做启动摘要，把「装了哪些功能、哪些被关了、注册了哪些服务商」写进日志。
 //
 // 放在这里而不是 app.go：摘要是「系统」这个组件的职责，写在自己的 Init 里

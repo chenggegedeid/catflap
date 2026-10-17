@@ -57,7 +57,7 @@ export function DomainInput({
   // 没有候选主域：普通输入框（老行为，不逼人先配 DDNS）
   if (zones.length === 0) {
     return (
-      <div className={`flex items-center rounded-xl border border-slate-200 bg-white focus-within:border-blue-400 ${className}`}>
+      <div className={`flex items-center rounded-xl border border-line bg-surface focus-within:border-blue-400 ${className}`}>
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -75,7 +75,7 @@ export function DomainInput({
 
   return (
     <div
-      className={`flex items-stretch overflow-hidden rounded-xl border border-slate-200 bg-white focus-within:border-blue-400 ${className}`}
+      className={`flex items-stretch overflow-hidden rounded-xl border border-line bg-surface focus-within:border-blue-400 ${className}`}
     >
       <input
         value={sub}
@@ -83,12 +83,12 @@ export function DomainInput({
         placeholder={placeholder || '子域，如 nas'}
         className={box + ' flex-1'}
       />
-      <span className="grid place-items-center px-1 font-mono text-sm text-slate-300">.</span>
+      <span className="grid place-items-center px-1 font-mono text-sm text-muted">.</span>
       <select
         value={zone}
         onChange={(e) => emit(sub, e.target.value)}
         title="主域名（来自 DDNS 解析记录）"
-        className="max-w-[45%] shrink-0 border-l border-slate-100 bg-slate-50 px-2 font-mono text-sm text-slate-600 outline-none"
+        className="max-w-[45%] shrink-0 border-l border-line bg-surface-2 px-2 font-mono text-sm text-content outline-none"
       >
         {zones.map((z) => (
           <option key={z} value={z}>

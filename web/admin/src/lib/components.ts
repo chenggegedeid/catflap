@@ -108,11 +108,16 @@ export function enabledIn(s: ComponentsState, name?: string): boolean {
   return c.enabled
 }
 
-/** 被关掉的组件名（有序）。界面提示用，例如「这台机器改过什么」 */
+/**
+ * 被关掉的组件（有序），界面提示用。
+ *
+ * 显示中文名而不是机器名：「当前已关闭：webhook、traffic」对用户没有意义。
+ * 退回机器名的分支留给「后端还没实现 Describer」的老版本，不是常态。
+ */
 export function disabledIn(s: ComponentsState): string[] {
   return s.list
     .filter((c) => !c.enabled)
-    .map((c) => c.name)
+    .map((c) => c.title ?? c.name)
     .sort()
 }
 
