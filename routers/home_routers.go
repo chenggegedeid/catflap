@@ -64,6 +64,18 @@ func HomeRoutersProtected(g *gin.RouterGroup) {
 		middleware.BindJsonMiddleware[home_api.CategoryReorderRequest], app.CategoryReorderView)
 
 	// App (常用网站)
+	// 分类切换方式（stream / paged）
+	g.PUT("home/pagemode",
+		middleware.BindJsonMiddleware[home_api.PageModeRequest], app.PageModeUpdateView)
+
+	// 把应用移到别的分组（拖到分组按钮上）
+	g.PUT("home/app/move",
+		middleware.BindJsonMiddleware[home_api.AppMoveRequest], app.AppMoveView)
+
+	// 底部托盘（存 id 列表）
+	g.PUT("home/dock",
+		middleware.BindJsonMiddleware[home_api.DockUpdateRequest], app.DockUpdateView)
+
 	g.POST("home/app/add",
 		middleware.BindJsonMiddleware[home_api.AppAddRequest], app.AppAddView)
 	g.PUT("home/app/update",

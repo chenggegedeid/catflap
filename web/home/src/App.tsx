@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import './App.css'
 
-import { deleteApp, gotoLogin, reorderApps } from './api/home'
+import { deleteApp, gotoLogin, moveApp, reorderApps, reorderCategories, saveDock } from './api/home'
 import { Background } from './components/layout/Background'
 import { CategoryRail } from './components/layout/CategoryRail'
 import { Header } from './components/layout/Header'
@@ -25,6 +25,9 @@ import { UnlockModal } from './components/grid/UnlockModal'
 import { AppFormModal } from './components/settings/AppFormModal'
 import { BlankContextMenu, type BlankMenuState } from './components/grid/BlankContextMenu'
 import { Section, useScrollSpy } from './components/grid/SectionedFeed'
+import { useWheelPaging } from './components/layout/useWheelPaging'
+import { HomeDnd } from './components/dnd/HomeDnd'
+import { Dock, useDockDroppable } from './components/dock/Dock'
 import { SearchBar } from './components/search/SearchBar'
 import { SettingsPanel } from './components/settings/SettingsPanel'
 import { HomeProvider, useHome, visibleApps, visibleCategories } from './state/HomeProvider'
@@ -104,6 +107,140 @@ function HomePage() {
     setSpyActive(id)
   }, [])
 
+  /**
+   * 滚轮翻分组。
+   *
+   * 判据是"**当前这一组**是不是已经看到头了"，而不是"整页滚到头了" ——
+   * 用整页判据的话，一屏能放下好几组时永远翻不动（页面还没到底），
+   * 表现就是"滚轮没反应"。这正是上一版不生效的原因。
+   *
+   * 手机上不启用：触屏本来就能直接滑，再叠一层"滚轮翻页"只会打架。
+   */
+  // 翻页方向：给滑动动画用（往下翻 = 新内容从下滑入）
+  const [pageDir, setPageDir] = useState<1 | -1>(1)
+
+  const pageByWheel = useCallback(
+    (dir: 1 | -1) => {
+      const i = catIds.indexOf(spyActive)
+      if (i < 0) return
+      const next = Math.min(catIds.length - 1, Math.max(0, i + dir))
+      if (next === i) return
+      setPageDir(dir)
+      scrollToCategory(catIds[next])
+    },
+    [catIds, spyActive, scrollToCategory],
+  )
+
+  /**
+   * 键盘翻分组：PageDown / PageUp。
+   *
+   * 为什么要有：滚轮翻页依赖 wheel 事件，而有些环境（远程桌面、
+   * 某些触控板驱动、自动化工具）不产生 wheel —— 那时"翻页"就完全没路了。
+   * 键盘是兜底，而且对键盘用户本来就该有。
+   *
+   * 焦点在输入框里时不响应，免得打断打字。
+   */
+  const onPageKey = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key !== 'PageDown' && e.key !== 'PageUp') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (catIds.length < 2) return
+      e.preventDefault()
+      pageByWheel(e.key === 'PageDown' ? 1 : -1)
+    },
+    [catIds, pageByWheel],
+  )
+
+  useEffect(() => {
+    window.addEventListener('keydown', onPageKey)
+    return () => window.removeEventListener('keydown', onPageKey)
+  }, [onPageKey])
+
+  /**
+   * 当前分组那一节的 DOM。翻页判据要靠它 —— 见 useWheelPaging 的说明。
+   * Section 的 id 是 `cat-<分组id>`，和 scrollToCategory 用的一致。
+   */
+  const currentSection = useCallback(
+    () => (spyActive ? document.getElementById(`cat-${spyActive}`) : null),
+    [spyActive],
+  )
+
+
+
+  /** 分组拖动排序：按新顺序写回 order（1..N 连续） */
+  const reorderCats = useCallback(
+    (ids: string[]) => {
+      const pos = new Map(ids.map((id, i) => [id, i + 1]))
+      void mutate({
+        apply: (cfg) => ({
+          ...cfg,
+          categories: cfg.categories.map((c) => (pos.has(c.id) ? { ...c, order: pos.get(c.id)! } : c)),
+        }),
+        request: () => reorderCategories(ids),
+      })
+    },
+    [mutate],
+  )
+
+  /** 拖进托盘：追加到末尾（已在里面就不动，避免重复项） */
+  const dropToDock = useCallback(
+    (appId: string) => {
+      const cur = state.config?.dock ?? []
+      const ids = cur.map((a) => a.id)
+      if (ids.includes(appId)) return
+      const next = [...ids, appId]
+      void mutate({
+        apply: (cfg) => {
+          const app = cfg.apps.find((a) => a.id === appId)
+          if (!app) return cfg
+          return { ...cfg, dock: [...(cfg.dock ?? []), app] }
+        },
+        request: () => saveDock(next),
+        okMsg: '已添加到托盘',
+      })
+    },
+    [state.config, mutate],
+  )
+
+  /**
+   * 拖到别的分组按钮上 = 移动分组。
+   *
+   * 不弹确认框：拖拽是**可逆**的（再拖回去就行），
+   * 而确认框会打断"拖放"这个连续动作，手感很糟。
+   * 真正不可逆的删除才需要确认。
+   */
+  const moveToCategory = useCallback(
+    (appId: string, categoryId: string) => {
+      const app = state.config?.apps.find((a) => a.id === appId)
+      if (!app || app.categoryId === categoryId) return
+      const catName = state.config?.categories.find((c) => c.id === categoryId)?.name ?? ''
+      void mutate({
+        apply: (cfg) => ({
+          ...cfg,
+          apps: cfg.apps.map((a) => (a.id === appId ? { ...a, categoryId } : a)),
+        }),
+        request: () => moveApp(appId, categoryId),
+        okMsg: `已移到「${catName}」`,
+      })
+    },
+    [state.config, mutate],
+  )
+
+  const removeFromDock = useCallback(
+    (appId: string) => {
+      const ids = (state.config?.dock ?? []).map((a) => a.id).filter((id) => id !== appId)
+      void mutate({
+        apply: (cfg) => ({ ...cfg, dock: (cfg.dock ?? []).filter((a) => a.id !== appId) }),
+        request: () => saveDock(ids),
+        okMsg: '已从托盘移除',
+      })
+    },
+    [state.config, mutate],
+  )
+
+  const { setNodeRef: dockRef, isOver } = useDockDroppable()
+
   const onRetry = useCallback(async () => {
     setRetrying(true)
     await reload()
@@ -127,11 +264,40 @@ function HomePage() {
   // 壁纸和标题不依赖配置：加载中、加载失败也要有个能看的样子
   const cfg = state.config
 
+  // hover: none 表示触屏设备 —— 那里不要滚轮翻页（触屏直接滑就行）
+  const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
+  useWheelPaging(!isTouch && catIds.length > 1, currentSection, pageByWheel, cfg?.pageMode === 'paged')
+
   return (
-    <div className="min-h-screen">
+    /**
+     * 全页唯一的 DndContext。卡片网格 / 分组栏 / 底部 Dock 都要挂在它下面，
+     * 否则跨区域拖不动（每个区域各建一个 DndContext = 三个互不相通的会话）。
+     * 访客（enabled=false）时这里直接返回 children，不做任何拖拽包装。
+     */
+    <HomeDnd
+      enabled={!!cfg?.authed}
+      onReorderApps={onReorder}
+      onReorderCategories={reorderCats}
+      onDropToDock={dropToDock}
+      onMoveToCategory={moveToCategory}
+    >
+      {/* min-h-dvh：移动端的 100vh 是"地址栏收起时"的高度，用它做满屏会被挡住一截 */}
+      <div className="min-h-dvh">
       <Background wallpaper={cfg?.wallpaper} />
 
-      <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col px-4 pb-10 pt-8 sm:px-6">
+      {/*
+        安全区：左右给刘海/圆角让位；底部多留一截给 Dock 和 iPhone 横条。
+        用 max() 是因为 env() 在不支持的浏览器里是无效值 —— 直接写 env() 会让
+        整条 padding 声明被丢弃，等于没有边距。
+      */}
+      <div
+        className="mx-auto flex min-h-dvh w-full max-w-[1600px] flex-col pt-4 sm:px-6 sm:pt-8"
+        style={{
+          paddingLeft: 'max(1rem, var(--safe-left))',
+          paddingRight: 'max(1rem, var(--safe-right))',
+          paddingBottom: 'calc(1.5rem + var(--safe-bottom) + 3.5rem)',
+        }}
+      >
         <TopRightActions
           authed={!!cfg?.authed}
           pending={state.pending > 0}
@@ -153,8 +319,9 @@ function HomePage() {
          * 左栏就高亮哪 —— 这是极光那种上下翻的手感。改动原因：
          * 一次只显示一组时，短分组下面全是空白，而且跨组找东西要点两次。
          */}
-        <div className="mt-8 flex flex-1 gap-3 sm:gap-4">
-          <div className="sticky top-6 self-start pt-1">
+        {/* 手机上是纵向（左栏变成横向一排在上面），≥sm 才左右分栏 */}
+        <div className="mt-5 flex flex-1 flex-col gap-3 sm:mt-8 sm:flex-row sm:gap-4">
+          <div className="sticky top-0 z-20 -mx-1 bg-gradient-to-b from-slate-900/10 to-transparent px-1 py-1 backdrop-blur-sm sm:top-6 sm:mx-0 sm:bg-none sm:px-0 sm:py-0 sm:pt-1 sm:backdrop-blur-none">
             <CategoryRail
               categories={visibleCategories(cfg)}
               active={spyActive}
@@ -169,6 +336,7 @@ function HomePage() {
               }}
               onAdd={() => setSettingsOpen(true)}
               canManage={!!cfg?.authed}
+              onReorder={cfg?.authed ? reorderCats : undefined}
               hiddenCount={cfg?.hiddenCategoryCount}
             />
           </div>
@@ -181,10 +349,12 @@ function HomePage() {
             {state.load === 'ready' && cfg && (
               <Feed
                 canManage={!!cfg.authed}
+                pageMode={cfg.pageMode === 'paged' ? 'paged' : 'stream'}
+                activeId={spyActive}
+                pageDir={pageDir}
                 onOpenMenu={(app, x, y) => setMenu({ app, x, y })}
                 onAddApp={openAddApp}
                 onBlankContextMenu={(x, y) => setBlankMenu({ x, y })}
-                onReorder={onReorder}
                 registerRef={registerRef}
               />
             )}
@@ -242,8 +412,19 @@ function HomePage() {
         />
       )}
 
+      <Dock
+        items={cfg?.dock ?? []}
+        prefer={cfg?.networkPrefer ?? 'wanV4'}
+        isOver={isOver}
+        dropRef={dockRef}
+        canManage={!!cfg?.authed}
+        onOpenApp={(app) => setFormFor(app)}
+        onRemove={removeFromDock}
+      />
+
       <Toasts toasts={toasts} onDismiss={dismissToast} />
     </div>
+    </HomeDnd>
   )
 }
 
@@ -256,17 +437,23 @@ function HomePage() {
  */
 function Feed({
   canManage,
+  pageMode,
+  activeId,
+  pageDir,
   onOpenMenu,
   onAddApp,
   onBlankContextMenu,
-  onReorder,
   registerRef,
 }: {
   canManage: boolean
+  /** stream = 一条长流；paged = 一屏一组（卡片少的时候流式没有可滚的余地） */
+  pageMode: 'stream' | 'paged'
+  activeId: string
+  /** 翻页方向，决定滑动动画从哪边进来 */
+  pageDir: 1 | -1
   onOpenMenu: (app: AppView, x: number, y: number) => void
   onAddApp: () => void
   onBlankContextMenu: (x: number, y: number) => void
-  onReorder: (ids: string[]) => void
   registerRef: (id: string, el: HTMLElement | null) => void
 }) {
   const { state } = useHome()
@@ -280,6 +467,50 @@ function Feed({
         hint="分组决定左边那一列显示什么。先建一个，再把应用放进去。"
         action={canManage ? { label: '新建分组', onClick: onAddApp } : undefined}
       />
+    )
+  }
+
+  /**
+   * paged 模式：只渲染当前分组。
+   *
+   * 为什么要有这个模式：stream 下"翻页"靠的是滚动，而**内容不足一屏时
+   * 页面根本没有可滚的余地** —— 滚轮发了事件、scrollIntoView 也调了，
+   * 但页面动不了，用户看到的就是"翻页没反应"。
+   * paged 每次只显示一组，翻页就是真的翻（配滑动动画）。
+   *
+   * key 用 activeId：React 按 key 重建节点，动画每次都从头播；
+   * 不换 key 的话同一组内翻页动画不会触发。
+   */
+  if (pageMode === 'paged') {
+    const cat = cats.find((c) => c.id === activeId) ?? cats[0]
+    const apps = cat ? visibleApps(cfg, cat.id) : []
+    return (
+      <div
+        className="min-h-[60vh] pb-12"
+        onContextMenu={
+          canManage
+            ? (e) => {
+                e.preventDefault()
+                onBlankContextMenu(e.clientX, e.clientY)
+              }
+            : undefined
+        }
+      >
+        {cat && (
+          <div key={cat.id} className={pageDir === 1 ? 'animate-page-next' : 'animate-page-prev'}>
+            <h2 className="mb-2 px-1 text-[11px] font-medium tracking-wide text-white/55">{cat.name}</h2>
+            {apps.length > 0 ? (
+              <AppGrid
+                apps={apps}
+                prefer={cfg.networkPrefer}
+                onOpenMenu={canManage ? onOpenMenu : undefined}
+              />
+            ) : (
+              <p className="px-1 text-[11px] text-white/40">这个分组还没有应用</p>
+            )}
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -315,12 +546,7 @@ function Feed({
         }
         return (
           <Section key={cat.id} id={cat.id} title={cat.name} registerRef={registerRef}>
-            <AppGrid
-              apps={apps}
-              prefer={cfg.networkPrefer}
-              onOpenMenu={canManage ? onOpenMenu : undefined}
-              onReorder={canManage ? onReorder : undefined}
-            />
+            <AppGrid apps={apps} prefer={cfg.networkPrefer} onOpenMenu={canManage ? onOpenMenu : undefined} />
           </Section>
         )
       })}

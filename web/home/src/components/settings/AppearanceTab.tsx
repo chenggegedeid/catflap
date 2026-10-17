@@ -8,7 +8,7 @@
 
 import { useState } from 'react'
 import { Check, Upload } from 'lucide-react'
-import { updateNetworkPrefer, updateWallpaper, uploadWallpaper } from '../../api/home'
+import { updateNetworkPrefer, updatePageMode, updateWallpaper, uploadWallpaper } from '../../api/home'
 import { useHome } from '../../state/HomeProvider'
 import type { NetworkPrefer, Wallpaper, WallpaperMode } from '../../types'
 
@@ -114,6 +114,53 @@ export function AppearanceTab() {
             className="w-full accent-blue-500"
           />
         </label>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-slate-700">分类切换方式</h3>
+        {/*
+          两种模式的取舍（见 model.go 里 PageMode 的注释）：
+          流式适合内容多、能滚起来的情况；翻页适合分组少、一屏放得下的情况。
+          不做成自动判断的原因：同样的内容在不同屏幕上可滚性不同，
+          自动判断会让"翻页行为"随着窗口大小变来变去，不可预测。
+        */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() =>
+              void mutate({
+                apply: (c) => ({ ...c, pageMode: 'stream' }),
+                request: () => updatePageMode('stream'),
+              })
+            }
+            className={`rounded-xl border py-2 text-[11px] font-semibold transition ${
+              (cfg?.pageMode ?? 'stream') === 'stream'
+                ? 'border-blue-400 bg-blue-50 text-blue-700'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            流式滚动
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void mutate({
+                apply: (c) => ({ ...c, pageMode: 'paged' }),
+                request: () => updatePageMode('paged'),
+              })
+            }
+            className={`rounded-xl border py-2 text-[11px] font-semibold transition ${
+              cfg?.pageMode === 'paged'
+                ? 'border-blue-400 bg-blue-50 text-blue-700'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            一屏一组
+          </button>
+        </div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+          流式：所有分组连着排，滚到哪亮哪。一屏一组：滚轮/PageDown 直接翻到相邻分组。
+        </p>
       </section>
 
       <section>

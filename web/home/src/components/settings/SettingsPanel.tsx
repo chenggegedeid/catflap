@@ -40,7 +40,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose()
         }}
-        className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl"
+        // 手机上没有"抽屉"这个概念 —— 直接占满屏，宽屏才做侧边面板
+        className="flex h-full w-full flex-col bg-white shadow-2xl sm:max-w-lg"
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
           <h2 className="text-sm font-semibold text-slate-800">导航页设置</h2>

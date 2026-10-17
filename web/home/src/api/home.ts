@@ -50,6 +50,12 @@ export const reorderApps = (ids: string[]) => apiSend<unknown>('PUT', '/api/home
 export const resizeApp = (id: string, size: CardSize) =>
   apiSend<AppView>('PUT', '/api/home/app/resize', { id, size })
 
+/** 切换分类模式：stream（流式）或 paged（一屏一组） */
+export const updatePageMode = (mode: string) => apiSend<unknown>('PUT', '/api/home/pagemode', { mode })
+
+/** 保存底部托盘（传完整顺序，空数组 = 清空） */
+export const saveDock = (ids: string[]) => apiSend<unknown>('PUT', '/api/home/dock', { ids })
+
 /** 移动到某个分类 */
 export const moveApp = (id: string, categoryId: string) =>
   apiSend<AppView>('PUT', '/api/home/app/category', { id, categoryId })

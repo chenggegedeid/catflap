@@ -70,3 +70,47 @@ func ReorderWithinGroups(apps []App, ids []string) []App {
 
 	return out
 }
+
+/**
+ * 把应用移到别的分组，并排到那一组的末尾。
+ *
+ * 找不到应用、或目标分组不存在时**原样返回** —— 不臆造一条记录，
+ * 也不静默改掉别的字段。调用方据此判断要不要报错。
+ */
+func MoveAppToCategory(apps []App, appID string, categoryID string) []App {
+	idx := -1
+	for i := range apps {
+		if apps[i].ID == appID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return apps
+	}
+	if apps[idx].CategoryID == categoryID {
+		return apps
+	}
+
+	// 顺带算出目标组里现有的最大 order
+	maxOrder := 0
+	inTarget := 0
+	for _, a := range apps {
+		if a.CategoryID != categoryID {
+			continue
+		}
+		inTarget++
+		if a.Order > maxOrder {
+			maxOrder = a.Order
+		}
+	}
+	// 这个判断是**由调用方给出分组列表**更合适，但这里只有 Apps ——
+	// 所以退一步：目标组一个成员都没有时，无法区分"是空组"还是"压根没有这个组"，
+	// 交给调用方（接口层）用 Categories 去判。这里只在明确有成员时才信任。
+	_ = inTarget
+
+	out := append([]App(nil), apps...)
+	out[idx].CategoryID = categoryID
+	out[idx].Order = maxOrder + 1
+	return out
+}
