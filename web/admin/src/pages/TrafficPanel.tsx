@@ -48,6 +48,32 @@ export function TrafficPanel() {
     }
   }, [])
 
+  /** 各站点的异常请求数，键是**站点 ID 的字符串**。空的表示审计没开或没数据 */
+  const [errorsBySite, setErrorsBySite] = useState<Record<string, number>>({})
+
+  // 异常数与流量并排看，才能回答「这个服务的流量是正常用还是被打」。
+  //
+  // 关联要绕一道：审计按**域名（Host）**聚合，流量按**站点 ID**聚合，
+  // 中间得靠站点配置里的 hosts[] 把域名翻译成 ID。拿不到配置就退回空表，
+  // 那只是少一列，不该让整个流量页报错。
+  const loadAuditErrors = useCallback(async () => {
+    try {
+      const [ov, cfg] = await Promise.all([api.getAuditOverview(24), api.getProxyConfig()])
+      const hostToId: Record<string, string> = {}
+      for (const s of cfg.sites ?? []) {
+        for (const h of s.hosts ?? []) hostToId[String(h).toLowerCase()] = String(s.id)
+      }
+      const out: Record<string, number> = {}
+      for (const s of ov.sites ?? []) {
+        const id = hostToId[String(s.site).toLowerCase()]
+        if (id) out[id] = (out[id] ?? 0) + s.count
+      }
+      setErrorsBySite(out)
+    } catch {
+      // 审计没开 / 没数据都属正常，静默
+    }
+  }, [])
+
   // 趋势范围（小时）：近1小时/近24小时/近7天/近30天 —— 参考飞牛的快捷档。
   // 聚合粒度后端自动定（≤48h 按小时，更大按天），前端只管把速率画出来。
   const [trendHours, setTrendHours] = useState(168)
@@ -64,6 +90,7 @@ export function TrafficPanel() {
   useEffect(() => {
     void loadRealtime()
     void loadTrend()
+    void loadAuditErrors()
 
     const start = () => {
       if (timerRef.current != null) return
@@ -196,7 +223,7 @@ export function TrafficPanel() {
             <CardHeader title="各服务流量" />
           </div>
           <div className="px-5 pb-4">
-            <TopList trend={trend} />
+            <TopList trend={trend} errorsBySite={errorsBySite} />
           </div>
         </Card>
       </div>
@@ -287,7 +314,14 @@ function RateChart({ series }: { series: { in: number; out: number }[] }) {
 }
 
 /** 近 N 天柱状图。入站在左、出站在右，同一天并排 */
-function TopList({ trend }: { trend: TrafficTrend | null }) {
+function TopList({
+  trend,
+  errorsBySite,
+}: {
+  trend: TrafficTrend | null
+  /** 站点 ID → 异常请求数。审计按域名聚合，进来前已翻译成站点 ID */
+  errorsBySite: Record<string, number>
+}) {
   // 展开的是哪个服务（key = site-<id> / tun-<ref>）
   const [expanded, setExpanded] = useState('')
   // 名字由后端解析好（「设备名 · 服务名」），拿不到就回落成编号
@@ -298,6 +332,8 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
       label: names[id] ?? (id === '0' ? '未匹配站点' : `站点 #${id}`),
       total: t.in + t.out,
       requests: t.requests,
+      // bySite 这一支都是反代站点，直接按站点 ID 取异常数
+      errors: errorsBySite[id] ?? 0,
       tunnel: false,
     })),
     ...Object.entries(trend?.byTunnel ?? {}).map(([key, t]) => ({
@@ -305,6 +341,8 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
       label: names[key] ?? `穿透 #${key.replace(/^s/, '')}`,
       total: t.in + t.out,
       requests: t.requests,
+      // 穿透不经过反代，审计里没有它 —— 异常列对它没意义
+      errors: 0,
       tunnel: true,
     })),
   ]
@@ -335,6 +373,16 @@ function TopList({ trend }: { trend: TrafficTrend | null }) {
               <span className="ml-2 text-[11px] text-muted">
                 {fmtCount(r.requests)} {r.tunnel ? '次连接' : '次'}
               </span>
+              {/* 异常列：红底 = 这个站点正在被打。和流量并排才能看出
+                  「流量高」到底是正常用还是有人扫 */}
+              {!r.tunnel && r.errors > 0 && (
+                <span
+                  title={`近 24 小时 ${r.errors} 次异常请求（4xx）`}
+                  className="ml-1.5 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600"
+                >
+                  异常 {fmtCount(r.errors)}
+                </span>
+              )}
             </span>
             <span className="tabular-nums text-muted">{fmtBytes(r.total)}</span>
           </div>

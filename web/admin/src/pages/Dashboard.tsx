@@ -12,7 +12,7 @@ import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
 
 
-import { TrafficPanel } from './TrafficPanel'
+import { TrafficSecurityCard } from '../components/TrafficSecurityCard'
 import type {
   Certificate,
   DdnsConfig,
@@ -217,8 +217,16 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4">
-      {/* 流量大屏：放在最前面 —— 进管理页第一眼想看的就是"现在流量怎么样" */}
-      <TrafficPanel />
+      {/*
+        流量与安全：只留信号。
+
+        这里**曾经**直接渲染 <TrafficPanel /> —— 那块有 587 行，实时速率、趋势
+        四档、各服务 Top、可疑来源全塞在仪表盘最上面，结果是往下翻好几屏才看得
+        到「当前状态」和「需要处理」。现在它独立成「流量统计」页（#/traffic），
+        这里换成一张紧凑的联合卡：流量与异常画在同一条时间轴上，回答「现在的
+        流量是正常访问还是有人在扫我」，详情各自链接过去。
+      */}
+      <TrafficSecurityCard />
 
       {/* 概览 + 快捷操作 */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
