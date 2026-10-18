@@ -1,7 +1,8 @@
 import {
-  ArrowRight, ExternalLink, FileText, Pencil, Power, ShieldCheck, Trash2, Zap,
+  ArrowRight, FileText, Pencil, Power, ShieldCheck, Trash2, Zap,
 } from 'lucide-react'
 import { CardBadge, ServiceCard, iconBtn } from '../../components/ServiceCard'
+import { ResolvedAddress } from '../../components/ResolvedAddress'
 import type { ProxyEntry, ProxyListener, ProxySite } from '../../types'
 import { portText, siteAddr, siteURL } from './shared'
 
@@ -40,6 +41,7 @@ export function SiteCard({
   onEdit,
   onRemove,
   onLogs,
+  onCopy,
 }: {
   site: ProxySite
   entry?: ProxyEntry
@@ -51,6 +53,8 @@ export function SiteCard({
   onRemove: () => void
   /** 打开这个站点的访问日志 */
   onLogs: () => void
+  /** 复制外部地址。不传则地址只展示、不可复制 */
+  onCopy?: (text: string) => void
 }) {
   const url = siteURL(entry, s)
   const addr = siteAddr(entry, s)
@@ -92,20 +96,19 @@ export function SiteCard({
         </>
       }
       subtitle={
+        // 和穿透页共用 ResolvedAddress：地址文字可点跳转、旁边复制图标、
+        // 端口非默认时带角标、非 HTTP 服务不提供跳转。
+        // 没拿到 URL 时（比如站点停用）退回纯文本展示域名。
         url ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex min-w-0 items-center gap-1 font-mono text-xs font-semibold text-content hover:text-blue-600"
-          >
-            <span className="truncate">
-              {s.hosts?.[0]}
-              {addr && <span className="text-muted">{portText(addr.https, addr.port)}</span>}
-              {s.pathPrefix && <span className="text-muted">{s.pathPrefix}</span>}
-            </span>
-            <ExternalLink className="h-3 w-3 shrink-0 text-muted" />
-          </a>
+          <ResolvedAddress
+            value={{
+              scheme: addr?.https ? 'https' : 'http',
+              host: s.hosts?.[0] ?? '',
+              port: addr?.port ?? 0,
+              path: s.pathPrefix || undefined,
+            }}
+            onCopy={onCopy ?? (() => {})}
+          />
         ) : (
           <span className="font-mono text-xs font-semibold text-content">
             {s.hosts?.[0] ?? <span className="text-muted">任意域名</span>}

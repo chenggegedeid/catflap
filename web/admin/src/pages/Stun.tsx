@@ -12,12 +12,14 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertCircle, ChevronRight, ClipboardCopy, Computer, ExternalLink, FileText, Globe,
+  AlertCircle, ChevronRight, Computer, FileText, Globe,
   Info, LoaderCircle, Pencil, Plus, Power, RotateCw, Server, Trash2, Wifi,
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
 import { LanScanModal } from '../components/LanScanModal'
 import { CardBadge, ServiceCard, iconBtn } from '../components/ServiceCard'
+import { ResolvedAddress } from '../components/ResolvedAddress'
+import type { ResolvedAddressValue } from '../components/ResolvedAddress'
 import { AccessLogModal } from '../components/AccessLogModal'
 import type { ServiceState } from '../components/ServiceCard'
 import * as api from '../lib/api'
@@ -308,21 +310,26 @@ export function Stun() {
       .catch(() => toast('复制失败'))
   }
 
-  const openAddress = (svc: StunService, addr: string) => {
-    if (!addr) return
-    if ((svc.protocol || '').toLowerCase() === 'ssh') {
-      const [host, port] = addr.split(':')
-      const cmd = `ssh root@${host} -p ${port || '22'}`
-      copy(cmd)
-      window.setTimeout(() => alert(`SSH 连接命令已复制：\n\n${cmd}`), 100)
-      return
-    }
-    // 和后端 PublicScheme 保持一致：洞口终结 TLS 时外部就是 https；
-    // 不终结却勾了「转发给内网时也用 HTTPS」时洞口在替内网加密，外面那一段是明文，
-    // 写成 https:// 会直接给出一个 ERR_SSL_PROTOCOL_ERROR 的链接
-    const scheme =
-      svc.tlsTerminate || (!svc.backendHttps && svc.https) ? 'https://' : 'http://'
-    window.open(`${scheme}${addr}`, '_blank', 'noopener,noreferrer')
+  /**
+   * 把服务的外部地址整理成 ResolvedAddress 要的结构。
+   *
+   * 协议的判定和后端 PublicScheme 保持一致：洞口终结 TLS 时外部就是 https；
+   * 不终结却勾了「转发给内网时也用 HTTPS」时洞口在替内网加密、外面那一段是明文，
+   * 写成 https:// 会直接给出一个 ERR_SSL_PROTOCOL_ERROR 的链接。
+   */
+  const resolvedAddr = (svc: StunService, host: string, port: number): ResolvedAddressValue | null => {
+    if (!host || port <= 0) return null
+    const proto = (svc.protocol || '').toLowerCase()
+    // 协议字段里写了明确的非 HTTP 协议就按它来，否则按 TLS 情况定 http/https
+    const scheme = proto === 'ssh' || proto === 'rdp' ? proto : svc.tlsTerminate || (!svc.backendHttps && svc.https) ? 'https' : 'http'
+    return { scheme, host, port }
+  }
+
+  /** SSH 这类没法用浏览器打开的，复制命令比复制链接有用 */
+  const copySSHCommand = (host: string, port: number) => {
+    const cmd = `ssh root@${host} -p ${port || 22}`
+    copy(cmd)
+    window.setTimeout(() => alert(`SSH 连接命令已复制：\n\n${cmd}`), 100)
   }
 
   const logStatus = useMemo(() => (logKey ? statusMap[logKey] ?? null : null), [logKey, statusMap])
@@ -392,7 +399,7 @@ export function Stun() {
     const externalPort = status?.externalPort ?? 0
     // 配了对外域名就用域名——终结 TLS 时证书是按域名签的，用 IP 访问必然报证书错
     const externalHost = svc.domain || config.publicIP
-    const fullAddr = externalPort > 0 && externalHost ? `${externalHost}:${externalPort}` : ''
+    // 地址拼接已交给 ResolvedAddress（它负责协议、端口角标与不可跳转的判断）
     const lastError = status?.lastError || ''
     const restartCount = status?.restartCount ?? 0
     const off = svc.enabled === false
@@ -480,26 +487,23 @@ export function Stun() {
         subtitle={
           off ? (
             <span className="text-muted">已停用，外部地址不通</span>
-          ) : fullAddr ? (
-            <div className="flex min-w-0 items-center gap-1">
-              <button
-                onClick={() => copy(fullAddr)}
-                title={`点击复制：${fullAddr}`}
-                className="flex min-w-0 flex-1 items-center gap-1 text-left"
-              >
-                <ClipboardCopy className="h-3 w-3 shrink-0 text-muted" />
-                <span className="truncate font-mono text-xs font-semibold text-blue-600">{fullAddr}</span>
-              </button>
-              <button
-                onClick={() => openAddress(svc, fullAddr)}
-                title="一键直达（新标签打开）"
-                className="shrink-0 rounded p-0.5 text-blue-500 transition hover:bg-blue-50"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </button>
-            </div>
           ) : (
-            <span className="text-muted">{phaseLabel[phase] || '等待外部地址…'}</span>
+            /*
+              用统一的 ResolvedAddress，不再自己拼「复制按钮 + 跳转小图标」。
+              原来那样做有三个毛病：点地址是复制不是跳转（不符合直觉）、
+              跳转藏在小图标里手机难中、非 HTTP 服务也照样 window.open 跳过去
+              必然打不开。现在开不了的服务会显示成 rdp:// 这类前缀且不提供跳转。
+            */
+            <ResolvedAddress
+              value={resolvedAddr(svc, externalHost, externalPort)}
+              // SSH 复制连接命令比复制 host:port 有用，其余照常复制地址
+              onCopy={(text) =>
+                (svc.protocol || '').toLowerCase() === 'ssh'
+                  ? copySSHCommand(externalHost, externalPort)
+                  : copy(text)
+              }
+              fallback={phaseLabel[phase] || '等待外部地址…'}
+            />
           )
         }
         meta={
