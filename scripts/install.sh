@@ -614,6 +614,10 @@ candidate_bases() {
     return 0
   fi
   printf '%s\n' "https://github.com"
+  # Gitee 镜像：仓库路径与 GitHub 完全一致（同为 chenggegedeid/catflap），
+  # 所以只换域名就能复用下面的 ${REPO} 拼接，不用另写一套拼法。
+  # 它排在第三方镜像前面 —— 自己的仓库可控，第三方镜像哪天挂了没法管。
+  printf '%s\n' "https://gitee.com"
   for m in https://ghfast.top https://gh-proxy.com https://ghproxy.net; do
     printf '%s/https://github.com\n' "$m"
   done
