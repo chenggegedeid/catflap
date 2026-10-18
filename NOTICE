@@ -14,99 +14,35 @@ You should have received a copy of the GNU General Public License along with
 this program. If not, see <https://www.gnu.org/licenses/>.
 
 ================================================================================
-1. 引用的代码与开源项目
+代码来源声明
 ================================================================================
 
-本项目在开发中**引用/复用了以下开源项目的代码**，并按各自许可履行义务。
-完整清单以 `go.mod` / `go.sum` 与 `web/*/package.json` 为准，此处列出的是
-「代码被直接引用」以及「设计被直接参照」的部分。
+本作品是 **LinkStar** 的修改版本。
 
-── 1.1 初始实现来源（代码级引用）──────────────────────────────────────────
+    项目    LinkStar
+    作者    ZluxYao
+    仓库    https://github.com/ZluxYao/LinkStar
+    许可    GNU General Public License v3.0 or later (GPL-3.0-or-later)
 
-    项目名   LinkStar
-    作者     ZluxYao
-    仓库     https://github.com/ZluxYao/LinkStar
-    许可     GNU General Public License v3.0 or later (GPL-3.0-or-later)
+依据 GPL-3.0-or-later 第 5 条，本作品整体同样以 GPL-3.0-or-later 发布。
+本仓库对上游代码做了修改，改动日期与逐项明细见 CHANGELOG.md。
 
-本项目在内网穿透（STUN 打洞、UPnP 映射）、DDNS、ACME 证书、反向代理等
-模块上，以其 0.7.4 版本的代码为起点进行开发与改写。所依据的基线为：
+设计参照（未使用其代码）：Lucky (gdy666)，MIT（≤ v1.4.10）。
 
-    repo      https://github.com/chenggegedeid/LinkStar（作者本人的早期修改版）
-    commit    9cb7cd1  更新源指向本 fork
-    version   0.7.4    （由官方 0.7.4 二进制的 Go buildinfo 读出并经比对确认）
-
-该基线在上游 `f60385a` 处分出，自分出点起含两个提交，其著作权一并继承：
-
-    a03c000  TCP 打洞 CGNAT 加固 + STUN 服务器列表可配置
-    9cb7cd1  更新源指向该分支
-
-依据 GPL-3.0-or-later 第 5 条，本作品同样以 GPL-3.0-or-later 发布，完整对应
-源码随本仓库一并提供，原始版权与许可声明均已保留。
-
-**说明**：本项目与该仓库之间**没有** git 上的派生/父子关系（本仓库是一份
-独立的历史，不含上游提交）。上游后续若有更新，我们采用**人工阅读并借鉴
-实现思路**的方式吸收，不做 `git merge`。因此两者不存在「同一条历史线」的
-merge 义务或预期 —— 但上述代码引用关系真实存在，特此声明。
-
-── 1.2 设计参照（未使用其代码）────────────────────────────────────────────
-
-  - Lucky (gdy666) —— 端口转发、计划任务、Web 子规则等功能的设计参照。
-    本项目**未**使用其任何代码；其 v1.4.10 及更早版本以 MIT 许可发布，
-    v2/v3 未开源。本项目与该项目无任何代码或授权关系。
-
-── 1.3 直接依赖的主要第三方库 ─────────────────────────────────────────────
-
-  后端（Go，完整清单见 go.mod / go.sum）：
-    github.com/gin-gonic/gin            MIT          Web 框架
-    github.com/golang-jwt/jwt/v5        MIT          JWT
-    github.com/huin/goupnp              BSD-3-Clause UPnP 客户端
-    github.com/libp2p/go-reuseport      MIT          端口复用
-    github.com/lionsoul2014/ip2region   Apache-2.0   IP 归属地（离线库，双许可 OR MIT）
-      ⚠️ 本项目内嵌了它的 IPv4 数据文件 modules/audit/geo/ip2region_v4.xdb（11MB），
-         随二进制一起分发。数据版权归 ip2region 项目所有，许可全文见
-         modules/audit/geo/LICENSE.ip2region。
-    github.com/pion/stun                MIT          STUN 协议
-    github.com/sirupsen/logrus          MIT          日志
-    github.com/wailsapp/wails/v3        MIT          桌面版外壳
-    golang.org/x/{crypto,net,sync,sys}  BSD-3-Clause Go 官方扩展库
-
-  前端（web/admin，完整清单见其 package.json）：
-    react / react-dom                   MIT
-    vite                                MIT
-    tailwindcss                         MIT
-    lucide-react                        ISC          图标
-
-若将来移植了任何以 MIT/BSD/ISC/Apache-2.0 等许可发布的第三方代码片段，
-必须在本节补充其版权声明与许可全文 —— 这些许可都要求保留版权声明。
+第三方依赖的版权与许可声明见 go.mod / go.sum 与 web/admin/package.json。
+其中内嵌数据文件 modules/audit/geo/ip2region_v4.xdb（11MB）随二进制分发，
+版权归 ip2region 项目所有，许可全文见 modules/audit/geo/LICENSE.ip2region。
 
 ================================================================================
-2. 本项目相对上述基线所做的改动
+商标
 ================================================================================
 
-按类别列出，逐版本明细见 CHANGELOG.md：
+GPL 授予的是著作权许可，不授予商标权。
 
-  品牌    项目名与图标全部替换为自有资产；后台路径 `/catflap/`；
-          二进制与发布资产名 catflap*
-  架构    引入组件 / 提供者 / 事件总线三层扩展点，消除「新增功能要手工修改
-          多处硬编码列表」的问题；Go module 名改为本项目的自有路径
-          `github.com/chenggegedeid/catflap`（见 docs/decisions/0004）
-  安全    首次初始化限定本机发起；移除更新源中的第三方 API 镜像；
-          收紧配置目录与文件权限；补充 systemd 加固示例
-  功能    见 CHANGELOG.md
+"Catflap" / "猫洞" 的名称与图标为本项目的自有资产；上文提及的各项目名称与
+图标归其各自权利人所有，本项目仅在「说明代码来源」的必要范围内使用其名称，
+不主张任何权利。本项目与它们之间不存在官方、赞助或背书关系。
 
-**兼容性说明**：本项目是一个独立的新项目，**不提供**从上述基线项目迁移的
-路径。写进用户 DNS 服务商账号的标记只认本项目自己的前缀（`catflap:`），
-不认旧前缀 —— 旧前缀写下的规则会被当作「用户自己创建的」而不被改动。
+---
 
-================================================================================
-3. 商标声明
-================================================================================
-
-GPL 授予的是**著作权**许可，不授予商标权。
-
-  - "Catflap" / "猫洞"：本项目使用的名称与自绘图标；
-  - 第 1 节中列出的各项目名称与图标归其各自权利人所有，本项目仅在「说明代码
-    来源」这一必要范围内使用其名称，不主张任何权利；
-  - 本项目的名称、图标若与任何在先商标近似，纯属无意，请联系我们处理。
-
-本项目与第 1 节列出的各项目之间**不存在**官方、赞助或背书关系，请勿混用名称。
+感谢 LinkStar 及所有被引用的开源项目。
