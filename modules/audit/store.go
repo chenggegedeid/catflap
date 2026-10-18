@@ -389,6 +389,11 @@ func flushRecords() {
 			_, _ = f.Write(append(line, '\n'))
 		}
 		_ = f.Close()
+		// 刚追加了记录：把这天已解析的缓存丢掉。
+		//
+		// 不丢也不会错（下次读会发现 mtime/大小变了而重读），但那样要等
+		// stat 一次才发现；这里直接清掉，「刚被扫完马上去看审计」就是新数据。
+		invalidateDayCache(day)
 	}
 }
 
@@ -581,7 +586,137 @@ func GetIPStat(ip string) (IPStat, bool) {
 // 现在按行扫，单行失败就记一笔日志然后继续。一行坏数据不该让一整天的
 // 记录都读不出来。
 func ReadDay(day string, ipFilter string, limit int) ([]Record, error) {
+	recs, err := readDayCached(day)
+	if err != nil {
+		return nil, err
+	}
+
+	// 过滤与分页在副本上做，不动缓存里那份 —— 调用方拿到的切片
+	// 不能和缓存共享底层数组，否则某个调用方一排序就把缓存改了
+	if ipFilter == "" && limit <= 0 {
+		out := make([]Record, len(recs))
+		copy(out, recs)
+		return out, nil
+	}
+
+	out := make([]Record, 0, len(recs))
+	for _, r := range recs {
+		if ipFilter != "" && r.IP != ipFilter {
+			continue
+		}
+		out = append(out, r)
+		if limit > 0 && len(out) >= limit {
+			break // 已经按时间倒序，够了就停
+		}
+	}
+	return out, nil
+}
+
+// dayCacheEntry 某天明细的解析结果缓存。
+//
+// # 为什么必须缓存
+//
+// 审计页一打开要算四样东西：指标卡（唯一 IP、攻击 IP）、趋势、攻击类型、
+// 站点 Top。四样都从「最近 24 小时的明细」算，而明细是按天一个大文件
+// （被扫过的机器一天几十 MB）。不缓存的话，打开一次页面就要把同一个文件
+// 完整读四遍、逐行 JSON 解析四遍 —— 实测单次 overview 请求里
+// 「站点 Top」一项就把 3 万多条记录读了一遍，页面自然转圈。
+//
+// # 为什么按 mtime+size 校验而不是按时间过期
+//
+// 当天的文件是**边写边变大**的（每分钟 flush 一次）。固定 TTL 会出现
+// 「刚写进去的记录半分钟内查不到」；而按 TTL 过期又保证不了新鲜。
+// 比对 mtime 和大小是最小代价的「变了就重读」：
+// 文件没动就直接返回，动了就重新解析一次。历史日期永远不会再动，
+// 于是它们的缓存是永久有效的（直到进程退出）。
+type dayCacheEntry struct {
+	recs  []Record
+	mtime time.Time
+	size  int64
+}
+
+var (
+	dayCacheMu sync.Mutex
+	dayCache   = map[string]*dayCacheEntry{}
+)
+
+// maxCachedDays 缓存最多留几天。
+//
+// 保留期默认 30 天，全留着也就几十 MB 的解析结果 —— 但如果有人把保留期
+// 调到 365 天、又挨个翻日历，无上限就会吃光内存。超了按「最久没用的」淘汰。
+const maxCachedDays = 40
+
+// readDayCached 读某天明细（带缓存）。返回的是**缓存里那份切片本身**，
+// 调用方只能读、不能排序或改元素；要改必须先自己 copy。
+func readDayCached(day string) ([]Record, error) {
 	name := filepath.Join(auditDir, day+".jsonl")
+	fi, statErr := os.Stat(name)
+
+	dayCacheMu.Lock()
+	if e, ok := dayCache[day]; ok {
+		// 文件不存在时也算命中：缓存记录的就是「这天没文件」，
+		// 免得每次请求都对一个不存在的路径反复 stat 失败
+		if statErr != nil || (e.size == fi.Size() && e.mtime.Equal(fi.ModTime())) {
+			recs := e.recs
+			dayCacheMu.Unlock()
+			if statErr != nil {
+				return nil, statErr
+			}
+			return recs, nil
+		}
+	}
+	dayCacheMu.Unlock()
+
+	if statErr != nil {
+		return nil, statErr
+	}
+
+	recs, err := parseDayFile(name, day)
+	if err != nil {
+		return nil, err
+	}
+
+	dayCacheMu.Lock()
+	if len(dayCache) >= maxCachedDays {
+		evictDayCacheLocked()
+	}
+	dayCache[day] = &dayCacheEntry{recs: recs, mtime: fi.ModTime(), size: fi.Size()}
+	dayCacheMu.Unlock()
+	return recs, nil
+}
+
+// evictDayCacheLocked 淘汰一半缓存。调用方必须持有 dayCacheMu。
+//
+// 淘汰策略是「留最近的两天 + 一半较新的」：审计页和 dashboard 绝大多数
+// 请求只碰今天，把今天那天的缓存淘汰掉，下一次请求又得重读整个文件。
+func evictDayCacheLocked() {
+	days := make([]string, 0, len(dayCache))
+	for d := range dayCache {
+		days = append(days, d)
+	}
+	// 日期字符串按字典序就是时间序，倒序即新的在前
+	sort.Sort(sort.Reverse(sort.StringSlice(days)))
+	keep := maxCachedDays / 2
+	for i, d := range days {
+		if i < keep {
+			continue
+		}
+		delete(dayCache, d)
+	}
+}
+
+// invalidateDayCache 让某天的缓存失效。
+//
+// flush 刚把新记录写进文件后调用：不调也不会错（下一次读会因 mtime 变化
+// 而重读），但这里主动清一次能让「刚写完就查」走同一条路径，少一次解析。
+func invalidateDayCache(day string) {
+	dayCacheMu.Lock()
+	delete(dayCache, day)
+	dayCacheMu.Unlock()
+}
+
+// parseDayFile 真正的逐行解析（带缓存前的实现）。
+func parseDayFile(name, day string) ([]Record, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
@@ -610,9 +745,6 @@ func ReadDay(day string, ipFilter string, limit int) ([]Record, error) {
 			}
 			continue
 		}
-		if ipFilter != "" && r.IP != ipFilter {
-			continue
-		}
 		out = append(out, r)
 	}
 
@@ -621,11 +753,11 @@ func ReadDay(day string, ipFilter string, limit int) ([]Record, error) {
 			day, badLines, firstErr)
 	}
 
-	// 新的在前
+	// 新的在前。
+	//
+	// 缓存的就是**排好序的完整一天**：ReadDay 的 limit 语义是「取最新的 N 条」，
+	// 所以只要按时间倒序排好，limit 就退化成取前缀，不需要每次重排。
 	sort.Slice(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
 	return out, nil
 }
 

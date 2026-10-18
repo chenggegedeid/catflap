@@ -304,6 +304,13 @@ type Overview struct {
 	Hours     int   `json:"hours"`
 	// ErrorRatio 错误率，0–1。放后端算，免得前端在好几个地方各算一遍算错
 	ErrorRatio float64 `json:"errorRatio"`
+
+	// seen / attacked 累加过程中的去重集合：唯一 IP 和攻击 IP 必须
+	// **跨天**去重，所以先攒着，最后一次性取长度。不导出到 JSON。
+	seen     map[string]struct{}
+	attacked map[string]struct{}
+	durSum   int64
+	durCount int64
 }
 
 // BuildOverview 最近 hours 小时的指标。
@@ -311,18 +318,35 @@ type Overview struct {
 // 唯一 IP 数用**明细重算**而不是把每小时桶里的计数加起来：
 // 同一小时里同一个 IP 会重复出现，逐小时相加会得到「IP 次」而不是「个 IP」。
 // 明细本身已经是按天分文件，最近 24 小时最多读两个文件。
+//
+// 明细读取走 readDayCached：文件没变就直接用上次解析好的那份。
+// 这曾经是审计页最重的一步 —— 每次请求都要把当天几十 MB 的明细
+// 逐行解析一遍，而同一屏上还有别的地方要读同一个文件。
 func BuildOverview(hours int) Overview {
+	ov := Overview{}
+	ov.add(hours, time.Now())
+	return ov
+}
+
+// add 把最近 hours 小时的记录累加进来，最后收尾算比率。
+//
+// 设计成「可累加到已有实例上」是为了让 /api/audit/overview 一次遍历
+// 就能得到全部结果：那个接口要指标卡、趋势、攻击类型、站点四样东西，
+// 前两样都基于明细，各扫一遍等于同一个文件解析多次。
+func (ov *Overview) add(hours int, now time.Time) {
 	if hours <= 0 {
 		hours = 24
 	}
-	now := time.Now()
+	ov.Hours = hours
 	since := now.Add(-time.Duration(hours) * time.Hour)
 
-	ov := Overview{Hours: hours}
-	seen := map[string]struct{}{}
-	attacked := map[string]struct{}{}
+	if ov.seen == nil {
+		ov.seen = map[string]struct{}{}
+		ov.attacked = map[string]struct{}{}
+	}
 
-	// 只读跨度内的那几天
+	// 只在跨度内的那几天里累加。范围之外的记录直接跳过，
+	// 但**文件仍然按天整体解析**（缓存之后这件事只发生一次）
 	daySet := map[string]bool{}
 	for d := since.Truncate(time.Hour); !d.After(now); d = d.Add(time.Hour) {
 		daySet[d.Format("2006-01-02")] = true
@@ -333,9 +357,8 @@ func BuildOverview(hours int) Overview {
 	}
 	sort.Strings(days)
 
-	var durSum, durCount int64
 	for _, day := range days {
-		recs, err := ReadDay(day, "", 0)
+		recs, err := readDayCached(day)
 		if err != nil {
 			continue
 		}
@@ -346,6 +369,11 @@ func BuildOverview(hours int) Overview {
 			ov.Requests++
 			if r.isError() {
 				ov.Errors++
+				// 「攻击 IP」的判据和列表里的可疑判定保持一致：
+				// 4xx/5xx 出现过的 IP。不追求精确，追求「能一眼看出有几个在打我」
+				if r.IP != "" {
+					ov.attacked[r.IP] = struct{}{}
+				}
 			}
 			if r.Status == 403 || r.Status == 429 {
 				ov.Blocked++
@@ -353,29 +381,29 @@ func BuildOverview(hours int) Overview {
 			ov.BytesIn += r.BytesIn
 			ov.BytesOut += r.BytesOut
 			if r.DurationMs > 0 {
-				durSum += r.DurationMs
-				durCount++
+				ov.durSum += r.DurationMs
+				ov.durCount++
 			}
 			if r.IP != "" {
-				seen[r.IP] = struct{}{}
-				// 「攻击 IP」的判据和列表里的可疑判定保持一致：
-				// 4xx/5xx 出现过的 IP。这里不追求精确，追求「能一眼看出有几个在打我」
-				if r.isError() {
-					attacked[r.IP] = struct{}{}
-				}
+				ov.seen[r.IP] = struct{}{}
 			}
 		}
 	}
 
-	ov.UniqueIPs = int64(len(seen))
-	ov.AttackIPs = int64(len(attacked))
-	if durCount > 0 {
-		ov.AvgDurMs = durSum / durCount
+	ov.UniqueIPs = int64(len(ov.seen))
+	ov.AttackIPs = int64(len(ov.attacked))
+	if ov.durCount > 0 {
+		ov.AvgDurMs = ov.durSum / ov.durCount
 	}
 	if ov.Requests > 0 {
 		ov.ErrorRatio = float64(ov.Errors) / float64(ov.Requests)
 	}
-	return ov
+}
+
+// finish 清掉累加器，让结果可以安全地被长时间持有（不拖着一个几万项的 map）。
+func (ov *Overview) finish() {
+	ov.seen = nil
+	ov.attacked = nil
 }
 
 // KindCount 攻击类型的一项。
@@ -427,31 +455,40 @@ type SiteCount struct {
 }
 
 // TopSites 最近 hours 小时请求最多的站点。
+//
+// 走按天聚合里那份 Sites（**整天**的站点计数），不再逐条扫明细。
+//
+// # 为什么可以这样
+//
+// 站点分布回答的是「谁被访问得多」，不需要精确到小时 —— 原来的实现为了
+// 这个排序把最近 24 小时的明细整个读了一遍，是被扫过之后审计页最慢的一环
+// （实测单这一项就吃掉 3 万多条记录的解析）。
+//
+// # 取舍说清楚
+//
+// 窗口不是「最近 N 小时」而是「跨度覆盖的那几天」：看 24 小时时，
+// 如果正好跨了零点，会把昨天全天的量也算进来。这个偏差对「Top 8 是谁」
+// 的判断没有影响（排序依据是量级差，不是小数点后几位），
+// 换来的是打开审计页时少读一整个文件。要精确到小时请用 Trends。
 func TopSites(hours, limit int) []SiteCount {
 	if hours <= 0 {
 		hours = 24
 	}
 	now := time.Now()
-	since := now.Add(-time.Duration(hours) * time.Hour)
+	start := now.Add(-time.Duration(hours) * time.Hour)
 
 	totals := map[string]int64{}
-	for d := since.Truncate(time.Hour); !d.After(now); d = d.Add(time.Hour) {
-		recs, err := ReadDay(d.Format("2006-01-02"), "", 0)
-		if err != nil {
+	daySet := map[string]bool{}
+	for d := start.Truncate(time.Hour); !d.After(now); d = d.Add(time.Hour) {
+		daySet[d.Format("2006-01-02")] = true
+	}
+	for day := range daySet {
+		st := ensureDayStat(day) // 缺了才从明细重算，有就直接用
+		if st == nil {
 			continue
 		}
-		for _, r := range recs {
-			if r.Time.Before(since) || r.Time.After(now) {
-				continue
-			}
-			site := r.Host
-			if site == "" {
-				site = r.Ref
-			}
-			if site == "" {
-				site = "-"
-			}
-			totals[site]++
+		for site, n := range st.Sites {
+			totals[site] += n
 		}
 	}
 

@@ -92,50 +92,62 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
         <Stat icon={<Timer className="h-3.5 w-3.5" />} label="平均耗时" value={`${ov.avgDurMs}ms`} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-        {/* 趋势 */}
-        <Card className="!p-0">
-          <div className="px-5 pt-4">
-            <CardHeader
-              title="请求与拦截趋势"
-              action={
-                <div className="flex items-center gap-3 text-[11px] text-muted">
-                  <span className="flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-sm bg-blue-400" />
-                    请求
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-sm bg-rose-500" />
-                    错误
-                  </span>
-                </div>
-              }
-            />
-          </div>
-          <div className="px-3 pb-3">
-            <TrendChart points={data.trends} />
-          </div>
-        </Card>
+      {/*
+        趋势图独占一行。
 
+        原来它和「访问来源地区」并排（1.5fr / 1fr）。现在地区挪到下面那三栏里了，
+        趋势图顺势占满整行 —— 小时粒度的折线窄了反而读不出趋势走向。
+      */}
+      <Card className="!p-0">
+        <div className="px-5 pt-4">
+          <CardHeader
+            title="请求与拦截趋势"
+            action={
+              <div className="flex items-center gap-3 text-[11px] text-muted">
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-blue-400" />
+                  请求
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-rose-500" />
+                  错误
+                </span>
+              </div>
+            }
+          />
+        </div>
+        <div className="px-3 pb-3">
+          <TrendChart points={data.trends} />
+        </div>
+      </Card>
+
+      {/*
+        地区 / 攻击类型 / 站点三块由竖排改为横排三栏。
+
+        原来它们是三张独立的卡、竖着堆在趋势图下面，一屏放完指标卡 + 趋势
+        就滚不到「访问来源」了 —— 而访问来源才是这一页真正每天要用的东西。
+        三块都是「扫一眼就够」的信息，收成一行横排既看得到又占地少。
+      */}
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* 地区 */}
         <Card className="!p-0">
-          <div className="px-5 pt-4">
+          <div className="px-4 pt-3">
             <CardHeader
               title="访问来源地区"
               action={
                 <span className="text-[11px] text-muted">
-                  {data.geoEnabled ? '按累计请求排序' : '归属地库未加载'}
+                  {data.geoEnabled ? '累计' : '归属地库未加载'}
                 </span>
               }
             />
           </div>
-          <div className="px-5 pb-4">
+          <div className="max-h-52 overflow-y-auto px-4 pb-3">
             {data.countries.length === 0 ? (
               <div className="rounded-xl bg-surface-2 px-3 py-6 text-center text-xs text-muted">
                 还没有访问记录
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {data.countries.map((c) => (
                   <button
                     key={c.name}
@@ -143,7 +155,7 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
                     className="group flex w-full items-center gap-2 text-left"
                     title={`${c.name}：${c.requests} 次请求，${c.ips} 个 IP`}
                   >
-                    <span className="w-20 shrink-0 truncate text-xs text-content group-hover:text-blue-600">
+                    <span className="w-16 shrink-0 truncate text-xs text-content group-hover:text-blue-600">
                       {c.name}
                     </span>
                     <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-blue-50">
@@ -152,7 +164,7 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
                         style={{ width: `${Math.max(2, (c.requests / maxCountry) * 100)}%` }}
                       />
                     </span>
-                    <span className="w-12 shrink-0 text-right font-mono text-[11px] text-muted">
+                    <span className="w-11 shrink-0 text-right font-mono text-[11px] text-muted">
                       {fmt(c.requests)}
                     </span>
                   </button>
@@ -161,24 +173,22 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
             )}
           </div>
         </Card>
-      </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1.5fr]">
         {/* 攻击类型 */}
         <Card className="!p-0">
-          <div className="px-5 pt-4">
+          <div className="px-4 pt-3">
             <CardHeader title="攻击类型" />
           </div>
-          <div className="px-5 pb-4">
+          <div className="max-h-52 overflow-y-auto px-4 pb-3">
             {data.attackKinds.length === 0 ? (
               <div className="rounded-xl bg-surface-2 px-3 py-6 text-center text-xs text-muted">
                 这段时间没有异常请求
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {data.attackKinds.map((k) => (
                   <div key={k.kind} className="flex items-center gap-2">
-                    <span className="w-24 shrink-0 text-xs text-content">{k.label}</span>
+                    <span className="w-16 shrink-0 truncate text-xs text-content">{k.label}</span>
                     <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2">
                       <span
                         className={`block h-full rounded-full ${
@@ -187,7 +197,7 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
                         style={{ width: `${Math.max(2, (k.count / maxKind) * 100)}%` }}
                       />
                     </span>
-                    <span className="w-12 shrink-0 text-right font-mono text-[11px] text-muted">
+                    <span className="w-11 shrink-0 text-right font-mono text-[11px] text-muted">
                       {fmt(k.count)}
                     </span>
                   </div>
@@ -199,23 +209,20 @@ export function AuditOverview({ hours, onPickCountry }: Props) {
 
         {/* 站点 */}
         <Card className="!p-0">
-          <div className="px-5 pt-4">
+          <div className="px-4 pt-3">
             <CardHeader title="被访问最多的站点" />
           </div>
-          <div className="px-5 pb-4">
+          <div className="max-h-52 overflow-y-auto px-4 pb-3">
             {data.sites.length === 0 ? (
               <div className="rounded-xl bg-surface-2 px-3 py-6 text-center text-xs text-muted">
                 还没有访问记录
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-0.5">
                 {data.sites.map((s) => (
-                  <div
-                    key={s.site}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-2"
-                  >
+                  <div key={s.site} className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-surface-2">
                     <Globe2 className="h-3 w-3 shrink-0 text-muted" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-content">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-content" title={s.site}>
                       {s.site}
                     </span>
                     <span className="shrink-0 text-xs font-semibold text-content">{fmt(s.count)}</span>

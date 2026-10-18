@@ -152,6 +152,50 @@ type simulatedErr struct{}
 
 func (*simulatedErr) Error() string { return "simulated disconnect" }
 
+// TestKeepaliveTimeoutIsMoreRelaxedThanProbe
+// 保活的握手超时必须**比首次探测宽松**。
+//
+// 这条一旦反过来（保活也是 3 秒），晚高峰一次抖动就会被判成"连接断了"
+// → 重连 → 换服务器 → NAT 换公网端口，用户那边看到的就是"IP 又跳了"。
+func TestKeepaliveTimeoutIsMoreRelaxedThanProbe(t *testing.T) {
+	if keepaliveStunTimeout <= defaultStunTimeout {
+		t.Errorf("保活超时 %v 必须大于首次探测超时 %v，否则一次抖动就会被误判成连接断开并触发换端口",
+			keepaliveStunTimeout, defaultStunTimeout)
+	}
+}
+
+// countingConn 计数 Write 次数，且 Read 恒定失败（模拟一条读不出响应的连接）。
+type countingConn struct {
+	net.Conn
+	writes  int
+	readErr error
+}
+
+func (c *countingConn) Write(b []byte) (int, error) {
+	c.writes++
+	return len(b), nil
+}
+func (c *countingConn) Read([]byte) (int, error)    { return 0, c.readErr }
+func (c *countingConn) SetDeadline(time.Time) error { return nil }
+
+// TestKeepaliveHandshakeRetriesBeforeGivingUp
+// 保活握手失败时必须在**同一条连接上重试**，而不是立刻判死。
+//
+// 为什么重要：一旦判死就会走到 redial，而 redial 是换服务器的入口 ——
+// NAT3 下换服务器 = 换公网端口。多试一次，就可能少一次端口变更。
+func TestKeepaliveHandshakeRetriesBeforeGivingUp(t *testing.T) {
+	c := &countingConn{readErr: errSimulatedDisconnect}
+
+	_, _, err := keepaliveHandshake(c)
+	if err == nil {
+		t.Fatal("连接恒定时应当返回错误")
+	}
+	if c.writes != keepaliveRetryAttempt {
+		t.Errorf("应当在放弃前尝试 %d 次（默认超时≠保活超时，这里守住重试真的发生了），实际 Write 了 %d 次",
+			keepaliveRetryAttempt, c.writes)
+	}
+}
+
 // TestDefaultSTUNServersWellFormed 内置服务器列表的基本健康检查。
 //
 // 这份列表会被"首次建配置"和"恢复内置列表"两处用到，

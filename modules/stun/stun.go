@@ -321,14 +321,80 @@ func formatProtocol(protocol string) (string, error) {
 
 }
 
-// 发送 STUN 请求
+// STUN 握手超时。
+//
+// # 为什么保活要用一个更长的超时
+//
+// 这是「外部端口 / 公网 IP 反复跳」的根因之一，链条是这样的：
+//
+//	握手超时 → 判定"连接不可用" → redial → 候选列表里原服务器排第一，
+//	但它可能同样刚超时 → 退到 GetBestSTUNServer()（另一个服务器）
+//	→ NAT3 / 端口受限锥形 NAT 下，**换服务器 = 换公网端口**
+//	→ 上层触发 DDNS / 重定向同步 + 发一条通知
+//	→ 用户看到的现象："IP 又跳了 / 端口又变了"
+//
+// 一次偶发的网络抖动（跨运营商、晚高峰、服务器在美国）就足以走完这一条链，
+// 而这条链每走一次，用户拿到的地址就失效一次。
+//
+// # 数值怎么定的
+//
+//   - defaultStunTimeout（3s）：**首次探测**用。要快速判断这台服务器在不在，
+//     慢的那个直接换掉，缩短启动时间。这里宁可激进。
+//   - keepaliveStunTimeout（10s）：**保活**用。这时连接已经建好、服务器已经验证过，
+//     唯一目的就是别把一条好好的连接误判成死的。慢一点没关系，误判才要命 ——
+//     超时放宽到 10 秒后，绝大多数抖动都能等到响应，不必走到重连。
+const (
+	defaultStunTimeout    = 3 * time.Second
+	keepaliveStunTimeout  = 10 * time.Second
+	keepaliveRetryAttempt = 2 // 保活握手最多试几次（含第一次）
+)
+
+// keepaliveHandshake 保活用的握手：宽松超时，并允许重试一次。
+//
+// # 为什么保活不能直接用 DoStunHandshake
+//
+// DoStunHandshake 是给「首次探测服务器在不在」用的，3 秒等不到就判这台不可用。
+// 保活阶段的处境完全不同：**连接已经建好、服务器早就验证过**，唯一要避免的
+// 是把一条健康的连接误判成死的。因为误判的代价很重 ——
+//
+//	误判 → 重连 → 换服务器 → NAT 换公网端口 → 上层同步 DDNS / 重定向
+//	→ 用户刚拿到的外部地址失效，还会收到一条"穿透成功（新端口）"的通知
+//
+// 这就是"IP / 端口反复跳"的放大器。一次晚高峰抖动就够触发整条链。
+//
+// 所以这里做两件事：
+//  1. 超时放宽到 keepaliveStunTimeout（10s）——绝大多数抖动能等到响应；
+//  2. 仍失败就**在同一条连接上再握一次**（重试间隔 1s）。偶发的丢包 / 半开连接
+//     常常第二次就成了。真死了才会返回错误，让上层去重连。
+func keepaliveHandshake(conn net.Conn) (string, int, error) {
+	var lastErr error
+	for i := 0; i < keepaliveRetryAttempt; i++ {
+		if i > 0 {
+			// 两次之间留一点时间：同一条刚超时的连接立刻再问，多半还是超时
+			time.Sleep(time.Second)
+		}
+		ip, port, err := doStunHandshake(conn, keepaliveStunTimeout)
+		if err == nil {
+			return ip, port, nil
+		}
+		lastErr = err
+	}
+	return "", 0, lastErr
+}
+
+// DoStunHandshake 用默认超时做一次握手（探测服务器在不在，要快）。
 func DoStunHandshake(conn net.Conn) (string, int, error) {
+	return doStunHandshake(conn, defaultStunTimeout)
+}
+
+// doStunHandshake 带自定义超时的握手。
+func doStunHandshake(conn net.Conn, timeout time.Duration) (string, int, error) {
 	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
 	if _, err := conn.Write(msg.Raw); err != nil {
 		return "", 0, fmt.Errorf("send stun request: %w", err)
 	}
 
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
 
 	buf := make([]byte, 1024)
@@ -392,21 +458,34 @@ func tcpStunHealthKeepAlive(
 		}
 	}
 
-	// 候选服务器：原来那台优先，其次才考虑换。换服务器必然导致端口变化，
-	// 所以只在原服务器真的连不上时才走到后面。
+	// 候选服务器：当前那台排最前，后面才是备胎。换服务器必然导致端口变化，
+	// 所以候选里只放**各不相同**的服务器（重复交给下面的重试环节处理，
+	// 两者混在一起会让"再试一次"的语义藏在一个重复列表里，看不出来）。
 	serverCandidates := func() []string {
 		list := make([]string, 0, 3)
 		if pinnedServer != "" {
 			list = append(list, pinnedServer)
 		}
-		if best, err := Runtime.STUNService.GetBestSTUNServer(); err == nil {
+		if best, err := Runtime.STUNService.GetBestSTUNServer(); err == nil && best != pinnedServer {
 			list = append(list, best)
 		}
-		if backup, err := Runtime.STUNService.GetBackupSTUNServer(); err == nil {
+		if backup, err := Runtime.STUNService.GetBackupSTUNServer(); err == nil &&
+			backup != pinnedServer && (len(list) == 0 || backup != list[len(list)-1]) {
 			list = append(list, backup)
 		}
 		return list
 	}
+
+	// pinnedRetry / retryGap：给「原来那台服务器」多少次机会、每次间隔多久。
+	//
+	// 为什么单独拎一层重试，而不是在候选列表里重复它：
+	// 单次失败常常只是瞬间抖动（晚高峰、跨运营商丢包），立刻退化到下一台
+	// 服务器会把这次抖动放大成一次公网端口变更 —— 用户那边看到的就是
+	// "IP 又跳了 / 又发通知了"。所以在认定它真的不行之前，要隔一小会儿多试几次。
+	const (
+		pinnedRetry = 3
+		retryGap    = time.Second
+	)
 
 	// 重连并重新握手。CGNAT 等多层 NAT 下重连后映射端口可能变化：
 	// 变化后的新映射同样可以把入站流量送到本服务（同一个本地端口），
@@ -415,16 +494,48 @@ func tcpStunHealthKeepAlive(
 	redial := func() (net.Conn, string, int, error) {
 		localAddr := fmt.Sprintf("%s:%d", localIP, localPort)
 		var lastErr error
-		for _, stunServer := range serverCandidates() {
-			conn, dialErr := CurrentOutboundIface().DialReusable("tcp", localAddr, stunServer)
+
+		// dialAndShake 连一台服务器并握手。握手用**宽松**超时：刚重拨回来的
+		// 连接要给它时间说话，3 秒那档（DoStunHandshake）太容易把慢服务器
+		// 判成不可用 —— 判错的后果就是绕过这台去连下一台，于是端口跟着变。
+		dialAndShake := func(server string) (net.Conn, string, int, error) {
+			conn, dialErr := CurrentOutboundIface().DialReusable("tcp", localAddr, server)
 			if dialErr != nil {
-				lastErr = fmt.Errorf("reconnect stun server %s failed: %w", stunServer, dialErr)
-				continue
+				return nil, "", 0, fmt.Errorf("reconnect stun server %s failed: %w", server, dialErr)
 			}
-			ip, port, hsErr := DoStunHandshake(conn)
+			ip, port, hsErr := doStunHandshake(conn, keepaliveStunTimeout)
 			if hsErr != nil {
 				conn.Close()
-				lastErr = fmt.Errorf("stun handshake after reconnect failed: %w", hsErr)
+				return nil, "", 0, fmt.Errorf("stun handshake after reconnect failed: %w", hsErr)
+			}
+			return conn, ip, port, nil
+		}
+
+		// 第一关：反复尝试**原来那台**（它在 candidates[0]），
+		// 见 pinnedRetry / retryGap 的注释 —— 宁愿多等两秒，也不要一抖就换端口。
+		candidates := serverCandidates()
+		if len(candidates) > 0 {
+			pinned := candidates[0]
+			for i := 0; i < pinnedRetry; i++ {
+				if i > 0 {
+					time.Sleep(retryGap)
+				}
+				conn, ip, port, err := dialAndShake(pinned)
+				if err == nil {
+					pinnedServer = pinned
+					return conn, ip, port, nil
+				}
+				lastErr = err
+			}
+		}
+
+		// 第二关：原来那台确实起不来了，才依次考虑备胎。
+		// 到这一步公网端口必然会变（NAT3 下换服务器 = 换端口），
+		// 所以这里没有捷径，如实重连后由上层跟随新端口。
+		for _, stunServer := range candidates[1:] {
+			conn, ip, port, err := dialAndShake(stunServer)
+			if err != nil {
+				lastErr = err
 				continue
 			}
 			// 成功了就把这台钉住，后续保活都回这里，端口才稳得住
@@ -461,7 +572,10 @@ func tcpStunHealthKeepAlive(
 	//
 	// 同样是"只有连不上才重连"：端口对不上只是映射变了，跟着新端口走即可，
 	// 重连反而会因为换服务器（NAT3）再换一次端口。
-	if ip, port, err := DoStunHandshake(currentStunConn); err != nil {
+	//
+	// 这里走 keepaliveHandshake（宽松超时 + 重试），不用 DoStunHandshake：
+	// 一次晚到的响应不该让这条连接被判死刑 —— 见 keepaliveStunTimeout 的注释。
+	if ip, port, err := keepaliveHandshake(currentStunConn); err != nil {
 		if err := followOrRestart(err); err != nil {
 			return err
 		}
@@ -538,11 +652,14 @@ func tcpStunHealthKeepAlive(
 			     - 连接还在、只是公网端口变了 → 更新记录即可，**不要重连**。
 			       重连会换服务器（NAT3 下换服务器 = 换端口），于是"变了又变"，
 			       形成"端口变 → 重连 → 端口再变"的循环，这正是漂移的放大器。
-			     - 连接断了（握手报错）→ 才重连，且固定回原来那台服务器。
+			     - 连接断了（握手真的失败）→ 才重连，且固定回原来那台服务器。
 
 			   握手本身产生的流量就是保活心跳，不需要额外发包。
+
+			   超时走宽松的那档（keepaliveHandshake）：这里的目的不是"快速探测
+			   服务器在不在"，而是"别把好好的连接误判成死的"。
 			*/
-			ip, port, err := DoStunHandshake(currentStunConn)
+			ip, port, err := keepaliveHandshake(currentStunConn)
 			if err != nil {
 				// 连接不可用：重连（候选列表里原来那台服务器排在最前）
 				if err := followOrRestart(err); err != nil {

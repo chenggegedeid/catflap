@@ -166,10 +166,21 @@ func newBackendTransport(site model.Site) http.RoundTripper {
 		// 跟着 HTTP_PROXY 跑出去纯属灾难
 		Proxy: nil,
 
-		DialContext: (&net.Dialer{
-			Timeout:   backendDialTimeout,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// 拨号参数沿用下面那个 Dialer（超时、KeepAlive 一致），
+			// 拨出来再多一步 tuneConn —— 后端这条腿同样需要缓冲：
+			// 下载时是「内网读 → 外网写」，内网读到多快取决于它的接收窗口。
+			d := &net.Dialer{
+				Timeout:   backendDialTimeout,
+				KeepAlive: 30 * time.Second,
+			}
+			c, err := d.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			tuneConn(c)
+			return c, nil
+		},
 
 		// 内网服务基本都是自签，本来就无从校验（与 forward.go 的行为一致）
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},

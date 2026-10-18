@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RotateCw, Search, TriangleAlert } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
+import { Collapsible } from '../components/Collapsible'
 import { BlockModal } from './audit/BlockModal'
 import { IPLists } from './audit/IPLists'
 import { IPRow } from './audit/IPRow'
@@ -305,8 +306,20 @@ export function Audit() {
         </div>
       </Card>
 
-      {/* 登录尝试：和"谁访问了服务"分开 —— 这是"谁在试着进后台" */}
-      <LoginPanel />
+      {/* 登录尝试：和"谁访问了服务"分开 —— 这是"谁在试着进后台"。
+          默认收起：日常只看访问来源，登录记录是出事才翻的。
+          收起时子组件整块不渲染，那一路请求也就不发了。 */}
+      <Collapsible
+        title="登录尝试"
+        storageKey="audit.loginPanel.open"
+        hint={
+          cfg && cfg.blocks.length > 0
+            ? `当前封禁 ${cfg.blocks.length} 个地址`
+            : '谁在试着进后台'
+        }
+      >
+        <LoginPanel />
+      </Collapsible>
 
       {/*
         顺序：设置 → IP 名单（黑名单 | 白名单）。
@@ -319,10 +332,20 @@ export function Audit() {
         （config/audit.json 的 Blocks）。分两块展示只会让人以为有两套名单，
         实际手动封禁和自动拉黑都写进同一张表。现在黑名单里全都有，
         并标出每条的原因、来源（手动/自动）和到期时间。
-      */}
-      <SettingsCard cfg={cfg} onSaved={refresh} onToast={say} />
 
-      <IPLists cfg={cfg} onSaved={refresh} onToast={say} />
+        **设置与名单默认收起**：它们是一年配一次的东西，占着首屏只会把
+        真正每天要看的「访问来源」推下去。
+      */}
+      <Collapsible
+        title="审计设置"
+        storageKey="audit.settings.open"
+        hint={`记录保留 ${cfg?.keepDays ?? 30} 天 · 单文件上限 ${cfg?.maxFileMB ?? 32} MB`}
+      >
+        <div className="space-y-4">
+          <SettingsCard cfg={cfg} onSaved={refresh} onToast={say} />
+          <IPLists cfg={cfg} onSaved={refresh} onToast={say} />
+        </div>
+      </Collapsible>
 
       {blockModal.open && (
         <BlockModal

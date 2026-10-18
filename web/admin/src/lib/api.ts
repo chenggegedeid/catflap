@@ -954,6 +954,18 @@ export const getAuditConfig = () => request<AuditConfigView>('/api/audit/config'
 export const getAuditOverview = (hours = 24) =>
   request<AuditOverview>(`/api/audit/overview?hours=${hours}`)
 
+/**
+ * 只要几个数字：有几条记录、几个可疑、几个在攻击、几个已封禁。
+ *
+ * 和 getAuditIPs 的区别：这个**不做逐行的归属地查询和攻击类型归纳**，
+ * 后端只走一遍计数。仪表盘上那两个指标用它，省掉整轮行级加工 ——
+ * 以前为了拿「可疑几个」而拉一整页 IPView，是首屏变慢的原因之一。
+ */
+export const getAuditIPSummary = () =>
+  request<{ total: number; suspicious: number; attackers: number; blocked: number }>(
+    '/api/audit/ips?summary=1',
+  )
+
 export const getAuditIPs = (
   params: {
     sort?: string

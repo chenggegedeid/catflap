@@ -13,6 +13,15 @@
  *
  * 这一块只放信号。完整的趋势、各服务 Top 在「流量统计」页，
  * 完整的 IP 管理在「访问审计」页 —— 仪表盘上堆操作会变成第二个审计页。
+ *
+ * # 分两拨加载（首屏不再等重接口）
+ *
+ * 首屏只发两个轻的：实时速率（内存里直接取）和 IP 摘要计数（只数不加工）。
+ * 这两样一到，四个指标卡和「可疑来源」就能画出来。
+ *
+ * 重的两样（24 小时趋势、审计 overview）延后一帧再发 —— 它们要读当天的
+ * 明细/流量文件，是真正的慢源头。以前四路一起并发发出去，四张卡要等
+ * 最慢的那个，整个仪表盘看起来就是在转圈。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, ShieldAlert } from 'lucide-react'
@@ -27,18 +36,35 @@ const ATTACK_SURGE = 2
 /** 可疑来源最多显示几条。仪表盘不是审计页，多了就喧宾夺主 */
 const SUSPICIOUS_LIMIT = 3
 
+interface IPSummary {
+  total: number
+  suspicious: number
+  attackers: number
+  blocked: number
+}
+
 export function TrafficSecurityCard() {
   const [rt, setRt] = useState<TrafficRealtime | null>(null)
+  const [summary, setSummary] = useState<IPSummary | null>(null)
   const [trend, setTrend] = useState<TrafficTrend | null>(null)
   const [ov, setOv] = useState<AuditOverview | null>(null)
   const [suspicious, setSuspicious] = useState<AuditIPStat[]>([])
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
 
-  const load = useCallback(async () => {
-    // 四路互不干扰：审计没开、流量没数据，都不该让整块消失
-    const [r, t, o, ips] = await Promise.all([
+  /** 轻的：实时速率 + 计数。这两样不需要读任何明细文件 */
+  const loadLight = useCallback(async () => {
+    const [r, s] = await Promise.all([
       api.getTrafficRealtime().catch(() => null),
+      api.getAuditIPSummary().catch(() => null),
+    ])
+    setRt(r)
+    setSummary(s)
+  }, [])
+
+  /** 重的：24 小时趋势 + 审计概览 + 可疑来源。要读当天文件，慢 */
+  const loadHeavy = useCallback(async () => {
+    const [t, o, ips] = await Promise.all([
       api.getTrafficTrend({ hours: 24 }).catch(() => null),
       api.getAuditOverview(24).catch(() => null),
       api
@@ -46,15 +72,22 @@ export function TrafficSecurityCard() {
         .then((x) => x.list ?? [])
         .catch(() => [] as AuditIPStat[]),
     ])
-    setRt(r)
     setTrend(t)
     setOv(o)
     setSuspicious(ips)
   }, [])
 
+  const reload = useCallback(async () => {
+    await Promise.all([loadLight(), loadHeavy()])
+  }, [loadLight, loadHeavy])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void loadLight()
+    // 让首屏先渲染出来再发重请求：两拨请求同时发的话，浏览器仍然要等
+    // 最慢的那个才认为「这一屏稳定」，分帧发能让轻的那部分先落屏
+    const t = window.setTimeout(() => void loadHeavy(), 60)
+    return () => window.clearTimeout(t)
+  }, [loadLight, loadHeavy])
 
   const block = async (ip: string) => {
     setBusy(ip)
@@ -62,7 +95,7 @@ export function TrafficSecurityCard() {
       await api.blockIP({ ip, reason: '仪表盘快捷拉黑', minutes: 60 * 24 })
       setMsg(`已封禁 ${ip}（1 天）`)
       window.setTimeout(() => setMsg(''), 2800)
-      await load()
+      await reload()
     } catch (e) {
       setMsg('封禁失败：' + (e instanceof Error ? e.message : ''))
     } finally {
@@ -75,6 +108,8 @@ export function TrafficSecurityCard() {
   const overview = ov?.overview
   const todayBytes = (rt?.today.in ?? 0) + (rt?.today.out ?? 0)
   const hasAudit = (overview?.requests ?? 0) > 0
+  // 审计数据还在路上时，别急着说「没有可疑访问」—— 那是在说谎
+  const auditPending = ov === null && summary === null
 
   return (
     <Card className="!p-0">
@@ -117,7 +152,11 @@ export function TrafficSecurityCard() {
           <Metric
             label="已拦截"
             value={fmtCount(overview?.blocked ?? 0)}
-            hint={`${overview?.attackIPs ?? 0} 个可疑 IP`}
+            hint={
+              summary
+                ? `${summary.attackers} 个 IP 出过异常`
+                : `${overview?.attackIPs ?? 0} 个可疑 IP`
+            }
             tone={(overview?.blocked ?? 0) > 0 ? 'danger' : 'plain'}
           />
         </div>
@@ -141,6 +180,8 @@ export function TrafficSecurityCard() {
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-700">
               {surge.label} 请求升到 {fmtCount(surge.requests)} 次，其中 {Math.round(surge.ratio * 100)}% 是异常 → 疑似扫描，不是正常访问
             </div>
+          ) : auditPending ? (
+            <div className="mt-2 h-7 animate-pulse rounded-lg bg-surface-2" />
           ) : hasAudit ? (
             <div className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-[11px] text-muted">
               近 24 小时没有可疑访问
