@@ -1255,3 +1255,40 @@ export async function exportBackup(modules: string[] = [], assets: string[] = []
   URL.revokeObjectURL(url)
   return filename
 }
+
+// ===================== 定时备份 =====================
+
+/** 定时备份设置 */
+export interface BackupSchedule {
+  enabled: boolean
+  /** 每隔几小时；0 按 24 处理 */
+  intervalHours: number
+  /** 保留最近几份；0 按 7 处理 */
+  keepCount: number
+  /** 要备份哪些模块；空 = 全部 */
+  modules: string[]
+  /** 上次执行时间（系统写） */
+  lastRunAt?: string
+  /** 上次结果（系统写） */
+  lastResult?: string
+}
+
+/** 已自动生成的一份备份 */
+export interface AutoBackupFile {
+  name: string
+  size: number
+  time: string
+}
+
+export const getBackupSchedule = () => request<BackupSchedule>('/api/backup/schedule')
+
+/** 保存定时备份设置（存完后端立即重启循环） */
+export const saveBackupSchedule = (cfg: BackupSchedule) =>
+  requestWithMsg<unknown>('/api/backup/schedule', { method: 'POST', body: JSON.stringify(cfg) })
+
+/** 不等下个周期，立刻生成一份 */
+export const runBackupNow = () =>
+  requestWithMsg<unknown>('/api/backup/run-now', { method: 'POST' })
+
+/** 列出已自动备份的文件（新→旧） */
+export const listAutoBackups = () => request<AutoBackupFile[]>('/api/backup/auto')

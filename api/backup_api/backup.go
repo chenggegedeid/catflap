@@ -178,3 +178,61 @@ func (BackupApi) PreviewView(c *gin.Context) {
 	}
 	res.OkWithData(mf, c)
 }
+
+/**
+ * 定时备份设置：读。
+ */
+func (BackupApi) ScheduleView(c *gin.Context) {
+	cfg, err := backup.LoadSchedule()
+	if err != nil {
+		res.FailWithMsg("读取定时备份设置失败:"+err.Error(), c)
+		return
+	}
+	res.OkWithData(cfg, c)
+}
+
+/**
+ * 定时备份设置：存。
+ *
+ * 存完立刻重启循环 —— 用户改了间隔或开关，不该等到下次重启进程才生效。
+ */
+func (BackupApi) SaveScheduleView(c *gin.Context) {
+	cr := middleware.GetBindRequest[backup.ScheduleConfig](c)
+
+	// 保留上次执行记录：它是系统写的，不该被界面回传的空值盖掉
+	old, _ := backup.LoadSchedule()
+	cr.LastRunAt = old.LastRunAt
+	cr.LastResult = old.LastResult
+
+	if err := backup.SaveSchedule(cr); err != nil {
+		res.FailWithMsg("保存定时备份设置失败:"+err.Error(), c)
+		return
+	}
+	backup.StartSchedule()
+	res.OkWithMsg("已保存", c)
+}
+
+/**
+ * 立刻跑一次定时备份（不等下个周期）。
+ *
+ * 用户勾完"每天一次"会想马上看到它真的能用，而不是等 24 小时。
+ */
+func (BackupApi) RunNowView(c *gin.Context) {
+	if err := backup.RunAutoBackupForAPI(); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithMsg("已生成一份备份", c)
+}
+
+/**
+ * 列出已自动备份的文件（新→旧）。
+ */
+func (BackupApi) ListAutoView(c *gin.Context) {
+	files, err := backup.ListAutoBackups()
+	if err != nil {
+		res.FailWithMsg("读取备份目录失败:"+err.Error(), c)
+		return
+	}
+	res.OkWithData(files, c)
+}
