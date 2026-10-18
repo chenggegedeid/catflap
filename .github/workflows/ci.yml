@@ -56,6 +56,33 @@ jobs:
       - name: 校验版本号注入点
         run: python3 scripts/check_version_ldflags.py
 
+      # 安装脚本的 shell 语法。成本几乎为零，但能挡住一类**极难排查**的事故：
+      #
+      # 曾经在脚本头部注释块里补了几行说明、漏写行首的 `#`，bash 就把中文当命令执行。
+      # 报错长这样 ——
+      #   /root/install.sh: line 11: $'\350\257\264\346\230\216': command not found
+      #   /root/install.sh: line 14: `curl: (23)'
+      # 里面混着 `curl: (23)`、`raw.githubusercontent.com`、`代理` 这些字样，
+      # 看着完全是网络故障，实际是纯语法错误：换域名、换镜像、加代理都绕不开，
+      # 只能一路往网络方向查下去。
+      #
+      # 另外空行也会咬人：`--help` 用 `awk 'NR>=3 { if ($0 !~ /^#/) exit }'` 打印
+      # 头部注释，注释块里的空行会让它提前退出，帮助只打印一半。
+      # 所以下面顺带检查「头部注释块里有没有空行」。
+      # 注意：bash -n **抓不到**漏 `#` 的情况 —— 一串中文在语法上是合法的
+      # 命令名（执行时才 command not found）。真正灵敏的是 `--help` 的行数：
+      # 正常 70+ 行，一旦注释块被非 `#` 行或空行截断，会掉到 10 行以下。
+      - name: 校验安装脚本语法与头部注释块
+        run: |
+          bash -n scripts/install.sh
+          n="$(bash scripts/install.sh --help | wc -l)"
+          echo "install.sh --help 输出 $n 行"
+          if [ "$n" -lt 30 ]; then
+            echo "::error::头部注释块被截断了（正常应 70+ 行，现在只有 $n 行）。"
+            echo "::error::多半是有行漏写了行首的 # —— 注释块里的空行也要写成 #，不能留空。"
+            exit 1
+          fi
+
       # 桌面版（wails）依赖 CGO，在 Linux 上编不了，这里只校验命令行版
       - name: go build（不加 desktop 标签）
         env:
