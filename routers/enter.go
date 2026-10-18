@@ -3,7 +3,6 @@ package routers
 import (
 	"io/fs"
 	"net/http"
-	_ "net/http/pprof" // 加下划线，只要副作用（自动注册路由）
 	"strings"
 	"time"
 
@@ -16,11 +15,16 @@ import (
 )
 
 func Run(webFS fs.FS) {
-	// 单独起 pprof，只在排查问题时用
-	// go func() {
-	// 	logrus.Info("pprof 运行在：0.0.0.0:3334")
-	// 	http.ListenAndServe("0.0.0.0:3334", nil)
-	// }()
+	// 这里**曾经** import 了 `_ "net/http/pprof"`，现在刻意去掉了。
+	//
+	// 那个 import 的副作用是把 /debug/pprof/* 注册到 http.DefaultServeMux 上。
+	// 当前它打不到（下面用的是 gin 引擎，不是 DefaultServeMux），
+	// 但留着是个地雷：谁想加个内部端口顺手写一句
+	// `http.ListenAndServe(":3334", nil)`（nil = 用 DefaultServeMux），
+	// 堆内存快照和协程栈就一起对外了 —— 而堆里可能有 DNS Token 和私钥。
+	//
+	// 要排查性能问题时临时加回来：补上 import + 单独起一个只监听 127.0.0.1 的
+	// net/http.Server，用完立刻删掉，别留在发布版里。
 
 	gin.SetMode("release")
 	// 不用 gin.Default()：它的访问日志会把 URL 查询串原样记下来，
