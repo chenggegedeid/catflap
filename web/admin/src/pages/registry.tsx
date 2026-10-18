@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import PageBoundary from '../components/PageBoundary'
 import type { LucideIcon } from 'lucide-react'
 import {
+  Activity,
   Archive,
   ArrowLeftRight,
   Cloud,
@@ -34,6 +35,7 @@ import { ReverseProxy } from './ReverseProxy'
 import { Settings } from './Settings'
 import { Stun } from './Stun'
 import { Task } from './Task'
+import { TrafficPanel } from './TrafficPanel'
 import { Tunnel } from './Tunnel'
 import { Wol } from './Wol'
 
@@ -203,6 +205,20 @@ export const pages = {
     icon: FileText,
     element: <PageBoundary key="logs"><Logs /></PageBoundary>,
   },
+  // 流量统计。
+  //
+  // 原来这块内容只作为组件嵌在仪表盘里（Dashboard 直接渲染 <TrafficPanel />），
+  // 结果是仪表盘被它撑得很长：往下翻好几屏才看得到「当前状态」和「需要处理」。
+  // 现在拆成独立页面 —— 仪表盘只留一张紧凑的「流量与安全」联合卡放信号，
+  // 完整的趋势、各服务 Top、可疑来源都在这儿。
+  traffic: {
+    label: '流量统计',
+    icon: Activity,
+    subtitle: '实时速率、历史趋势、各服务流量与可疑来源',
+    component: 'traffic',
+    element: <PageBoundary key="traffic"><TrafficPanel /></PageBoundary>,
+  },
+
   audit: {
     label: '访问审计',
     icon: ShieldAlert,
@@ -246,7 +262,7 @@ export const pageGroups = [
   { keys: ['dashboard'] },
   { title: '网络与连接', keys: ['devices', 'forwards', 'stun', 'ddns', 'reverse-proxy', 'tunnel', 'cert', 'wol'] },
   { title: '自动化', keys: ['task'] },
-  { title: '系统与管理', keys: ['components', 'settings', 'backup', 'logs', 'audit', 'notify'] },
+  { title: '系统与管理', keys: ['components', 'settings', 'backup', 'logs', 'traffic', 'audit', 'notify'] },
 ] as const satisfies readonly NavGroupDef[]
 
 /**
