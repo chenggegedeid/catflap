@@ -647,13 +647,36 @@ while IFS= read -r base; do
   [ -n "$base" ] || continue
   if [ "$base" = "https://github.com" ]; then
     log "下载 ${ASSET}（直连 github.com）"
+    if [ -n "$TTY_DEV" ]; then warn "若长时间不动会自动换源，稍等即可"; fi
   else
     log "换用镜像 ${base%/https://github.com} 重试"
   fi
 
-  if ! curl -fsSL --retry 2 --max-time 300 -o "${tmpdir}/${ASSET}" \
-       "${base}/${REPO}/releases/download/${TAG}/${ASSET}" 2>/dev/null; then
-    warn "这个源下载失败，换下一个"
+  # 下载参数（为什么要这么写）：
+  #
+  # · **进度条**：以前用 -s（静默），44MB 的二进制在国内网络可能几分钟没动静，
+  #   屏幕上只有一行"下载 catflap"，看不出是卡住了还是在下 —— 用户只能干等或
+  #   以为挂了。交互时给 --progress-bar；非交互（CI/管道）保持 -sS 免得刷屏。
+  #
+  # · **--speed-time / --speed-limit**：比 --max-time 更聪明。后者是"总共等多久"，
+  #   卡死时要熬到 300 秒才换源；前者是"速度低于 1KB/s 持续 20 秒就算没救"，
+  #   20 秒就能判定这个源不行、立刻换下一个，整体快得多。
+  #
+  # · **--connect-timeout 10**：连都连不上就别耗着。
+  #
+  # · 不再 2>/dev/null：进度条走 stderr，吞掉就看不见了。
+  dl_out=""
+  if [ -n "$TTY_DEV" ]; then
+    dl_out="--progress-bar"
+  else
+    dl_out="-sS"
+  fi
+
+  if ! curl -fL --retry 1 --connect-timeout 10 \
+       --speed-time 20 --speed-limit 1024 --max-time 600 \
+       $dl_out -o "${tmpdir}/${ASSET}" \
+       "${base}/${REPO}/releases/download/${TAG}/${ASSET}"; then
+    warn "这个源下载失败或太慢，换下一个"
     continue
   fi
 
