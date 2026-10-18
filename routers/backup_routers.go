@@ -27,6 +27,13 @@ func BackupRouters(g *gin.RouterGroup) {
 	g.POST("backup/export",
 		middleware.BindJsonMiddleware[backup_api.ExportRequest],
 		app.ExportView)
+	// 定时备份：设置读写 / 立即跑一次 / 列出已生成的
+	g.GET("backup/schedule", app.ScheduleView)
+	g.POST("backup/schedule",
+		middleware.BindJsonMiddleware[backup.ScheduleConfig],
+		app.SaveScheduleView)
+	g.POST("backup/run-now", app.RunNowView)
+	g.GET("backup/auto", app.ListAutoView)
 	// 导入恢复（内部会先快照，失败自动回滚）
 	g.POST("backup/import", app.ImportView)
 }

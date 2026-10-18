@@ -28,9 +28,19 @@ func (backupComponent) Title() string { return "配置备份" }
 // Summary 见 core/component.Describer。
 func (backupComponent) Summary() string { return "导出全部配置与素材，可一键还原" }
 
-// Init 不需要做任何事：备份是直接读配置文件的，没有运行时状态要准备。
-func (backupComponent) Init(context.Context) error { return nil }
+// Init 启动定时备份循环。
+//
+// 之前这里什么都不做 —— 那时候备份只有手动触发。加了定时之后需要一个
+// 后台 goroutine，组件生命周期正好是它的位置：由框架统一管理启停，
+// 不用在外面散落 go 语句。配置里没开定时的话，StartSchedule 自己会跳过。
+func (backupComponent) Init(context.Context) error {
+	StartSchedule()
+	return nil
+}
 
-func (backupComponent) Stop(context.Context) error { return nil }
+func (backupComponent) Stop(context.Context) error {
+	StopSchedule()
+	return nil
+}
 
 func init() { component.MustRegister(backupComponent{}) }

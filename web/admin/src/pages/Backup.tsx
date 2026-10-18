@@ -9,6 +9,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
+import { ScheduleBackup } from '../components/ScheduleBackup'
 import {
   type BackupItem,
   type BackupManifest,
@@ -136,6 +137,9 @@ export function Backup() {
 
   return (
     <div className="space-y-4">
+      {/* 定时备份放在最上面：多数人真正需要的是它自己会存，手动导出是补充 */}
+      <ScheduleBackup />
+
       {/* 创建备份 */}
       <Card className="!p-0">
         <div className="px-5 pt-4">
