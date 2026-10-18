@@ -8,6 +8,7 @@ import (
 
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/chenggegedeid/catflap/middleware"
 	"github.com/chenggegedeid/catflap/modules/audit"
@@ -96,6 +97,12 @@ type IPView struct {
 //
 // 支持分页：被扫的时候 IP 数能到几千，一屏塞不下，全塞进一张表既卡又没法看。
 // 返回 total 让界面能算页码。
+//
+// # summary=1：只给数字，不查归属地
+//
+// 仪表盘上只要「有几个可疑 / 几个攻击 IP」这两个数，不需要每一行的归属地
+// 和攻击类型分类。默认路径每行都要查一次归属地库、还要按路径归纳攻击类型，
+// 而仪表盘关心的是数字 —— 传 summary=1 就只走计数，省掉整轮行级加工。
 func (AuditApi) AuditIPsView(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort", "errors")
 	onlySuspicious := c.Query("suspicious") == "1"
@@ -104,6 +111,11 @@ func (AuditApi) AuditIPsView(c *gin.Context) {
 	day := strings.TrimSpace(c.Query("day"))
 	if day != "" && !validDay.MatchString(day) {
 		res.FailWithMsg("日期格式不对（应为 YYYY-MM-DD）", c)
+		return
+	}
+
+	if c.Query("summary") == "1" {
+		res.OkWithData(auditSummary(day, sortBy), c)
 		return
 	}
 
@@ -168,6 +180,38 @@ func (AuditApi) AuditIPsView(c *gin.Context) {
 	}, c)
 }
 
+// auditSummary 只给计数，不做逐行的归属地 / 攻击类型加工。
+//
+// 给仪表盘用：它要的是「可疑几个、攻击几个」，不是一张 IP 表。
+func auditSummary(day, sortBy string) gin.H {
+	var all []audit.IPStat
+	if day != "" {
+		all, _ = audit.ListIPStatsByDay(day, sortBy, false, 0)
+	} else {
+		all = audit.ListIPStats(sortBy, false, 0)
+	}
+
+	var suspicious, attackers, blocked int
+	for i := range all {
+		if all[i].Suspicious() {
+			suspicious++
+		}
+		if all[i].Errors > 0 {
+			attackers++
+		}
+		if all[i].Blocked {
+			blocked++
+		}
+	}
+	return gin.H{
+		"total":      len(all),
+		"suspicious": suspicious,
+		"attackers":  attackers,
+		"blocked":    blocked,
+		"day":        day,
+	}
+}
+
 // attackOfIP 这个 IP 最像哪一类攻击。
 //
 // 看它扫过的路径：一个 IP 可能同时扫 .env 和 wp-login，按「最严重的那个」
@@ -227,9 +271,15 @@ func matchIPView(v IPView, kw string) bool {
 //     这种对不上的画面；
 //   - 打开审计页就是一次请求，比分六次快得多。
 //
-// 代价是这个接口比别的重一点（要读最近 24 小时的明细来算唯一 IP 数）。
-// 已经做了两件事压住成本：按小时的聚合有缓存（缺了自动从明细重算），
-// 唯一 IP 只读跨度内的那 1–2 个文件。
+// # 为什么这里要串成一条流水线
+//
+// 指标卡和趋势都基于明细。以前它们各自调一次 BuildOverview / Trends，
+// 各自把当天那个几十 MB 的文件读一遍解析一遍 —— 打开一次页面解析两三次，
+// 被扫过的机器上就是好几秒的白屏。
+//
+// 现在：明细解析有缓存（readDayCached，文件没变直接复用），
+// 站点 Top 改读按小时聚合里那份 Sites（不碰明细），
+// 地区分布有按 IP 统计版本号的缓存。一次打开页面的磁盘读取降到"文件变了才读"。
 func (AuditApi) AuditOverviewView(c *gin.Context) {
 	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
 	if hours <= 0 || hours > 168 {
@@ -261,8 +311,41 @@ type CountryCount struct {
 //
 // 用按 IP 的累计统计而不是最近 24 小时的明细：明细里一个 IP 会出现几万次，
 // 逐条查归属地太浪费；而「哪些国家在访问我」这种问题看累计值更合适。
+//
+// # 缓存
+//
+// 这段每次都要对全部 IP 查一次归属地库（纯内存查表，但 IP 上千个时
+// 一次也有几毫秒到几十毫秒），并且要对整个统计列表排序 —— 而它在
+// **每次打开审计页、每次打开仪表盘**都会跑一遍，结果却几乎不变。
+//
+// 所以按「IP 集合指纹」缓存：IP 数和企业数一样就复用。
+// 指纹用 (IP 数, 请求总数) 两个数拼成 —— 新 IP 出现会改变 IP 数，
+// 老 IP 继续刷量会改变请求总数。两者都没变时，排序结果不可能变。
+type geoRankKey struct {
+	ips      int
+	requests int64
+}
+
+var (
+	geoRankMu    sync.Mutex
+	geoRankCache map[geoRankKey][]CountryCount
+)
+
 func geoRanking() []CountryCount {
 	stats := audit.ListIPStats("requests", false, 0)
+
+	key := geoRankKey{ips: len(stats)}
+	for i := range stats {
+		key.requests += stats[i].Requests
+	}
+
+	geoRankMu.Lock()
+	if c, ok := geoRankCache[key]; ok {
+		geoRankMu.Unlock()
+		return c
+	}
+	geoRankMu.Unlock()
+
 	agg := map[string]*CountryCount{}
 	for _, st := range stats {
 		info := geo.Lookup(st.IP)
@@ -293,6 +376,11 @@ func geoRanking() []CountryCount {
 	if len(out) > 12 {
 		out = out[:12]
 	}
+
+	// 只留一份：这个 key 每次数据一变就是新的，留多了纯属吃内存
+	geoRankMu.Lock()
+	geoRankCache = map[geoRankKey][]CountryCount{key: out}
+	geoRankMu.Unlock()
 	return out
 }
 

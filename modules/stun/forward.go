@@ -10,6 +10,7 @@ import (
 
 	"github.com/chenggegedeid/catflap/modules/plainhttp"
 	"github.com/chenggegedeid/catflap/modules/traffic"
+	"github.com/chenggegedeid/catflap/utils/nettune"
 
 	"github.com/sirupsen/logrus"
 )
@@ -45,6 +46,15 @@ type ForwardOptions struct {
 // （统计会归到"未分组"，转发行为完全不受影响）。
 func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOptions, deviceID, serviceID uint) {
 	defer src.Close()
+
+	// ★ 吞吐调优，且**必须在 TLS 握手之前**：
+	//
+	// 下面 opt.TLSConfig != nil 时 src 会被换成 *tls.Conn，那时候断言不到
+	// *net.TCPConn 了。这里是唯一能摸到底层 TCP 连接的时机。
+	//
+	// 为什么必须调：见 utils/nettune 的说明。穿透这条路的延迟比内网还高一层
+	// （要经 NAT 映射到公网），窗口不够时上限就是几百 KB/s。
+	nettune.Conn(src)
 
 	// 先完成握手再拨后端：握手失败就不该白拨一次内网
 	if opt.TLSConfig != nil {
@@ -92,6 +102,10 @@ func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOpt
 		logrus.Errorf("连接内网目标失败 [%s]: %s", targetAddr, describeDialError(err))
 		return
 	}
+	// 通往内网服务这条腿同样要调：下载是「内网读 → 外网写」，
+	// 内网读到多快取决于它自己的接收窗口。（BackendHTTPS 时这里是 *tls.Conn，
+	// 断言会自动跳过，那种情况由 ulimit 的系统默认兜底。）
+	nettune.Conn(dst)
 	defer dst.Close()
 
 	// 流量统计：这条连接转了多字节。

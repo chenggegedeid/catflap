@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertCircle, ChevronRight, Computer, FileText, Globe,
+  AlertCircle, ArrowRight, ChevronRight, Computer, FileText, Globe,
   Info, LoaderCircle, Pencil, Plus, Power, RotateCw, Server, Trash2, Wifi,
 } from 'lucide-react'
 import { Card, CardHeader } from '../components/Card'
@@ -489,29 +489,67 @@ export function Stun() {
             <span className="text-muted">已停用，外部地址不通</span>
           ) : (
             /*
-              用统一的 ResolvedAddress，不再自己拼「复制按钮 + 跳转小图标」。
-              原来那样做有三个毛病：点地址是复制不是跳转（不符合直觉）、
-              跳转藏在小图标里手机难中、非 HTTP 服务也照样 window.open 跳过去
-              必然打不开。现在开不了的服务会显示成 rdp:// 这类前缀且不提供跳转。
+              完整链路：**内网服务 → 洞口 → 外部地址**。
+
+              以前第二行只有一个外部地址，看不出这个洞到底通向哪台机器的哪个
+              端口 —— 一个 reckon arithmetic 里挂着好几个设备时，想知道"这洞
+              通向谁"只能点编辑进去看。现在把两头都写出来，扫一眼就知道。
             */
-            <ResolvedAddress
-              value={resolvedAddr(svc, externalHost, externalPort)}
-              // SSH 复制连接命令比复制 host:port 有用，其余照常复制地址
-              onCopy={(text) =>
-                (svc.protocol || '').toLowerCase() === 'ssh'
-                  ? copySSHCommand(externalHost, externalPort)
-                  : copy(text)
-              }
-              fallback={phaseLabel[phase] || '等待外部地址…'}
-            />
+            <div className="flex min-w-0 items-center gap-1">
+              <span
+                className="shrink-0 font-mono text-[11px] text-muted"
+                title={`内网服务地址${dev?.name ? `（${dev.name}）` : ''}`}
+              >
+                {dev?.ip ? `${dev.ip}:${svc.internalPort}` : `:${svc.internalPort}`}
+              </span>
+              <ArrowRight className="h-3 w-3 shrink-0 text-muted" />
+              {/*
+                用统一的 ResolvedAddress，不再自己拼「复制按钮 + 跳转小图标」。
+                原来那样做有三个毛病：点地址是复制不是跳转（不符合直觉）、
+                跳转藏在小图标里手机难中、非 HTTP 服务也照样 window.open 跳过去
+                必然打不开。现在开不了的服务会显示成 rdp:// 这类前缀且不提供跳转。
+              */}
+              <ResolvedAddress
+                value={resolvedAddr(svc, externalHost, externalPort)}
+                // SSH 复制连接命令比复制 host:port 有用，其余照常复制地址
+                onCopy={(text) =>
+                  (svc.protocol || '').toLowerCase() === 'ssh'
+                    ? copySSHCommand(externalHost, externalPort)
+                    : copy(text)
+                }
+                fallback={phaseLabel[phase] || '等待外部地址…'}
+              />
+            </div>
           )
         }
         meta={
           <>
-            <span className="font-mono text-[11px] text-muted">: {svc.internalPort}</span>
-            <CardBadge tone="slate" title="协议">
+            <CardBadge tone="slate" title="传输协议">
               {(svc.protocol || 'TCP').toUpperCase()}
             </CardBadge>
+            {/*
+              本机打洞端口：**外部端口是 NAT 照着本机端口分配的**。
+              本机端口随机（punchLocalPort=0）时，每重连一次 NAT 就换一个外部端口，
+              表现就是外部地址一直在跳。这里显式标出来，让用户一眼看出
+              "该给这个服务钉一个本机端口"，而不是猜为什么地址老失效。
+            */}
+            <CardBadge
+              tone={svc.punchLocalPort > 0 ? 'blue' : 'amber'}
+              title={
+                svc.punchLocalPort > 0
+                  ? `打洞固定用本机 ${svc.punchLocalPort} 端口，外部端口才稳得住`
+                  : '打洞随机选本机端口 → 每次重连外部端口都可能变，建议填一个固定本机端口'
+              }
+            >
+              {svc.punchLocalPort > 0 ? `本机 ${svc.punchLocalPort}` : '本机端口随机'}
+            </CardBadge>
+            {/* 重启次数直接标出来：以前它只藏在状态点的悬停提示里，
+                页面上一脸正常但服务其实在反复重启，用户完全看不出来 */}
+            {restartCount > 0 && (
+              <CardBadge tone="rose" title={`累计重启 ${restartCount} 次，说明这个洞不太稳`}>
+                重启 {restartCount}
+              </CardBadge>
+            )}
             {svc.tlsTerminate && (
               <CardBadge tone="violet" title="Catflap 用证书给外面加 HTTPS">
                 HTTPS

@@ -173,6 +173,11 @@ func (s *boundServer) start() error {
 		return errors.New(msg)
 	}
 
+	// TCP 吞吐调优要在**最底层**做：Serve Accept 出来的连接，往上还会被
+	// plainhttp / TLS 包一层。包在这层拿到的才是裸 *net.TCPConn ——
+	// 详情见 tune.go 里那段「必须包在最底层」的说明。
+	ln = tunedListener{ln}
+
 	if s.spec.TLS {
 		// 先接住明文 HTTP：地址栏敲 example.com:8443 时浏览器默认按 http 发，
 		// 不管的话 TLS 握手直接失败、连接被掐断，用户看到的是错误页 +「不安全」。
