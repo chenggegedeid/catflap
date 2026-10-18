@@ -1,0 +1,166 @@
+name: 同步 Release 资产到 Gitee
+
+# GitHub Release 发布后，把二进制资产同步到 Gitee 镜像。
+#
+# 为什么需要它：sync-gitee.yml 只同步**代码**（而且只推 main 分支），
+# Release 的二进制不会跟着走。国内用户即使从 Gitee 拿到了脚本，
+# 拉二进制时 Gitee 上是 404，只能退回第三方镜像 —— 自己的镜像就没起作用。
+
+on:
+  release:
+    types: [published]
+  # 手动补传用：填一个已发布的 tag（如 v2.5.3），把它的资产传到 Gitee
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要同步的 tag，例如 v2.5.3'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-gitee-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    # 与 sync-gitee.yml 同一个开关：没配 Gitee 就空转，不算失败
+    if: vars.GITEE_SYNC == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 准备变量
+        id: vars
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ vars.GITEE_USER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          [ -n "$TAG" ] || { echo "::error::拿不到 tag"; exit 1; }
+          if [ -z "${GITEE_TOKEN}" ] || [ -z "${GITEE_USER}" ] || [ -z "${GITEE_REPO}" ]; then
+            echo "::warning::Gitee 的用户名/仓库名/令牌没配齐，跳过"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+
+      # ── 1. 先把 tag 推到 Gitee ──────────────────────────────────────────
+      #
+      # sync-gitee.yml 只推 main 分支（git push ... HEAD:refs/heads/main），
+      # 所以 Gitee 上**没有 tag**。而创建发行版必须给 target_commitish，
+      # 指到一个不存在的 ref 会失败。这里补推这个 tag。
+      - name: 推送 tag 到 Gitee
+        if: steps.vars.outputs.skip == '0'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ vars.GITEE_USER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote remove gitee 2>/dev/null || true
+          git remote add gitee "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/${GITEE_USER}/${GITEE_REPO}.git"
+          git push gitee "refs/tags/${TAG}:refs/tags/${TAG}" || echo "::warning::tag 推送失败（可能已存在），继续"
+          echo "已推送 tag ${TAG}"
+
+      # ── 2. 下载 GitHub 上的资产 ─────────────────────────────────────────
+      - name: 下载 GitHub Release 资产
+        if: steps.vars.outputs.skip == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          mkdir -p assets
+          gh release download "$TAG" --dir assets
+          echo "下载到的资产："
+          ls -la assets
+
+      # ── 3. 在 Gitee 创建发行版（已存在就复用） ──────────────────────────
+      #
+      # ⚠️ 必须带 target_commitish，否则 Gitee 报 `target_commitish is missing`。
+      - name: 创建 Gitee 发行版
+        if: steps.vars.outputs.skip == '0'
+        id: rel
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ vars.GITEE_USER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+          RELEASE_BODY: ${{ github.event.release.body || '' }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          API="https://gitee.com/api/v5/repos/${GITEE_USER}/${GITEE_REPO}/releases"
+
+          # 先看有没有同名发行版（重跑时复用，避免重复创建）
+          existing="$(curl -fsS "${API}?access_token=${GITEE_TOKEN}&per_page=100" \
+            | jq -r --arg t "$TAG" '.[] | select(.tag_name==$t) | .id' | head -n1 || true)"
+
+          if [ -n "$existing" ]; then
+            echo "rel_id=$existing" >> "$GITHUB_OUTPUT"
+            echo "复用已存在的发行版 id=$existing"
+            exit 0
+          fi
+
+          printf '%s' "$RELEASE_BODY" > /tmp/body.md
+          resp="$(curl -fsS -X POST "$API" \
+            -F "access_token=${GITEE_TOKEN}" \
+            -F "tag_name=${TAG}" \
+            -F "name=${TAG}" \
+            -F "target_commitish=${TAG}" \
+            -F "body=</tmp/body.md" || true)"
+          id="$(printf '%s' "$resp" | jq -r '.id // empty')"
+          if [ -z "$id" ]; then
+            echo "::error::创建发行版失败：$(printf '%s' "$resp" | head -c 300)"
+            exit 1
+          fi
+          echo "rel_id=$id" >> "$GITHUB_OUTPUT"
+          echo "已创建发行版 id=$id"
+
+      # ── 4. 逐个上传资产 ─────────────────────────────────────────────────
+      - name: 上传资产到 Gitee
+        if: steps.vars.outputs.skip == '0'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ vars.GITEE_USER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          REL_ID="${{ steps.rel.outputs.rel_id }}"
+          [ -n "$REL_ID" ] || { echo "::error::没有发行版 id"; exit 1; }
+          API="https://gitee.com/api/v5/repos/${GITEE_USER}/${GITEE_REPO}/releases/${REL_ID}/attach_files"
+
+          ok=0
+          fail=0
+          for f in assets/*; do
+            [ -f "$f" ] || continue
+            name="$(basename "$f")"
+            if curl -fsS -X POST "$API" \
+                 -F "access_token=${GITEE_TOKEN}" \
+                 -F "file=@${f};filename=${name}" > /dev/null; then
+              echo "  ✓ $name"
+              ok=$((ok+1))
+            else
+              echo "  ✗ $name（上传失败）"
+              fail=$((fail+1))
+            fi
+          done
+
+          echo "上传完成：成功 $ok 个，失败 $fail 个"
+          # 一个都没传上去才算失败；个别失败只警告，方便重跑补传
+          if [ "$ok" -eq 0 ]; then
+            echo "::error::没有任何资产上传成功"
+            exit 1
+          fi
+          if [ "$fail" -gt 0 ]; then
+            echo "::warning::有 $fail 个资产上传失败，可重跑本 workflow 补传"
+          fi
