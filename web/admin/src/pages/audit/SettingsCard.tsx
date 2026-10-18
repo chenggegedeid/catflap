@@ -19,6 +19,8 @@ export function SettingsCard({
   const [autoBlock, setAutoBlock] = useState(cfg?.autoBlock ?? false)
   const [threshold, setThreshold] = useState(String(cfg?.autoBlockThreshold ?? 500))
   const [minutes, setMinutes] = useState(String(cfg?.autoBlockMinutes ?? 60))
+  // 可信反代：一行一个，和下面「IP 名单」那两个输入框保持一致的输入习惯
+  const [trustedText, setTrustedText] = useState((cfg?.trustedProxies ?? []).join('\n'))
   const [busy, setBusy] = useState(false)
 
   // cfg 从后端回来时同步进表单（首屏是 null，拿到后要填上）
@@ -30,6 +32,7 @@ export function SettingsCard({
     setAutoBlock(cfg.autoBlock)
     setThreshold(String(cfg.autoBlockThreshold))
     setMinutes(String(cfg.autoBlockMinutes))
+    setTrustedText((cfg.trustedProxies ?? []).join('\n'))
   }, [cfg])
 
   const save = async () => {
@@ -44,7 +47,10 @@ export function SettingsCard({
         autoBlockMinutes: Number(minutes) || 60,
         // 白名单已移到下面的「IP 名单」区块，这里原样带回，别把它清空
         whitelist: cfg?.whitelist ?? [],
-        trustedProxies: cfg?.trustedProxies ?? [],
+        trustedProxies: trustedText
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean),
       })
       onToast(res.msg || '已保存')
       onSaved()
@@ -149,6 +155,26 @@ export function SettingsCard({
             </div>
           )}
         </div>
+
+        <label className="block">
+          <div className="mb-1 text-xs font-semibold text-muted">可信反代（一行一个）</div>
+          <textarea
+            value={trustedText}
+            onChange={(e) => setTrustedText(e.target.value)}
+            rows={3}
+            placeholder={'173.245.48.0/20\n2400:cb00::/32'}
+            className={`${cls} resize-y font-mono`}
+          />
+          <div className="mt-1 text-[11px] leading-relaxed text-muted">
+            只有<b>来自这些地址</b>的请求，才会去 <code>X-Forwarded-For</code> 里取真实来源。
+            <br />
+            走 Cloudflare 时必填 —— 否则每一个访客在审计里都显示成 CF 的地址，
+            封禁也会误伤到 CF 自己。留空表示「谁都不信」，一律用对端的真实地址。
+            <br />
+            支持网段写法，例如 <code>173.245.48.0/20</code>。完整地址段见
+            Cloudflare 官方的 IP Ranges 页面。
+          </div>
+        </label>
 
         <div className="flex justify-end">
           <button

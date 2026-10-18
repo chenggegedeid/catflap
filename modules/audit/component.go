@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -460,6 +461,86 @@ func sortBlocks(list []BlockEntry) {
 
 // Enabled 审计是否开着。热路径上读，所以走 atomic。
 func Enabled() bool { return enabled.Load() }
+
+// ResolveClientIP 取这次请求的真实来源 IP。
+//
+// **反代、封禁、审计三处必须共用这一份判断**，否则会出现「封禁按对端地址判、
+// 审计按转发头记」这种对不上的情况 —— 表面上封禁生效了，统计里却还在涨。
+//
+// 默认只信 TCP 对端地址（r.RemoteAddr）：它造不了假，
+// 客户端伪造一个 X-Forwarded-For 没有任何作用。
+// 只有当对端**确实落在 TrustedProxies 里**时，才回头去信转发头 ——
+// 那种情况下对端是代理（Cloudflare / nginx），它不是来访者本人。
+//
+// 从 X-Forwarded-For 取值必须**从右往左**：每过一层代理就在末尾追加一个，
+// 最右边是离我们最近的一层，最左边是客户端自己声称的（可以随便填）。
+// 右往左跳过所有可信地址，取第一个不可信的 —— 那才是伪造不了的真实来源。
+func ResolveClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	remote := remoteIP(r)
+
+	Runtime.mu.RLock()
+	nets := Runtime.trustedNets
+	Runtime.mu.RUnlock()
+
+	// 没配可信反代，或对端不在可信网段里 → 转发头一律不信
+	if len(nets) == 0 || !matchAny(nets, remote) {
+		return remote
+	}
+
+	// 对端可信，转发头才有意义：从右往左找第一个不可信的
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			cand := normalizeIP(parts[i])
+			if cand == "" || matchAny(nets, cand) {
+				continue // 空项，或可信代理自己加的那一跳 —— 跳过
+			}
+			return cand
+		}
+	}
+
+	// XFF 没给、或整条链都可信 → 退到 Cloudflare 那个头。
+	// 只有到这一步才信它：上面已经确认过对端在可信网段里。
+	if v := normalizeIP(r.Header.Get("CF-Connecting-IP")); v != "" {
+		return v
+	}
+
+	return remote
+}
+
+// remoteIP 从 RemoteAddr 里取出 IP 部分（去掉端口）
+//
+// 不用 c.ClientIP()：gin 默认信任全部代理，它会去读 X-Forwarded-For，
+// 伪造一个头就能让「来源」变成别的地方。这里从 TCP 连接信息直接取。
+func remoteIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.Trim(r.RemoteAddr, "[]")
+}
+
+// normalizeIP 把转发头里的一个值规整成裸 IP。
+//
+// 容忍三种写法：带端口的（部分代理会写 "1.2.3.4:56789"）、
+// IPv6 带方括号的（"[2001:db8::1]:8080"）、以及两边有空格的。
+// 规整不了就返回空串，让调用方跳过这一项。
+func normalizeIP(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.Trim(s, "[]")
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = strings.Trim(host, "[]")
+	}
+	if net.ParseIP(s) == nil {
+		return "" // 不是合法 IP（可能是主机名或垃圾），别拿它当来源
+	}
+	return s
+}
 
 // SetEnabled 开关
 func SetEnabled(on bool) { enabled.Store(on) }

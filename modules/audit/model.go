@@ -156,7 +156,11 @@ type Config struct {
 	// 别把管理员自己关在外面。
 	Whitelist []string `json:"whitelist"`
 
-	// TrustedProxies 可信反代。配了之后会从 X-Forwarded-For 取真实来源。
+	// TrustedProxies 可信反代的 IP 或网段。
+	//
+	// 配了之后，只有**对端落在这些网段里**的请求才会去 X-Forwarded-For 取真实来源
+	// （走 Cloudflare 时必填）。留空 = 谁都不信，一律用 TCP 对端地址。
+	// 判断逻辑见 ResolveClientIP —— 反代、封禁、审计三处共用那一份。
 	//
 	// **默认空**：不配就只用 TCP 对端地址（伪造不了）。
 	// 配了就意味着"相信这个来源写的转发头"，只该在确实挡了 Cloudflare
