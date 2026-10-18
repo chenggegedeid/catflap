@@ -165,6 +165,7 @@ export function Backup() {
             ))}
           </div>
 
+          {/* 资产（图标/壁纸）已随导航页废弃，后端返回空数组时这一块不渲染 */}
           {(items?.assets ?? []).length > 0 && (
             <div className="mb-3">
               <div className="mb-1.5 text-xs font-semibold text-muted">上传的资产</div>

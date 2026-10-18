@@ -152,7 +152,10 @@ export interface StunService {
   /** 内网服务本身就说 TLS（自签也算），转发时用 tls.Dial */
   backendHttps: boolean
   enabled: boolean
-  /** 访问控制（IP 门禁）：和反代站点同一套结构和语义 */
+  /**
+   * 站点级访问控制 **已废弃**：后端不再检查这条规则，界面也没有配置入口。
+   * 字段留着只为兼容老配置的读取（不报错），不要再用它做权限判断。
+   */
   access?: { mode: string; rules?: string[] }
   /** 自定义通知正文模板（#{xxx} 占位符）。通知方式和 token 在通知页全局配 */
   notifyTemplate?: string

@@ -392,8 +392,8 @@ export interface StunServicePayload {
   deviceId: number
   name: string
   /**
-   * 访问控制（IP 门禁）—— 和反代站点同一套结构。
-   * 新建时不传会按默认处理：黑名单模式 + 空规则。
+   * 站点级访问控制 **已废弃**：后端不再检查，界面也没有配置入口。
+   * 字段留着只为兼容老配置，新代码不要传、也不要依赖它。
    */
   access?: { mode: string; rules?: string[] }
   internalPort: number

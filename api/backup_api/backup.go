@@ -110,6 +110,8 @@ func (BackupApi) ModulesView(c *gin.Context) {
 		})
 	}
 
+	// 资产（图标/壁纸）已随导航页一并废弃，backup.ASSETS 现在是空的。
+	// 这里仍然按 ASSETS 遍历，是为了将来加回资产时不用改这段。
 	assets := make([]item, 0, len(backup.ASSETS))
 	for _, a := range backup.ASSETS {
 		info, err := os.Stat(a.Dir)
