@@ -1,0 +1,48 @@
+name: 同步到 Gitee
+
+# GitHub 一有提交就推一份到 Gitee，让国内用户有稳定的下载地址。
+#
+# 为什么不用 Gitee 自带的「仓库镜像管理」：那个触发最短间隔 5 分钟、不支持
+# Git-LFS、大仓库容易超时，而且方向一旦配错会反过来覆盖 GitHub。
+# 写在 Actions 里可以明确控制「只从 GitHub 流向 Gitee」，失败也有日志可查。
+#
+# 需要的配置（仓库 Settings → Secrets and variables → Actions）：
+#   Secrets:   GITEE_TOKEN    Gitee 私人令牌（权限给 projects）
+#   Variables: GITEE_USER     Gitee 用户名
+#              GITEE_REPO     Gitee 仓库名（不含用户名）
+#              GITEE_SYNC     设为 true 才真正同步（默认关，方便先配后开）
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # 没开开关就空转，不算失败 —— 免得没配 Gitee 的 fork 一推就红叉
+    if: vars.GITEE_SYNC == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 推送到 Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ vars.GITEE_USER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITEE_TOKEN}" ] || [ -z "${GITEE_USER}" ] || [ -z "${GITEE_REPO}" ]; then
+            echo "::warning::Gitee 的用户名/仓库名/令牌没配齐，跳过同步"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote remove gitee 2>/dev/null || true
+          git remote add gitee "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/${GITEE_USER}/${GITEE_REPO}.git"
+          # --force：Gitee 侧是纯镜像，不允许它有自己的提交。
+          # 若有人往 Gitee 直接推过东西，那部分会被覆盖（这是镜像该有的行为）。
+          git push --force gitee HEAD:refs/heads/main
+          echo "已同步到 https://gitee.com/${GITEE_USER}/${GITEE_REPO}"
