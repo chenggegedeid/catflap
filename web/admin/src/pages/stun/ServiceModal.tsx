@@ -468,7 +468,7 @@ export function ServiceModal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex gap-8 border-b border-line px-6">
+        <div className="flex gap-4 overflow-x-auto border-b border-line px-4 sm:gap-8 sm:px-6">
           {[
             { key: 'basic' as const, label: '基础配置' },
             // 入口重定向是 HTTP 307，只有浏览器听得懂；UDP 根本没有这回事
@@ -500,7 +500,7 @@ export function ServiceModal({
               */}
               <label className="block">
                 <div className={fieldLabelCls}>设备</div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <select
                     value={deviceId || ''}
                     onChange={(e) => onDeviceChange(Number(e.target.value) || 0)}

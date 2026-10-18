@@ -241,3 +241,48 @@ textarea {
 .dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(248, 250, 252, 0.28);
 }
+
+/* ── 窄屏（手机）：弹窗改成贴底抽屉 ──────────────────────────────────────────
+ *
+ * 桌面弹窗是居中的一张卡片，这在手机上不好用：手指够不到上半部分的按钮，
+ * 而且卡片四周留白后可视区很小。改成从底部滑出的抽屉，占满宽度、贴着底边，
+ * 单手就能操作。
+ *
+ * 为什么写在 CSS 里而不是给每个弹窗加 `sm:` 变体：
+ * 抽屉化要同时改**遮罩定位**（place-items: end）和**弹窗本体**（去掉底部圆角、
+ * 取消最大宽度），两边得成对改才对得上。弹窗有几十个，逐个改必漏。
+ * 用 `.catflap-modal > *` 一次命中全部，以后新增弹窗自动继承。
+ * （钩子 class 加在 components/modal.ts 的 modalBackdrop 上。）
+ */
+@media (max-width: 640px) {
+  .catflap-modal {
+    /* 贴底：内容靠下，左右和底部不留白 */
+    place-items: end;
+    padding-left: 0;
+    padding-right: 0;
+    padding-bottom: 0;
+  }
+
+  .catflap-modal > * {
+    /* 抽屉贴着屏幕底边，底部圆角要去掉，否则底边两角露出背景 */
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    /* 卡片本体常有 max-w-md 之类，手机上应该占满宽度 */
+    max-width: 100%;
+    /* 底部按钮别贴着屏幕边缘，留出安全区 */
+    padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+    /* 从底部滑上来 */
+    animation: catflap-sheet-in 0.18s ease-out;
+  }
+}
+
+@keyframes catflap-sheet-in {
+  from {
+    transform: translateY(8%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
