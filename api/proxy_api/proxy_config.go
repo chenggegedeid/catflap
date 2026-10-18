@@ -21,6 +21,15 @@ type ProxyConfigView struct {
 	Forwards []proxymodel.Forward `json:"forwards"`
 	// ErrorPage 外网错误页（404 / 502）的显示方式。「系统设置」页用。
 	ErrorPage proxymodel.ErrorPage `json:"errorPage"`
+	// ExposeAdmin 是否允许把管理后台通过反代挂出去。「系统设置」页那个开关读它。
+	//
+	// ⚠️ 这个字段**曾经漏过**，后果很隐蔽：保存接口 /api/proxy/expose-admin
+	// 写进配置了、界面也提示「已打开，立即生效」，但本视图不返回它，
+	// 前端读到的永远是 undefined → 一刷新开关就弹回关闭。
+	// 用户看到的现象是「打开了却没保存住」，实际是保存住了、读不回来。
+	// 上面的 Forwards 踩过同一个坑（注释里还记着），所以新加字段时
+	// 务必确认「写接口有的，读接口也要有」——见 proxy_config_test.go 的守门。
+	ExposeAdmin bool `json:"exposeAdmin"`
 }
 
 // EntryView 两个默认入口的设置。
@@ -52,6 +61,9 @@ func (ProxyApi) ProxyConfigView(c *gin.Context) {
 		// 端口转发同样要带上：这个视图就是「端口转发」页的数据源。
 		Forwards:  proxy.SortForwards(cfg.Forwards),
 		ErrorPage: cfg.ErrorPage,
+		// 读接口必须把写接口能改的字段都带回来，否则界面「保存成功、刷新归位」。
+		// 具体踩过的坑见结构体里 ExposeAdmin 的注释。
+		ExposeAdmin: cfg.ExposeAdmin,
 	}, c)
 }
 
