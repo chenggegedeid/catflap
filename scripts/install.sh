@@ -8,17 +8,17 @@
 #     -o /tmp/install.sh && sudo bash /tmp/install.sh
 #
 # ⚠️ 如果 `-o /tmp/install.sh` 报 `curl: (23) client returned ERROR on write`，
-说明 /tmp 写不进去（部分 VPS 的 /tmp 是 tmpfs 内存盘，内存紧张时写失败，
-但 `df` 仍显示有空间）。换个目录就行：`-o ~/install.sh`。
-
-⚠️ 如果报 `curl: (23)` 且 /tmp 明明能写，或者连接秒断 —— 多半是
-raw.githubusercontent.com 被拦（和 api.github.com 同类）。两条路：
-  · 走代理：`curl -x http://<代理> ... -o ~/install.sh`，
-    跑的时候记得 `sudo env http_proxy=... https_proxy=... bash ~/install.sh`
-    （sudo 会清环境变量，不给它传代理的话下二进制那步又会裸连失败）
-  · 换 github.com 域名：`https://github.com/<owner>/<repo>/raw/main/scripts/install.sh`
-
-⚠️ 别把「脚本的来源地址」当作参数传回来 —— Release 资产不在
+# 说明 /tmp 写不进去（部分 VPS 的 /tmp 是 tmpfs 内存盘，内存紧张时写失败，
+# 但 `df` 仍显示有空间）。换个目录就行：`-o ~/install.sh`。
+#
+# ⚠️ 如果报 `curl: (23)` 且 /tmp 明明能写，或者连接秒断 —— 多半是
+# raw.githubusercontent.com 被拦（和 api.github.com 同类）。两条路：
+#   · 走代理：`curl -x http://<代理> ... -o ~/install.sh`，
+#     跑的时候记得 `sudo env http_proxy=... https_proxy=... bash ~/install.sh`
+#     （sudo 会清环境变量，不给它传代理的话下二进制那步又会裸连失败）
+#   · 换 github.com 域名：`https://github.com/<owner>/<repo>/raw/main/scripts/install.sh`
+#
+# ⚠️ 别把「脚本的来源地址」当作参数传回来 —— Release 资产不在
 # raw.githubusercontent.com 上，传了会被当成镜像前缀拼进下载链接，拼出
 # `.../main/https://github.com/...` 这种畸形 URL（curl 报 404 且看不出原因）。
 # 要换镜像就传镜像域名：sudo bash /tmp/install.sh https://ghfast.top
