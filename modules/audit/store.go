@@ -84,6 +84,12 @@ type runtime struct {
 	blockedNets []blockedNet
 	// whitelist 永不封禁的名单，同上
 	whitelist []*net.IPNet
+	// trustedNets 可信反代的网段。判「要不要信 X-Forwarded-For」用。
+	//
+	// 存解析后的网段而不是每次现解析：ResolveClientIP 在**每个请求**上都要调，
+	// 而 parseCIDROrIP 要做字符串切分 + 地址解析，热路径上不该重复做。
+	// 跟上面两位的待遇一致 —— 配置变更时（rebuildIndexes）重建一次。
+	trustedNets []*net.IPNet
 }
 
 // blockedNet 一条网段封禁
@@ -200,10 +206,19 @@ func rebuildIndexes(cfg *Config) {
 		}
 	}
 
+	// 可信反代：配了才会去 X-Forwarded-For 里找真实来源（走 Cloudflare 时用）
+	var tp []*net.IPNet
+	for _, t := range cfg.TrustedProxies {
+		if n := parseCIDROrIP(t); n != nil {
+			tp = append(tp, n)
+		}
+	}
+
 	Runtime.mu.Lock()
 	Runtime.blocked = blocked
 	Runtime.blockedNets = nets
 	Runtime.whitelist = wl
+	Runtime.trustedNets = tp
 	Runtime.mu.Unlock()
 }
 

@@ -91,13 +91,16 @@ func (r *ProxyRuntime) accessLogEnabled() bool {
 
 // clientIP 记真实来访者。
 //
-// 反代自己就是最外面那一层，RemoteAddr 就是对端——
-// 所以不看 X-Forwarded-For（那是客户端能随便伪造的）。
+// 判断统一交给 audit.ResolveClientIP，不在这里自己写一份：
+// 封禁（handler.go）、访问日志、审计记录三处调的都是这个函数，
+// 它们**必须看到同一个 IP**，否则会出现「封禁按对端地址判、审计按转发头记」
+// 这种表面生效、统计却还在涨的情况。
+//
+// 默认只信 TCP 对端（RemoteAddr）—— 伪造 X-Forwarded-For 没用；
+// 只有把来源配进审计设置里的「可信反代」后，才会去 XFF 里找真实来源
+// （走 Cloudflare 时对端是 CF，那是唯一能拿到真实来源的地方）。
 func clientIP(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
+	return audit.ResolveClientIP(r)
 }
 
 // statusRecorder 拿状态码 + 出站字节数。
