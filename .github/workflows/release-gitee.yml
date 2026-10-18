@@ -29,9 +29,14 @@ jobs:
     # 与 sync-gitee.yml 同一个开关：没配 Gitee 就空转，不算失败
     if: vars.GITEE_SYNC == 'true'
     steps:
+      # fetch-tags: true **必须显式写**。checkout@v4 默认是 false，
+      # 不拉 tag 的话下面 git push refs/tags/... 会因为本地没这个 tag 而失败，
+      # 接着 Gitee 上就没有这个 tag，创建发行版时 target_commitish 指向不存在的
+      # ref，Gitee 返回 400 —— 报错只是一个 400，看不出是 tag 没拉到。
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: 准备变量
         id: vars
@@ -69,6 +74,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote remove gitee 2>/dev/null || true
           git remote add gitee "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/${GITEE_USER}/${GITEE_REPO}.git"
+          # 兜底：万一 checkout 没把 tag 带全，显式抓一次
+          git fetch origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
+          git rev-parse "${TAG}^{commit}" >/dev/null 2>&1 || { echo "::error::本地拿不到 tag ${TAG}"; exit 1; }
           git push gitee "refs/tags/${TAG}:refs/tags/${TAG}" || echo "::warning::tag 推送失败（可能已存在），继续"
           echo "已推送 tag ${TAG}"
 
@@ -111,13 +119,20 @@ jobs:
             exit 0
           fi
 
-          printf '%s' "$RELEASE_BODY" > /tmp/body.md
-          resp="$(curl -fsS -X POST "$API" \
+          # body 为空时 Gitee 也可能挑刺，给个兜底文案
+          if [ -s /tmp/body.md ]; then
+            BODY_ARG="-F body=</tmp/body.md"
+          else
+            BODY_ARG="-F body=Catflap ${TAG}"
+          fi
+
+          # 不用 -f：失败时也要拿到 Gitee 返回的正文，否则只有一个 400 无从下手
+          resp="$(curl -sS -X POST "$API" \
             -F "access_token=${GITEE_TOKEN}" \
             -F "tag_name=${TAG}" \
             -F "name=${TAG}" \
             -F "target_commitish=${TAG}" \
-            -F "body=</tmp/body.md" || true)"
+            $BODY_ARG || true)"
           id="$(printf '%s' "$resp" | jq -r '.id // empty')"
           if [ -z "$id" ]; then
             echo "::error::创建发行版失败：$(printf '%s' "$resp" | head -c 300)"
