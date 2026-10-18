@@ -43,6 +43,14 @@ export function ReverseProxy() {
   const [logSite, setLogSite] = useState<ProxySite | null>(null)
   const { toasts, show: toast } = useToast()
 
+  /** 复制外部地址。穿透页也有一个，两处行为保持一致 */
+  const copyAddress = (text: string) => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast(`已复制: ${text}`))
+      .catch(() => toast('复制失败'))
+  }
+
   const [entryModal, setEntryModal] = useState(false)
   const [siteModal, setSiteModal] = useState<{
     open: boolean
@@ -578,6 +586,7 @@ export function ReverseProxy() {
                       onToggleFlag={(flag) => toggleSiteFlag(s, flag)}
                       onEdit={() => setSiteModal({ open: true, initial: s })}
                       onRemove={() => removeSite(s)}
+                      onCopy={copyAddress}
                     />
                     </div>
                   ))}
