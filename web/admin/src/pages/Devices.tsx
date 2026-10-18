@@ -12,6 +12,7 @@ import { Card, CardHeader } from '../components/Card'
 import * as api from '../lib/api'
 import type { Device, LanHost, LanSubnet, ProxyConfig, StunConfig } from '../types'
 import { LanScanModal } from '../components/LanScanModal'
+import { NetworkSettings } from '../components/NetworkSettings'
 import { modalBackdrop } from '../components/modal'
 
 export function Devices() {
@@ -142,6 +143,13 @@ export function Devices() {
 
   return (
     <div className="space-y-4">
+      {/*
+        出口网络设置放在设备列表**上面**：它是全局的（Catflap 自己从哪张卡出去），
+        跟设备有多少台无关。放上面不会被"设备变多"顶下去；
+        它本身默认折叠，不抢设备列表的位置。
+      */}
+      <NetworkSettings />
+
       <Card className="!p-0">
         <div className="px-5 pt-4">
           <CardHeader
