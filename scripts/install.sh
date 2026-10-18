@@ -7,7 +7,18 @@
 #   curl -fsSL https://raw.githubusercontent.com/chenggegedeid/catflap/main/scripts/install.sh \
 #     -o /tmp/install.sh && sudo bash /tmp/install.sh
 #
-# ⚠️ 别把「脚本的来源地址」当作参数传回来 —— Release 资产不在
+# ⚠️ 如果 `-o /tmp/install.sh` 报 `curl: (23) client returned ERROR on write`，
+说明 /tmp 写不进去（部分 VPS 的 /tmp 是 tmpfs 内存盘，内存紧张时写失败，
+但 `df` 仍显示有空间）。换个目录就行：`-o ~/install.sh`。
+
+⚠️ 如果报 `curl: (23)` 且 /tmp 明明能写，或者连接秒断 —— 多半是
+raw.githubusercontent.com 被拦（和 api.github.com 同类）。两条路：
+  · 走代理：`curl -x http://<代理> ... -o ~/install.sh`，
+    跑的时候记得 `sudo env http_proxy=... https_proxy=... bash ~/install.sh`
+    （sudo 会清环境变量，不给它传代理的话下二进制那步又会裸连失败）
+  · 换 github.com 域名：`https://github.com/<owner>/<repo>/raw/main/scripts/install.sh`
+
+⚠️ 别把「脚本的来源地址」当作参数传回来 —— Release 资产不在
 # raw.githubusercontent.com 上，传了会被当成镜像前缀拼进下载链接，拼出
 # `.../main/https://github.com/...` 这种畸形 URL（curl 报 404 且看不出原因）。
 # 要换镜像就传镜像域名：sudo bash /tmp/install.sh https://ghfast.top
@@ -20,9 +31,15 @@
 #   · 没装过 → 问装哪个版本
 #   · 装过   → 问「更新 / 重装 / 卸载 / 完全卸载」，不会闷头就开始下载
 #
-# 自动化（给了任何参数就不弹菜单，保证结果确定）：
+# 已装过的话，**即使给了 --version 也会先弹菜单**问你要更新还是卸载 ——
+# 参数只决定"装的话装哪版、从哪下"，不代表这次要做什么。
+# 想连这一问都跳过（脚本化 / CI），显式加 --yes。
+#
+# 自动化（--yes 或明确的动作参数才免交互，保证结果确定）：
 #   sudo bash install.sh --status          只看装没装、装的哪版，不动手
-#   sudo bash install.sh --yes             非交互安装 / 升级到最新版
+#   sudo bash install.sh --yes             非交互安装 / 升级到最新版（不问）
+#   sudo bash install.sh --yes --version v2.0.0   非交互装指定版本
+#   sudo bash install.sh --menu            强制先弹菜单（哪怕给了别的参数）
 #   sudo bash install.sh --version v2.0.0  装指定版本
 #   sudo bash install.sh --uninstall       卸载（保留配置与数据）
 #   sudo bash install.sh --purge           卸载并删除配置与数据（**删之前自动备份**）
@@ -74,6 +91,8 @@ ASSUME_YES=0
 # 有没有显式给过参数。给了就完全按参数走（适合自动化），一个都没给且能交互
 # 时才进菜单。
 ARGS_GIVEN=0
+# 1 = 即使用户给了参数也先弹菜单（--menu）
+MENU_FORCE=0
 
 # 重跑自己时该写什么命令。直接写 $0 在 `curl ... | sudo bash` 这种管道执行下会
 # 变成尴尬的 "bash bash"（管道里 $0 就是 bash，前面再加一个 bash 就成了两个）。
@@ -114,6 +133,8 @@ while [ $# -gt 0 ]; do
     --uninstall) ACTION="uninstall"; ARGS_GIVEN=1; shift ;;
     --purge)     ACTION="purge"; ARGS_GIVEN=1; shift ;;
     --run-as-root) RUN_AS="root"; ARGS_GIVEN=1; shift ;;
+    # 显式要求弹菜单：即使给了 --version / --mirror 也先问一句做什么
+    --menu)      MENU_FORCE=1; shift ;;
     -h|--help)
       # 只打印文件开头那段连续的注释，并且去掉行首的 "# "。
       # 之前写的是 sed -n '3,30p'，注释块结束之后就把代码也打出来了（REPO=… 之类），
@@ -354,7 +375,31 @@ confirm_or_exit() {
   esac
 }
 
-if [ "$ARGS_GIVEN" -eq 0 ] && [ -n "$TTY_DEV" ]; then
+# ── 要不要弹菜单 ────────────────────────────────────────────────────────────
+#
+# 规则（改过一次，之前的规则会让"只想升级"的人跳过所有选择）：
+#
+#   · **已经装过 + 有终端 + 没显式 --yes** → 一律弹菜单。
+#     哪怕用户给了 --version / --mirror —— 那些只是"装的话装哪个版本、从哪下"，
+#     并不能说明他这次是想升级还是想卸载。以前把"给了参数"当成"别问了"，
+#     结果 `--version v2.5.1` 直接闷头覆盖，用户想卸载都没机会选。
+#   · 没装过 → 弹"装哪个版本"的简菜单（同样可以 --yes 跳过）。
+#   · `--yes` → 明确表示"别问，照我说的做"，走非交互。
+#   · `--status` / `--uninstall` / `--purge` → 本身就是明确动作，不必再问。
+#   · 拿不到终端（管道 / CI）→ 不弹，见下面那段。
+WANT_MENU=0
+if [ -n "$TTY_DEV" ] && [ "$ASSUME_YES" -eq 0 ]; then
+  case "$ACTION" in
+    status|uninstall|purge) WANT_MENU=0 ;;
+    *)
+      if [ "$ARGS_GIVEN" -eq 0 ] || [ "$MENU_FORCE" -eq 1 ] || is_installed; then
+        WANT_MENU=1
+      fi
+      ;;
+  esac
+fi
+
+if [ "$WANT_MENU" -eq 1 ]; then
   if is_installed; then menu_installed; else menu_fresh; fi
   case "$ACTION" in
     install) confirm_or_exit "安装 / 更新到 ${INSTALL_DIR}（账号 ${RUN_AS}，端口 ${PORT:-3791}）" ;;
