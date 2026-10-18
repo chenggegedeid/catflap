@@ -266,9 +266,18 @@ function OverlayChart({
   const step = W / n
   const barW = Math.max(3, Math.min(12, step * 0.45))
 
-  // 流量：按 (入+出) 的峰值归一化
+  /*
+    流量序列是**稀疏**的：只有发生过流量的小时才有记录（刚开机可能只有 1 个点），
+    而审计序列是**稠密**的：24 个小时桶全部预填，没数据的小时是 0。
+    所以不能按下标一一对应 —— 那样流量的那 1 个点会被画到最左边（24 小时前），
+    实际它属于「当前小时」。
+
+    两边都覆盖同一个窗口、且都以「当前小时」结尾，所以**从右往左对齐**是正确的：
+    流量的最后一个点对应审计的最后一个点，倒数第二个对应倒数第二个。
+  */
   const tPeak = Math.max(1, ...tSeries.map((p) => p.in + p.out))
-  const tPts = tSeries.map((p, i) => {
+  const tPts = tSeries.map((p, idxFromStart) => {
+    const i = n - (tSeries.length - idxFromStart) // 换算成整条轴的绝对下标（右对齐）
     const x = i * step + step / 2
     const y = base - ((p.in + p.out) / tPeak) * (base - 10)
     return `${x.toFixed(1)},${y.toFixed(1)}`
@@ -303,11 +312,7 @@ function OverlayChart({
 
         {tPts.length > 1 ? (
           <>
-            <polygon
-              points={`0,${base} ${tPts.join(' ')} ${W},${base}`}
-              fill="#378ADD"
-              opacity="0.14"
-            />
+            <polygon points={`0,${base} ${tPts.join(' ')} ${W},${base}`} fill="#378ADD" opacity="0.14" />
             <polyline
               points={tPts.join(' ')}
               fill="none"
@@ -316,6 +321,16 @@ function OverlayChart({
               strokeLinejoin="round"
             />
           </>
+        ) : null}
+
+        {/* 只有一个小时的流量（刚开机常见）：画个点，别让整条线凭空消失 */}
+        {tPts.length === 1 ? (
+          <circle
+            cx={tPts[0].split(',')[0]}
+            cy={tPts[0].split(',')[1]}
+            r="3"
+            fill="#378ADD"
+          />
         ) : null}
       </svg>
 
