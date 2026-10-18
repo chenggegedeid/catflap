@@ -15,6 +15,15 @@
 # modules/task 的测试同样以包目录为 CWD，RunDue → SaveConfig 会写出
 # modules/task/config/taskConfig.json。理由同上。
 /modules/task/config/
+#
+# ⚠️ 下面两个不只是「制造无意义 diff」，是**真的泄露过内网信息**：
+#   modules/device/config/devices.json —— 里面是真实的内网设备清单
+#     （IP 与设备名），曾被提交进公开仓库，已从全部历史中清除。
+#   modules/auth/config/audit.json —— 登录失败封禁记录，同样是运行期数据。
+# 两者都是测试以包目录为 CWD 写进源码树的运行期产物，
+# 真实运行时写在工作目录的 config/ 下（已被上面 /config/ 排除）。
+/modules/device/config/
+/modules/auth/config/
 
 
 # ── 构建产物 ────────────────────────────────────────────────────────
