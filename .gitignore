@@ -72,3 +72,7 @@ gh_token*
 .env.*
 !.env.example
 !.env.sample
+
+# Python
+__pycache__/
+*.pyc
