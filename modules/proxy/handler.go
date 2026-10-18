@@ -54,12 +54,15 @@ func serve(router *Router, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 门禁：先看这个来源能不能访问该站点，再谈转发。
-	// 放在 Match 之后是因为规则挂在站点上，得先知道命中了哪个站点。
-	if !accessAllowed(entry.Site, r) {
-		writeAccessDenied(w, entry.Site, r)
-		return
-	}
+	// 站点级 IP 门禁已删除（2026-10）。
+	//
+	// 曾经这里有一道 accessAllowed() 检查，读站点上的 access 规则。
+	// 后来发现：面向互联网的服务没法提前知道谁会来，预先写网段没有意义，
+	// 真正起作用的是**全局**黑名单（audit 模块）+ 自动拉黑 + 全局白名单，
+	// 那套还带审计记录。所以站点级那份先是不再能配置（UI 删了），
+	// 现在连检查也一并去掉，免得"代码说没这功能、实际还在拦人"。
+	//
+	// 老配置里的 access 字段仍在数据模型里，读进来不报错，只是不再生效。
 
 	// 把站点 ID 填进外层给的容器（它要按服务分组统计流量）。
 	// 注意不是 context：内层改 context 传不回外层，见 traffic.SiteRef 的说明。
