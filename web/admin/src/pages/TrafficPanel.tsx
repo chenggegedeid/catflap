@@ -140,11 +140,19 @@ export function TrafficPanel() {
         </div>
       </Card>
 
-      {/* 累计与今日 */}
+      {/* 累计与今日。
+          今日和累计用**同样的口径**（入站/出站分开）——
+          原来今日是 in+out 合并成一个数、累计却是分开两个，
+          并排放着会让人以为"今日流量"是第三种东西。 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="累计入站" value={fmtBytes(rt?.totals.totalIn ?? 0)} />
         <Metric label="累计出站" value={fmtBytes(rt?.totals.totalOut ?? 0)} />
-        <Metric label="今日流量" value={fmtBytes((rt?.today.in ?? 0) + (rt?.today.out ?? 0))} />
+        <Metric label="今日入站" value={fmtBytes(rt?.today.in ?? 0)} />
+        <Metric label="今日出站" value={fmtBytes(rt?.today.out ?? 0)} />
+      </div>
+      {/* 合计与请求数单独一行：上面四个是入/出两个方向，这两个是另外的口径 */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Metric label="今日流量（合计）" value={fmtBytes((rt?.today.in ?? 0) + (rt?.today.out ?? 0))} />
         <Metric label="今日请求" value={fmtCount(rt?.today.requests ?? 0)} />
       </div>
 
@@ -516,6 +524,24 @@ function SuspiciousPanel() {
  *
  * 用手写 SVG 不引图表库：两条折线 + 一圈刻度，引个 chart 库比图本身还重。
  */
+/** 两条速率线的颜色。图例和线共用同一份，避免两边对不上 */
+const IN_COLOR = '#378ADD'
+const OUT_COLOR = '#a78bfa'
+
+/**
+ * x 轴时间刻度格式，按聚合粒度变。
+ *
+ * 按天聚合时还带小时（"10/18 08:00"）会让人误以为这是小时粒度 ——
+ * 而桶边界其实是当天零点。按小时聚合才需要显示到小时。
+ */
+function fmtTick(t: number, bucketSeconds: number): string {
+  const d = new Date(t * 1000)
+  if (bucketSeconds >= 86400) {
+    return d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })
+  }
+  return d.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 function RateLineChart({
   series,
   bucketSeconds,
@@ -541,33 +567,46 @@ function RateLineChart({
   const PAD_B = 18
   const t0 = pts[0].t
   const t1 = Math.max(pts[pts.length - 1].t, t0 + bucketSeconds)
-  const x = (t: number) => PAD_L + ((t - t0) / (t1 - t0)) * (W - PAD_L - 8)
-  const y = (v: number) => H - PAD_B - (v / peak) * (H - PAD_B - 8)
 
-  const line = (get: (p: (typeof pts)[number]) => number) =>
-    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(1)},${y(get(p)).toFixed(1)}`).join(' ')
-
-  // y 轴刻度：峰值取整到好看的档位（0.4 / 1.2 / 2.8 Mbps 这种）
+  // y 轴顶部刻度取整到好看的档位（0.4 / 1.2 / 2.8M 这种）。
+  //
+  // **归一化必须用 nicePeak 而不是 peak**：原来 y() 用 peak 归一、刻度却按
+  // nicePeak 画，两者不等时数据和刻度就对不上 —— 曲线最高点会落在
+  // 刻度最大值*下面*，看起来像"峰值没到"或者数值被压扁了。
   const nicePeak = (() => {
     const mag = Math.pow(10, Math.floor(Math.log10(peak)))
     return Math.ceil(peak / mag) * mag
   })()
+  const top = Math.max(nicePeak, 1)
+
+  const x = (t: number) => PAD_L + ((t - t0) / (t1 - t0 || 1)) * (W - PAD_L - 8)
+  const y = (v: number) => H - PAD_B - (v / top) * (H - PAD_B - 8)
+
+  const line = (get: (p: (typeof pts)[number]) => number) =>
+    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(1)},${y(get(p)).toFixed(1)}`).join(' ')
+
   const fmtRate = (bps: number) =>
     bps >= 1e6 ? (bps / 1e6).toFixed(1) + 'M' : bps >= 1e3 ? (bps / 1e3).toFixed(0) + 'K' : bps.toFixed(0)
 
-  // x 轴刻度：取 4 个均匀的时间点
+  // x 轴刻度：取 4 个均匀的时间点（格式按聚合粒度决定，见 fmtTick）
   const ticks = [0, 1, 2, 3].map((i) => t0 + ((t1 - t0) * i) / 3)
-  const fmtTick = (t: number) =>
-    new Date(t * 1000).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 
   return (
     <div>
+      {/*
+        图例配色和线本身必须**一致**，否则用户按图例找线会找不到。
+        原来入站写的是 bg-fill（浅灰底），线却是 #94a3b8 ——
+        而网格线和坐标轴文字也是 #94a3b8/#e2e8f0，入站那条线直接融进背景，
+        看图上只剩一条紫线，等于入站看不见。
+
+        现在两条线用**足够区分**的颜色：入站蓝、出站紫。
+      */}
       <div className="mb-1 flex items-center gap-4 text-[11px] text-muted">
         <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-2 rounded-full bg-fill" /> 入站速率
+          <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: IN_COLOR }} /> 入站速率
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-2 rounded-full bg-violet-400" /> 出站速率
+          <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: OUT_COLOR }} /> 出站速率
         </span>
         <span className="ml-auto text-muted">
           峰值 {fmtRate(peak)}bps
@@ -576,18 +615,18 @@ function RateLineChart({
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="流量速率趋势">
         {[0, 0.25, 0.5, 0.75, 1].map((f) => (
           <g key={f}>
-            <line x1={PAD_L} x2={W - 8} y1={y(nicePeak * f)} y2={y(nicePeak * f)} stroke="#e2e8f0" strokeWidth="0.5" />
-            <text x={PAD_L - 4} y={y(nicePeak * f)} textAnchor="end" dominantBaseline="central" fontSize="9" fill="#94a3b8">
-              {fmtRate(nicePeak * f)}
+            <line x1={PAD_L} x2={W - 8} y1={y(top * f)} y2={y(top * f)} stroke="#e2e8f0" strokeWidth="0.5" />
+            <text x={PAD_L - 4} y={y(top * f)} textAnchor="end" dominantBaseline="central" fontSize="9" fill="#94a3b8">
+              {fmtRate(top * f)}
             </text>
           </g>
         ))}
         {/* 出站画在下层、入站在上层；线宽 1.2 两个桶之间就有连续感 */}
-        <path d={line((p) => p.outBps)} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeLinejoin="round" />
-        <path d={line((p) => p.inBps)} fill="none" stroke="#94a3b8" strokeWidth="1.2" strokeLinejoin="round" />
+        <path d={line((p) => p.outBps)} fill="none" stroke={OUT_COLOR} strokeWidth="1.2" strokeLinejoin="round" />
+        <path d={line((p) => p.inBps)} fill="none" stroke={IN_COLOR} strokeWidth="1.2" strokeLinejoin="round" />
         {ticks.map((t, i) => (
           <text key={i} x={x(t)} y={H - 4} textAnchor={i === 0 ? 'start' : i === 3 ? 'end' : 'middle'} fontSize="9" fill="#94a3b8">
-            {fmtTick(t)}
+            {fmtTick(t, bucketSeconds)}
           </text>
         ))}
       </svg>

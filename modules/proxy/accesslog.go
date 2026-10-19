@@ -41,6 +41,8 @@ func withAccessLog(next http.Handler) http.Handler {
 			// 而我们要在**响应写入途中**就上报 —— 所以给一个读取函数，
 			// 而不是在创建时拷一个值（那一刻它还是 0）。
 			siteIDOf: func() uint { return traffic.SiteIDFromRequest(r) },
+			// 来访者 IP：途中上报要用，这里算一次存下来
+			ip: clientIP(r),
 		}
 
 		// 请求体大小：反代读的是 r.Body，要包一层才数得到。
@@ -84,7 +86,11 @@ func withAccessLog(next http.Handler) http.Handler {
 		// 记进去会让被拉黑 IP 的错误数继续涨（而它已经封了），
 		// 统计上看着像"封了还在扫"，其实是自己数自己。
 		if audit.Enabled() && !rec.denied {
-			audit.RecordAccess(audit.Record{
+			// 结算：传**已上报的字节数**，让来源 IP 的累加上只补剩余。
+			//
+			// 明细记录里仍是这次请求的完整流量（一条记录 = 一次完整请求），
+			// 只是 IPStat 不去重复加已经加过的那部分 —— 不然来源流量翻倍。
+			audit.RecordAccessProgress(audit.Record{
 				Time:       start,
 				IP:         clientIP(r),
 				Method:     r.Method,
@@ -96,7 +102,7 @@ func withAccessLog(next http.Handler) http.Handler {
 				DurationMs: time.Since(start).Milliseconds(),
 				UserAgent:  r.UserAgent(),
 				SiteID:     siteID,
-			})
+			}, 0, rec.reported)
 		}
 	})
 }
@@ -163,6 +169,9 @@ type statusRecorder struct {
 	// siteIDOf 读当前站点 ID。延迟到用的时候再读，因为 serve() 是在
 	// ResponseWriter 创建之后才匹配到站点并写进 SiteRef 的。
 	siteIDOf func() uint
+	// ip 来访者 IP，创建时算好 —— ResolveClientIP 要读审计的可信反代配置，
+	// 途中上报每次都算太浪费，且 RemoteAddr 本来也不会变。
+	ip string
 }
 
 // reportProgressLocked 把自上次上报以来新增的字节交给流量统计。
@@ -176,7 +185,12 @@ func (s *statusRecorder) reportProgress(force bool) {
 	if !force && pending < progressReportBytes && time.Since(s.lastReport) < progressReportInterval {
 		return
 	}
+	// 两处一起报：traffic 管全局流量，audit 管这个来源 IP 的累计流量。
+	// 分开的话会出现"总流量在涨、但审计里这个 IP 的流量不动"，
+	// 用户看到的还是不一致。
 	traffic.RecordPartial(s.siteID(), 0, pending)
+	audit.AddTrafficProgress(s.ip, 0, pending)
+
 	s.reported = s.bytesOut
 	s.lastReport = time.Now()
 }

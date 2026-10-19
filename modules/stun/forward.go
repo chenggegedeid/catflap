@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chenggegedeid/catflap/modules/audit"
 	"github.com/chenggegedeid/catflap/modules/plainhttp"
 	"github.com/chenggegedeid/catflap/modules/traffic"
 	"github.com/chenggegedeid/catflap/utils/nettune"
@@ -110,6 +111,11 @@ func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOpt
 
 	// 流量统计：这条连接转了多字节。
 	//
+	// 来访者 IP：穿透访问在审计里是按"连接"记的，连接建立时就知道来源，
+	// 但**要传多少字节当时还不知道**（recordTunnelAccess 因此只能记 0）。
+	// 这里拿它，好在转发过程中把字节补进审计的来源 IP 累计。
+	tunnelIP := addrIP(src.RemoteAddr())
+
 	// 方向定义与反向代理一致：
 	//   - 入站 = 外部 → 内网（写进 dst 的）
 	//   - 出站 = 内网 → 外部（写回 src 的）
@@ -117,16 +123,23 @@ func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOpt
 	//
 	// 两个 writer 各带一个上报回调：下载主要看 out（内网→外部），
 	// 上传主要看 in，但两边都要报，否则一个方向永远是零。
+	//
+	// 回调里**同时**给 traffic 和 audit 上报：
+	// traffic 管全局流量，audit 管这个来源 IP 的累计流量。
+	// 少了 audit 那一路，审计页上来自穿透的 IP 流量就永远是 0 ——
+	// 穿透正是很多人的主要用法，漏了它"来源流量"就是假的。
 	inCount := &countingWriter{
 		w: dst,
 		onReport: func(delta int64) {
 			traffic.RecordStunPartial(deviceID, serviceID, delta, 0)
+			audit.AddTrafficProgress(tunnelIP, delta, 0)
 		},
 	}
 	outCount := &countingWriter{
 		w: src,
 		onReport: func(delta int64) {
 			traffic.RecordStunPartial(deviceID, serviceID, 0, delta)
+			audit.AddTrafficProgress(tunnelIP, 0, delta)
 		},
 	}
 
