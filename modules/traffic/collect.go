@@ -138,20 +138,13 @@ var accum = &minuteAccum{
 // 后者每秒最多被调用几百次（不是每请求都加锁 —— 见下面 flush 的说明），
 // 实际开销可忽略。
 func Record(siteID uint, bytesIn, bytesOut int64, status int) {
-	// 入站：请求体；出站：响应体。CH 记成 1 个请求
+	// 入站：请求体；出站：响应体。这里记成 1 个请求
 	rateWindow.Add(bytesIn, bytesOut, 1)
-
-	now := time.Now()
-	thisMinute := now.Truncate(time.Minute).Unix()
 
 	accum.mu.Lock()
 	defer accum.mu.Unlock()
 
-	// 跨分钟了：先把上一分钟落盘，再开新的
-	if accum.minute != 0 && accum.minute != thisMinute {
-		accum.flushLocked()
-	}
-	accum.minute = thisMinute
+	rollMinuteLocked()
 
 	accum.in += bytesIn
 	accum.out += bytesOut
@@ -159,7 +152,55 @@ func Record(siteID uint, bytesIn, bytesOut int64, status int) {
 	if status >= 400 {
 		accum.errors++
 	}
+	addSiteLocked(siteID, bytesIn, bytesOut, 1)
+}
 
+// RecordPartial 传输**途中**上报一段增量（只加字节，不计请求数）。
+//
+// # 为什么必须有这个
+//
+// Record 只在请求结束时调一次。这个设计对普通网页没问题（几十毫秒就结束），
+// 但碰上大文件下载 / 长连接转发就要命了：一个传十几分钟的视频，
+// 在这十几分钟里 Catflap 的流量统计**一字节都没有** —— 仪表盘、实时速率、
+// 今日流量全都纹丝不动，等传完了才一次性加上一大笔。
+//
+// 用户在路由器（爱快）上看到的是网络层的实时上行，和我们这边对不上，
+// 于是"流量统计不准"。两边都没错，错的是我们记晚了。
+//
+// # 请求数为什么不计
+//
+// 一次下载是一个请求，不能因为上报了 20 段增量就变成 20 个请求 ——
+// 请求数会被放大几十倍，统计页上"请求数"就没法看了。
+// 字节可以分段累加，请求不行。
+func RecordPartial(siteID uint, bytesIn, bytesOut int64) {
+	if bytesIn <= 0 && bytesOut <= 0 {
+		return
+	}
+	// 实时速率窗口：这里要加，否则下载过程中速率曲线是平的
+	rateWindow.Add(bytesIn, bytesOut, 0)
+
+	accum.mu.Lock()
+	defer accum.mu.Unlock()
+
+	rollMinuteLocked()
+
+	accum.in += bytesIn
+	accum.out += bytesOut
+	addSiteLocked(siteID, bytesIn, bytesOut, 0)
+}
+
+// rollMinuteLocked 跨分钟就先把上一分钟落盘。调用方必须持锁。
+func rollMinuteLocked() {
+	now := time.Now()
+	thisMinute := now.Truncate(time.Minute).Unix()
+	if accum.minute != 0 && accum.minute != thisMinute {
+		accum.flushLocked()
+	}
+	accum.minute = thisMinute
+}
+
+// addSiteLocked 把字节累加进按站点的分组。requests 传 0 表示只加字节。
+func addSiteLocked(siteID uint, bytesIn, bytesOut, requests int64) {
 	sa := accum.bySite[siteID]
 	if sa == nil {
 		sa = &siteAccum{}
@@ -167,7 +208,7 @@ func Record(siteID uint, bytesIn, bytesOut int64, status int) {
 	}
 	sa.In += bytesIn
 	sa.Out += bytesOut
-	sa.Requests++
+	sa.Requests += requests
 }
 
 // Flush 把当前这一分钟落盘（定时器每分钟调一次，退出时也调一次）
@@ -263,14 +304,23 @@ func TodayTotals() DailyTotals {
 // 穿透是**另一条出口**：外部直接连到洞上、由这里转发到内网，
 // 根本不经过反代 —— 所以必须单独在这里采，否则那部分流量是漏的。
 //
-// 与反代的两个区别：
+// 与反代的一个区别：
 //   - 反代按"请求"记（有 URL、状态码）；穿透是字节流，只按"连接"记
-//   - 穿透的连接可能很长（SSH、看视频），所以**连接结束才上报**，
-//     中途不记（转发中途上报既拿不到最终值又要额外加锁）
+//
+// 穿透的连接可能很长（SSH、看视频），所以字节在**途中分段上报**
+// （RecordStunPartial），连接结束时用 RecordStun 做结算。
 
-// RecordStun 记一次穿透转发的流量。
+// RecordStun 穿透转发的结算：补上剩余字节，并把这条连接记进连接数。
 //
 // deviceID / serviceID 用于按服务归组；都是 0 时算到"未分组"，不影响累计值。
+//
+// 注意这里**不做** "没字节就 return" 的短路。
+//
+// 原来有这个短路（避免探测性空连接污染计数），但加了途中上报之后，结算时
+// 传进来的是"剩余未上报的字节"，完全可能为 0 —— 字节已经在途中报完了。
+// 若此时短路返回，这条连接就**不会被记进连接数**，于是"连接数"会比实际少，
+// 而且少得很随机（取决于字节数是否刚好卡在阈值上）。
+// 一次连接就是一次，空不空都记；字节为 0 时只是不加数字。
 func RecordStun(deviceID, serviceID uint, bytesIn, bytesOut int64) {
 	if bytesIn <= 0 && bytesOut <= 0 {
 		return
@@ -281,17 +331,69 @@ func RecordStun(deviceID, serviceID uint, bytesIn, bytesOut int64) {
 	accum.mu.Lock()
 	defer accum.mu.Unlock()
 
-	now := time.Now()
-	thisMinute := now.Truncate(time.Minute).Unix()
-	if accum.minute != 0 && accum.minute != thisMinute {
-		accum.flushLocked()
-	}
-	accum.minute = thisMinute
+	rollMinuteLocked()
 
 	accum.in += bytesIn
 	accum.out += bytesOut
 	accum.requests++ // 一条连接算一次
 
+	addTunnelLocked(deviceID, serviceID, bytesIn, bytesOut, 1)
+}
+
+// RecordStunSettle 穿透连接**结算**：补上剩余字节，并把这条连接记进连接数。
+//
+// 和 RecordStun 的区别只有一条：**这里不做"没字节就 return"的短路**。
+//
+// 加了途中上报之后，结算时传进来的是"剩余未上报的字节"，完全可能为 0 ——
+// 字节已经在途中分段报完了。若沿用 RecordStun 那个短路，这条连接就
+// **不会被记进连接数**，于是"连接数"会比实际少，而且少得很随机
+// （取决于总字节是否刚好卡在阈值整数倍上）。
+//
+// 所以分成两个函数而不是改 RecordStun 的行为：
+//   - RecordStun：一次性记录（既有语义，零字节不记 —— 那条规则防的是
+//     探测性空连接污染计数，有测试守着 TestRecordStunSkipsZero）
+//   - RecordStunSettle：途中上报后的结算（一次连接就是一次，字节可为 0）
+//
+// 「空连接不记」这件事改由**调用方**判断：它知道总字节，用 total 决定要不要调。
+func RecordStunSettle(deviceID, serviceID uint, bytesIn, bytesOut int64) {
+	// 实时速率：与反代共用同一个滚动窗口，仪表盘上看到的是两者之和
+	rateWindow.Add(bytesIn, bytesOut, 1)
+
+	accum.mu.Lock()
+	defer accum.mu.Unlock()
+
+	rollMinuteLocked()
+
+	accum.in += bytesIn
+	accum.out += bytesOut
+	accum.requests++ // 一条连接算一次
+
+	addTunnelLocked(deviceID, serviceID, bytesIn, bytesOut, 1)
+}
+
+// RecordStunPartial 穿透转发**途中**的增量上报（只加字节，不计连接数）。
+//
+// 与上面 RecordPartial 同一个理由：SSH、看视频、传文件这类连接能开几个小时，
+// 只在连接结束时记一次的话，这几个小时里统计是空的。
+// 连接数仍只在结束时记一次，否则一条长连接会被放大成几十条。
+func RecordStunPartial(deviceID, serviceID uint, bytesIn, bytesOut int64) {
+	if bytesIn <= 0 && bytesOut <= 0 {
+		return
+	}
+	rateWindow.Add(bytesIn, bytesOut, 0)
+
+	accum.mu.Lock()
+	defer accum.mu.Unlock()
+
+	rollMinuteLocked()
+
+	accum.in += bytesIn
+	accum.out += bytesOut
+	addTunnelLocked(deviceID, serviceID, bytesIn, bytesOut, 0)
+}
+
+// addTunnelLocked 累加进按穿透服务分组。调用方必须持锁。
+func addTunnelLocked(deviceID, serviceID uint, bytesIn, bytesOut, requests int64) {
 	// 按"穿透服务"分组。键用 s<设备>-<服务>，和站点的纯数字 ID 区分开，
 	// 前端显示时据此知道这是穿透服务而不是反代站点
 	key := "s" + strconv.FormatUint(uint64(deviceID), 10) + "-" + strconv.FormatUint(uint64(serviceID), 10)
@@ -302,5 +404,5 @@ func RecordStun(deviceID, serviceID uint, bytesIn, bytesOut int64) {
 	}
 	sa.In += bytesIn
 	sa.Out += bytesOut
-	sa.Requests++
+	sa.Requests += requests
 }

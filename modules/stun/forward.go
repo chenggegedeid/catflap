@@ -114,8 +114,21 @@ func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOpt
 	//   - 入站 = 外部 → 内网（写进 dst 的）
 	//   - 出站 = 内网 → 外部（写回 src 的）
 	// 两边统一，仪表盘上"入站/出站"才对得上。
-	inCount := &countingWriter{w: dst}
-	outCount := &countingWriter{w: src}
+	//
+	// 两个 writer 各带一个上报回调：下载主要看 out（内网→外部），
+	// 上传主要看 in，但两边都要报，否则一个方向永远是零。
+	inCount := &countingWriter{
+		w: dst,
+		onReport: func(delta int64) {
+			traffic.RecordStunPartial(deviceID, serviceID, delta, 0)
+		},
+	}
+	outCount := &countingWriter{
+		w: src,
+		onReport: func(delta int64) {
+			traffic.RecordStunPartial(deviceID, serviceID, 0, delta)
+		},
+	}
 
 	go func() {
 		_, _ = io.Copy(inCount, src)
@@ -125,27 +138,82 @@ func ForwardTCP(src net.Conn, targetAddr string, protocol string, opt ForwardOpt
 	_, _ = io.Copy(outCount, dst)
 	src.Close()
 
-	// 连接结束才上报：转发是长连接，中途报要额外加锁还拿不到最终值。
-	// 这里的代价是"正在传的大文件要等传完才计入"，对统计趋势没有影响。
-	traffic.RecordStun(deviceID, serviceID, inCount.total(), outCount.total())
+	// 连接结束做结算：字节已在途中分段上报，这里补最后不足一个阈值的那截，
+	// 并把这条连接记进"连接数"。
+	//
+	// **只有确实传过数据才记**：沿用 RecordStun 的"空连接不记"约定
+	// （防的是探测性空连接把计数刷上去），判断依据用**总字节**而不是剩余 ——
+	// 剩余为 0 是常态（刚好报完），不代表这条连接没传东西。
+	inCount.report(true)
+	outCount.report(true)
+	if inCount.total() > 0 || outCount.total() > 0 {
+		traffic.RecordStunSettle(
+			deviceID, serviceID,
+			inCount.total()-inCount.reported,
+			outCount.total()-outCount.reported,
+		)
+	}
 }
 
 // countingWriter 边转发边数字节。
 //
 // 不做成 net.Conn 包装是因为我们只需要 Write 这一个方向 ——
 // 转发用的是 io.Copy，包一层 io.Writer 就够了，改动面最小。
+//
+// # 为什么要途中上报
+//
+// 原来只在连接结束时把总数交给 traffic，于是 SSH、看视频、传文件这类
+// 长连接**在整段传输期间统计都是零**，等断开才一次性加一大笔。
+// 用户在路由器上看到上行在跑，我们这边却是平的 —— 表现为"流量统计不准"。
+// 现在按阈值分段上报，结束时只补最后一段（见 report 的 force 分支）。
 type countingWriter struct {
 	w     io.Writer
 	bytes int64
+
+	// 途中上报的状态
+	reported   int64
+	lastReport time.Time
+	// onReport 把增量交给流量统计。由调用方注入（反代/穿透的落点不同）
+	onReport func(delta int64)
 }
 
 func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
 	c.bytes += int64(n)
+	c.report(false)
 	return n, err
 }
 
 func (c *countingWriter) total() int64 { return c.bytes }
+
+// report 把自上次上报以来新增的字节交给流量统计。force=true 时无条件上报。
+//
+// 阈值与反代保持一致（4MB / 5 秒）：大流量按量、小流量按时间，
+// 保证慢速长传也不会一直没动静。
+func (c *countingWriter) report(force bool) {
+	if c.onReport == nil {
+		return
+	}
+	pending := c.bytes - c.reported
+	if pending <= 0 {
+		return
+	}
+	if !force && pending < progressReportBytes && time.Since(c.lastReport) < progressReportInterval {
+		return
+	}
+	c.onReport(pending)
+	c.reported = c.bytes
+	c.lastReport = time.Now()
+}
+
+// 途中上报的阈值：够了哪个都上报一次。
+//
+// - 4MB：20Mbps 的下载约 2 秒攒够，速率曲线肉眼跟得上
+// - 5 秒：照顾慢速长传，避免它半天不上报、统计看着没动
+const (
+	progressReportBytes    = 4 << 20
+	progressReportInterval = 5 * time.Second
+)
 
 // describeDialError 把拨号错误翻译成能直接照着改配置的话。
 //
