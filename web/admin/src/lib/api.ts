@@ -208,6 +208,11 @@ export const checkUpdate = () => request<UpdateStatus>('/api/system/update/check
 // 立刻返回，下载进度和结果轮询 getUpdateStatus 看；下载校验完后端会自己重启
 export const installUpdate = () => request<unknown>('/api/system/update/install', { method: 'POST' })
 
+// 取消正在进行的更新。也是卡住时的出口：下载卡死、自动重启没拉起来之后，
+// 状态会一直停在 downloading / restarting，不取消就既不能重来也不能手动上传
+export const cancelUpdate = () =>
+  request<UpdateStatus>('/api/system/update/cancel', { method: 'POST' })
+
 export const setUpdateConfig = (body: UpdateConfig) =>
   request<UpdateStatus>('/api/system/update/config', {
     method: 'PUT',

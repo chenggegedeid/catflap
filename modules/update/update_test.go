@@ -117,7 +117,7 @@ func TestDownload(t *testing.T) {
 			defer func() { executablePath, stallTimeout = origExe, origStall }()
 
 			asset := releaseAsset{Name: "catflap", Size: int64(len(newBin)), Digest: digest, DownloadURL: "https://github.com/x/catflap"}
-			err := (&UpdateRuntime{}).download(asset, sources)
+			err := (&UpdateRuntime{}).download(context.Background(), asset, sources)
 			if c.wantErr == "" && err != nil {
 				t.Fatalf("不该出错：%v", err)
 			}
