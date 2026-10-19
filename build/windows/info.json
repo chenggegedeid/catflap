@@ -1,12 +1,12 @@
 {
   "fixed": {
-    "file_version": "2.5.7",
-    "product_version": "2.5.7"
+    "file_version": "2.5.8",
+    "product_version": "2.5.8"
   },
   "info": {
     "0409": {
-      "FileVersion": "2.5.7",
-      "ProductVersion": "2.5.7",
+      "FileVersion": "2.5.8",
+      "ProductVersion": "2.5.8",
       "OriginalFilename": "catflap-desktop.exe",
       "InternalName": "catflap",
       "CompanyName": "chenggegedeid",
