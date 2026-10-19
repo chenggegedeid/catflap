@@ -48,6 +48,7 @@ func UpdateRouters(g *gin.RouterGroup) {
 	g.GET("system/update", app.UpdateStatusView)
 	g.POST("system/update/check", app.UpdateCheckView)
 	g.POST("system/update/install", app.UpdateInstallView)
+	g.POST("system/update/cancel", app.UpdateCancelView)
 	g.POST("system/update/upload", app.UpdateUploadView)
 	g.PUT(
 		"system/update/config",

@@ -297,6 +297,24 @@ type UpdateRuntime struct {
 	checkErr  string
 	job       Job
 	done      atomic.Int64 // 下载进度单独放，下载循环里不用抢锁
+
+	// jobCancel 取消**正在进行的那次下载**。
+	//
+	// 为什么必须在运行时上存一份：Job 是会被 Status() 拷出去发给前端的结构体，
+	// 取消函数不能跟它走（也不该进 JSON）。而且下载是在 goroutine 里跑的，
+	// Install 早就返回了，只有运行时还能够到它。
+	//
+	// 没有这个东西，一次卡住的下载就永远卡在 "downloading" ——
+	// 用户既不能取消也不能重来，只能重启整个 Catflap。
+	jobCancel context.CancelFunc
+
+	// jobGen 当前任务的代号，每开始一次更新就 +1。
+	//
+	// 用途：下载 goroutine 收尾时要判断"我这个 cancel 还是不是当前有效的"。
+	// Go 不让比较函数（只能和 nil 比），所以拿一个整数当版本号 ——
+	// 不判断的话，一个慢吞吞结束的旧任务会把刚发起的新任务的 cancel 清掉，
+	// 于是新任务变得无法取消。
+	jobGen uint64
 }
 
 // Runtime 更新模块全局运行时
@@ -581,6 +599,53 @@ func pickAsset(rel *release) (releaseAsset, error) {
 	return releaseAsset{}, fmt.Errorf("新版本里没有 %s，请手动下载", name)
 }
 
+/*
+CancelJob 取消正在进行的更新，或者把一个卡住的任务清掉。
+
+# 为什么必须有这个入口
+
+Job 只有 "" / downloading / restarting / failed 四态，而 downloading
+只由下载 goroutine 自己结束、restarting 只由重启结果改写。
+一旦哪一步卡住（源连上了不给数据、替换文件被占用、自动重启没拉起来），
+状态就**永远停在那儿**，Install 和 InstallUpload 都只会回一句
+"已经在更新了" —— 用户既不能取消也不能重来，只能重启整个 Catflap。
+
+这个入口就是那个出口：无论卡在哪一态，都能清回空闲。
+
+# 两种情况的差别
+
+  - 下载中：调 cancel，正在阻塞的 Read 立刻返回，goroutine 自己收尾
+    （它会把状态清回空闲，见 Install 里的 context.Canceled 分支）。
+    这里不等它，返回后前端下次轮询就能看到空闲。
+  - 重启中 / 已卡死：没有可取消的东西，直接把 Job 清掉。
+    注意「正在重启」时文件**可能已经换好了**，所以提示语要说清楚。
+*/
+func (r *UpdateRuntime) CancelJob() error {
+	r.mu.Lock()
+	if r.job.State == "" {
+		r.mu.Unlock()
+		return errors.New("现在没有正在进行的更新")
+	}
+
+	restarting := r.job.State == "restarting"
+	cancel := r.jobCancel
+
+	// 先把状态清干净：不管 goroutine 那边什么时候反应过来，
+	// 用户点完取消就应当立刻能重新操作了。
+	r.job = Job{}
+	r.done.Store(0)
+	r.jobCancel = nil
+	r.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if restarting {
+		logrus.Warn("[update] 用户取消了正在重启的更新；如果程序文件已经换过，需要手动重启才会生效")
+	}
+	return nil
+}
+
 // Install 开始下载更新，立刻返回；进度从 Status 里看。下载校验完会自己重启
 func (r *UpdateRuntime) Install() error {
 	r.mu.Lock()
@@ -600,24 +665,45 @@ func (r *UpdateRuntime) Install() error {
 	_, sources := r.config.sources()
 	r.job = Job{State: "downloading", Total: asset.Size}
 	r.done.Store(0)
+
+	// 这次下载由一个可取消的 ctx 管着。用户点「取消」时 CancelJob 调 cancel，
+	// 正在阻塞的 Read 立刻返回，goroutine 收尾把状态清干净 ——
+	// 否则卡在 downloading 就再也没有出口。
+	dlCtx, cancel := context.WithCancel(context.Background())
+	r.jobCancel = cancel
+	r.jobGen++
+	gen := r.jobGen
 	r.mu.Unlock()
 
 	go func() {
-		err := r.download(asset, sources)
+		defer cancel()
+		err := r.download(dlCtx, asset, sources)
 		r.mu.Lock()
+		defer r.mu.Unlock()
+		// 这次任务的取消函数已经用完了，清掉免得下次误取消。
+		// 只在我仍是"当前任务"时才清：Go 不能比较函数，所以比对代号。
+		if r.jobGen == gen {
+			r.jobCancel = nil
+		}
 		if err != nil {
+			// 用户主动取消的话，别报成失败 —— 报错文案会让人以为出问题了。
+			// 直接回空闲，界面上什么都不显示，就是"回到没更新之前"。
+			if errors.Is(err, context.Canceled) {
+				r.job = Job{}
+				r.done.Store(0)
+				return
+			}
 			r.job.State, r.job.Error = "failed", err.Error()
 		} else {
 			r.job.State = "restarting"
 		}
-		r.mu.Unlock()
 		if err != nil {
 			logrus.Errorf("更新失败：%v", err)
 			return
 		}
 
 		logrus.Infof("已换成 %s，正在重启", asset.Name)
-		r.restart()
+		go r.restart()
 	}()
 	return nil
 }
@@ -739,7 +825,7 @@ func (r *UpdateRuntime) restart() {
 var errDirNotWritable = errors.New("程序目录不能写")
 
 // download 依次从各个源下载到可执行文件旁边，校验 sha256 通过就换掉正在运行的那个
-func (r *UpdateRuntime) download(asset releaseAsset, sources []string) error {
+func (r *UpdateRuntime) download(ctx context.Context, asset releaseAsset, sources []string) error {
 	exe, err := executablePath()
 	if err != nil {
 		return fmt.Errorf("找不到程序自身的位置：%w", err)
@@ -749,12 +835,16 @@ func (r *UpdateRuntime) download(asset releaseAsset, sources []string) error {
 
 	var errs []string
 	for _, src := range sources {
+		// 用户取消了就别再试下一个源了
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		r.mu.Lock()
 		r.job.Source = sourceName(src)
 		r.mu.Unlock()
 		r.done.Store(0)
 
-		err := r.downloadFrom(src+asset.DownloadURL, tmp, asset)
+		err := r.downloadFrom(ctx, src+asset.DownloadURL, tmp, asset)
 		if err == nil {
 			logrus.Infof("从 %s 下载 %s 完成", sourceName(src), asset.Name)
 			return replaceExecutable(exe, tmp)
@@ -762,21 +852,27 @@ func (r *UpdateRuntime) download(asset releaseAsset, sources []string) error {
 		if errors.Is(err, errDirNotWritable) {
 			return fmt.Errorf("程序所在目录 %s 不能写，请手动替换：%w", filepath.Dir(exe), err)
 		}
+		// 取消要原样往上抛，不能当成"这个源不行"继续换下一个
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		logrus.Warnf("从 %s 下载失败，换下一个：%v", sourceName(src), err)
 		errs = append(errs, sourceName(src)+" "+err.Error())
 	}
 	return errors.New("下载失败，换个下载源再试，或者去 Releases 页下载后手动上传（" + strings.Join(errs, "；") + "）")
 }
 
-// downloadFrom 从一个地址下载到 tmp 并校验。stallTimeout 内一个字节都没多就放弃
-func (r *UpdateRuntime) downloadFrom(url, tmp string, asset releaseAsset) error {
+// downloadFrom 从一个地址下载到 tmp 并校验。stallTimeout 内一个字节都没多就放弃。
+// ctx 取消（用户点了取消）时立刻返回。
+func (r *UpdateRuntime) downloadFrom(ctx context.Context, url, tmp string, asset releaseAsset) error {
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
 	if err != nil {
 		return fmt.Errorf("%w：%v", errDirNotWritable, err)
 	}
 	defer f.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// 从外面传进来的 ctx 派生：用户取消 → 这里也取消
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
 		last := r.done.Load()

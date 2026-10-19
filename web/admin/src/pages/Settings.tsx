@@ -5,6 +5,7 @@ import { ModeSwitch } from '../components/ModeSwitch'
 import {
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
+  cancelUpdate,
   changePassword,
   checkUpdate,
   getProxyConfig,
@@ -406,7 +407,7 @@ const formatMB = (n: number) => (n / 1024 / 1024).toFixed(1)
 
 function SoftwareUpdate() {
   const [st, setSt] = useState<UpdateStatus | null>(null)
-  const [busy, setBusy] = useState<'' | 'check' | 'install' | 'upload' | 'config'>('')
+  const [busy, setBusy] = useState<'' | 'check' | 'install' | 'upload' | 'config' | 'cancel'>('')
   const [err, setErr] = useState('')
   const [done, setDone] = useState('')
   const [source, setSource] = useState<UpdateSource>('')
@@ -540,6 +541,25 @@ function SoftwareUpdate() {
     await install(s)
   }
 
+  // cancel 取消正在进行的更新，或者清掉一个卡住的任务。
+  //
+  // 下载慢、源不通、或者上一次卡在"正在重启"没走完的时候用它，
+  // 之后就能重新点更新 / 手动上传了。
+  const cancel = async () => {
+    if (!confirm('取消这次更新？\n\n已经下了一半会丢掉，之后可以重新点更新或手动上传。')) return
+    setBusy('cancel')
+    setErr('')
+    setDone('')
+    try {
+      apply(await cancelUpdate())
+      setDone('已取消')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '取消失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
   const upload = async (file: File) => {
     if (!st) return
     if (!confirm(`用 ${file.name} 替换现在的程序？\n\n换完会自动重启，所有打洞服务会断开几秒。`)) return
@@ -616,18 +636,41 @@ function SoftwareUpdate() {
           <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">上次检查失败：{st.checkError}</div>
         )}
 
-        {busy === 'install' && (
+        {/*
+          进度条按**服务端返回的 job.state** 显示，不再看本地的 busy。
+
+          以前是 busy === 'install' 才显示：busy 是组件内的 state，
+          一刷新页面就变回空，明明后端还在下载，界面上却什么都不剩 ——
+          用户以为更新没了，再点一次还被回「已经在更新了」。
+          现在刷新后从接口重新拿到 job，进度照常接着走。
+        */}
+        {(job.state === 'downloading' || job.state === 'restarting' || job.state === 'failed') && (
           <div className="space-y-1">
             <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div
-                className="h-full bg-blue-500 transition-all"
+                className={`h-full transition-all ${
+                  job.state === 'failed' ? 'bg-rose-500' : 'bg-blue-500'
+                }`}
                 style={{ width: `${job.state === 'restarting' ? 100 : percent}%` }}
               />
             </div>
-            <div className="text-[11px] text-muted">
-              {job.state === 'restarting'
-                ? '下载完成，正在重启，起来后页面会自动刷新…'
-                : `正在从 ${job.source || '…'} 下载 ${formatMB(job.done)} / ${formatMB(job.total)} MB（${percent}%）`}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-[11px] text-muted">
+                {job.state === 'restarting'
+                  ? '下载完成，正在重启，起来后页面会自动刷新…'
+                  : job.state === 'failed'
+                    ? `更新失败：${job.error || '未知原因'}`
+                    : `正在从 ${job.source || '…'} 下载 ${formatMB(job.done)} / ${formatMB(job.total)} MB（${percent}%）`}
+              </span>
+              {/* 取消 / 清掉卡住的任务。下载慢或者卡住时点它就能重新来过 */}
+              <button
+                type="button"
+                onClick={cancel}
+                disabled={busy === 'cancel'}
+                className="text-[11px] font-semibold text-rose-500 underline-offset-2 transition hover:underline disabled:opacity-50"
+              >
+                {busy === 'cancel' ? '正在取消…' : '取消'}
+              </button>
             </div>
           </div>
         )}

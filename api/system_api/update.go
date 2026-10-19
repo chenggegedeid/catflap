@@ -31,6 +31,19 @@ func (SystemApi) UpdateInstallView(c *gin.Context) {
 	res.OkWithMsg("开始下载", c)
 }
 
+// UpdateCancelView 取消正在进行的更新。
+//
+// 这也是卡住时的唯一出口：下载卡死、自动重启没拉起来这类情况，
+// 状态会一直停在 downloading / restarting，不取消的话既不能重来
+// 也不能手动上传，只能重启整个 Catflap。
+func (SystemApi) UpdateCancelView(c *gin.Context) {
+	if err := update.Runtime.CancelJob(); err != nil {
+		res.FailWithMsg(err.Error(), c)
+		return
+	}
+	res.OkWithData(update.Runtime.Status(), c)
+}
+
 // UpdateUploadView 手动上传程序文件更新，下载不了 GitHub 或者要回退老版本时用
 func (SystemApi) UpdateUploadView(c *gin.Context) {
 	fh, err := c.FormFile("file")
