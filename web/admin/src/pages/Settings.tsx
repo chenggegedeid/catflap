@@ -411,6 +411,7 @@ function SoftwareUpdate() {
   const [done, setDone] = useState('')
   const [source, setSource] = useState<UpdateSource>('')
   const [custom, setCustom] = useState('')
+  const [proxy, setProxy] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   // 离开设置页后停掉轮询
   const alive = useRef(true)
@@ -419,6 +420,7 @@ function SoftwareUpdate() {
     setSt(s)
     setSource(s.config.source)
     setCustom(s.config.custom)
+    setProxy(s.config.proxy ?? '')
   }, [])
 
   useEffect(() => {
@@ -432,13 +434,31 @@ function SoftwareUpdate() {
   }, [apply])
 
   // saveSource 内置和官方点了就存；自定义要等填好地址点保存
+  //
+  // **必须把 proxy 一起带上**：后端 SetConfig 是整份覆盖，
+  // 少传一个字段就等于把它清空 —— 改下载源会把代理悄悄抹掉。
   const saveSource = async (next: UpdateSource, nextCustom: string) => {
     setBusy('config')
     setErr('')
     setDone('')
     try {
-      apply(await setUpdateConfig({ source: next, custom: nextCustom }))
+      apply(await setUpdateConfig({ source: next, custom: nextCustom, proxy }))
       setDone('下载源已保存')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  // saveProxy 同理，source / custom 也要原样带回去
+  const saveProxy = async () => {
+    setBusy('config')
+    setErr('')
+    setDone('')
+    try {
+      apply(await setUpdateConfig({ source, custom, proxy: proxy.trim() }))
+      setDone('代理设置已保存')
     } catch (e) {
       setErr(e instanceof Error ? e.message : '保存失败')
     } finally {
@@ -674,6 +694,38 @@ function SoftwareUpdate() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* 更新代理 */}
+        <div>
+          <div className={labelCls}>更新代理（可选）</div>
+          <div className="mt-2 flex max-w-xl gap-2">
+            <input
+              value={proxy}
+              onChange={(e) => setProxy(e.target.value)}
+              placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${fieldCls} font-mono`}
+            />
+            <button
+              type="button"
+              onClick={saveProxy}
+              disabled={busy !== '' || proxy.trim() === (st?.config.proxy ?? '')}
+              className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-content ring-1 ring-line transition hover:bg-surface-2 disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" />
+              保存
+            </button>
+          </div>
+          <div className="mt-2 text-[11px] leading-relaxed text-muted">
+            查版本和下载更新包都会走这个代理。需要认证的写法：
+            <code className="mx-1 rounded bg-surface-2 px-1 font-mono">http://用户名:密码@127.0.0.1:7890</code>
+            <br />
+            留空表示听环境变量的（HTTP_PROXY / HTTPS_PROXY）。
+            <strong className="font-semibold"> 只对更新生效</strong>
+            —— 反代和穿透的目标是内网地址，不会走它。
+          </div>
         </div>
 
         {/* 手动上传 */}

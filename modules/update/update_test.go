@@ -152,7 +152,7 @@ func TestFetchLatestFallback(t *testing.T) {
 	latestAPI = "https://api.github.com/repos/x/releases/latest"
 	defer func() { latestAPI = origAPI }()
 
-	rel, err := fetchLatest(context.Background(), []string{srv.URL + "/limited/", srv.URL + "/mirror/"})
+	rel, err := fetchLatest(context.Background(), []string{srv.URL + "/limited/", srv.URL + "/mirror/"}, Config{})
 	if err != nil {
 		t.Fatalf("第一个源被限流应换下一个：%v", err)
 	}

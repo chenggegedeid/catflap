@@ -54,12 +54,21 @@ func (SystemApi) UpdateUploadView(c *gin.Context) {
 type UpdateConfigRequest struct {
 	Source string `json:"source"` // "" 内置 / "official" 官方 / "custom" 自定义
 	Custom string `json:"custom"`
+
+	// Proxy 下载更新时走的代理。要原样带回落盘 ——
+	// SetConfig 是整份覆盖，这里少传就等于把代理清空，
+	// 用户在界面上填了却保存不住，而且看不出为什么。
+	Proxy string `json:"proxy"`
 }
 
-// UpdateConfigView 保存下载源：内置 / 官方 / 自定义
+// UpdateConfigView 保存下载源与更新代理
 func (SystemApi) UpdateConfigView(c *gin.Context) {
 	cr := middleware.GetBindRequest[UpdateConfigRequest](c)
-	if err := update.Runtime.SetConfig(update.Config{Source: cr.Source, Custom: cr.Custom}); err != nil {
+	if err := update.Runtime.SetConfig(update.Config{
+		Source: cr.Source,
+		Custom: cr.Custom,
+		Proxy:  cr.Proxy,
+	}); err != nil {
 		res.FailWithMsg(err.Error(), c)
 		return
 	}

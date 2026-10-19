@@ -12,7 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -26,6 +28,8 @@ import (
 	"github.com/chenggegedeid/catflap/core"
 	"github.com/chenggegedeid/catflap/core/component"
 	"github.com/chenggegedeid/catflap/utils/utilsFile"
+
+	"golang.org/x/net/proxy"
 
 	"github.com/sirupsen/logrus"
 )
@@ -54,6 +58,14 @@ const (
 type Config struct {
 	Source string `json:"source"` // SourceBuiltin / SourceOfficial / SourceCustom
 	Custom string `json:"custom"` // 自定义加速前缀，如 https://ghproxy.example.com/
+
+	// Proxy 下载更新时走的代理，如 http://127.0.0.1:7890、socks5://127.0.0.1:1080。
+	// 留空表示「听环境变量的」（HTTP_PROXY / HTTPS_PROXY），也就是和以前一样。
+	//
+	// 为什么要在界面上配而不全靠环境变量：Catflap 多半是 systemd / 服务方式
+	// 拉起来的，那种进程的**环境变量是干净的** —— 用户在 shell 里 export 了
+	// 代理，服务重启后根本读不到。要有稳定的代理就得自己存一份。
+	Proxy string `json:"proxy,omitempty"`
 }
 
 // builtinDownload 内置模式下载时依次试的前缀，拼在 GitHub 下载地址前面，空串是直连。
@@ -100,6 +112,124 @@ func normalizePrefix(p string) string {
 		p += "/"
 	}
 	return p
+}
+
+/*
+	   updateHTTPClient 更新专用的 HTTP 客户端。
+
+	   # 为什么不用 http.DefaultClient
+
+	   DefaultClient 用的是 DefaultTransport，它只认**环境变量**（HTTP_PROXY /
+	   HTTPS_PROXY）。而 Catflap 多半以服务方式运行，那种进程的环境变量是干净的，
+	   用户在 shell 里设的代理读不到 —— 于是"明明有代理、下载还是慢"。
+	   所以要在配置里存一份，界面上填。
+
+	   # 优先级
+
+		界面填的 > 环境变量 > 直连
+
+	   留空时退化成 ProxyFromEnvironment，老用户靠环境变量走代理的行为**完全不变**。
+
+	   # 为什么只给更新用
+
+	   这个代理只服务「查版本 + 下载二进制」这两件事，不影响反代与穿透：
+	   那两边的目标都是内网地址，走代理纯属灾难（proxy 模块的 Transport 里
+	   显式写了 Proxy: nil）。更新访问的是 GitHub，**恰恰是最需要代理的地方**。
+*/
+func updateHTTPClient(cfg Config) *http.Client {
+	dial := (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	// socks5 不走 Proxy 字段（net/http 不认这个 scheme），改在拨号层做
+	if d, ok := socksDialer(cfg.Proxy); ok {
+		dial = d
+	}
+
+	transport := &http.Transport{
+		Proxy: proxyFuncFor(cfg.Proxy),
+		// 下面几项照抄 http.DefaultTransport：更新是几个到几十 MB 的下载，
+		// 默认值已经合适，没必要调
+		DialContext:           dial,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return &http.Client{Transport: transport}
+}
+
+// proxyFuncFor 按配置的代理地址给出 http.Transport 用的 Proxy 函数。
+//
+// 支持的写法（scheme 可省略，省了默认 http）：
+//   - http://127.0.0.1:7890  —— Clash / V2Ray 这类最常见的 HTTP 代理
+//   - socks5://127.0.0.1:1080
+//   - 留空 → 交给环境变量
+//
+// socks5 走 DialContext 而不是 Proxy 字段：net/http 的 Proxy 只认
+// http/https 两种 scheme，socks5 得自己在拨号层做。
+func proxyFuncFor(p string) func(*http.Request) (*url.URL, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return http.ProxyFromEnvironment
+	}
+
+	// 用户多半只会填 127.0.0.1:7890，补上 scheme 免得解析出个奇怪的 URL
+	if !strings.Contains(p, "://") {
+		p = "http://" + p
+	}
+
+	u, err := url.Parse(p)
+	if err != nil || u.Host == "" {
+		// 填错了不该让更新直接不能用：退回去听环境变量的，并在日志里说一声
+		logrus.Warnf("[update] 代理地址 %q 不合法，本次更新改为直连（或按环境变量走）", p)
+		return http.ProxyFromEnvironment
+	}
+
+	switch u.Scheme {
+	case "socks5", "socks5h":
+		// 这两个 scheme net/http 的 Proxy 不认，交给拨号层
+		return nil // 见下面的 DialContext 覆盖
+	default:
+		return http.ProxyURL(u)
+	}
+}
+
+// socksDialer 配置的代理是 socks5 时，替换掉 Transport 的拨号函数。
+// 不是 socks5 就返回 nil，保持默认。
+func socksDialer(p string) (func(ctx context.Context, network, addr string) (net.Conn, error), bool) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return nil, false
+	}
+	if !strings.Contains(p, "://") {
+		return nil, false // 没写 scheme 就默认是 http，不走 socks
+	}
+	u, err := url.Parse(p)
+	if err != nil || (u.Scheme != "socks5" && u.Scheme != "socks5h") {
+		return nil, false
+	}
+
+	// 带认证的 socks5：user:pass@host:port
+	var auth *proxy.Auth
+	if u.User != nil {
+		auth = &proxy.Auth{User: u.User.Username()}
+		if pw, ok := u.User.Password(); ok {
+			auth.Password = pw
+		}
+	}
+	dialer, err := proxy.SOCKS5("tcp", u.Host, auth, proxy.Direct)
+	if err != nil {
+		logrus.Warnf("[update] socks5 代理 %q 不可用，改为直连：%v", p, err)
+		return nil, false
+	}
+
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		// x/net/proxy 的 Dialer 不吃 context，这里用 Dial 即可。
+		// 超时由 Transport 的 ResponseHeaderTimeout / stallTimeout 兜住。
+		return dialer.Dial(network, addr)
+	}, true
 }
 
 // stallTimeout 下载多久没进展就放弃这个源、换下一个。镜像挂了常常是连上了但不给数据。
@@ -174,6 +304,17 @@ var Runtime = &UpdateRuntime{}
 
 // desktopQuit 桌面版注册的退出函数，见 RegisterDesktop
 var desktopQuit func()
+
+// configSnapshot 取一份配置副本。
+//
+// 下载是几十 MB 的长活儿，全程拿锁不合适；但也不能直接读 r.config
+// （正在下载时用户在界面上改配置就会 data race）。
+// 开头读一次快照就够：代理这种设置本来也不需要中途生效。
+func (r *UpdateRuntime) configSnapshot() Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.config
+}
 
 // RegisterDesktop 桌面版启动时调用。一来认出自己是桌面版，下载 catflap-desktop.exe；
 // 二来重启时要走 Wails 的 Quit，托盘图标才会收掉，直接 os.Exit 会在任务栏留个死图标。
@@ -292,7 +433,7 @@ func (r *UpdateRuntime) Check(ctx context.Context) error {
 	r.mu.RLock()
 	apiSources, _ := r.config.sources()
 	r.mu.RUnlock()
-	rel, err := fetchLatest(ctx, apiSources)
+	rel, err := fetchLatest(ctx, apiSources, r.configSnapshot())
 	now := time.Now()
 
 	r.mu.Lock()
@@ -308,10 +449,10 @@ func (r *UpdateRuntime) Check(ctx context.Context) error {
 }
 
 // fetchLatest 依次从各个源查最新 Release，直连不通（国内常见）或被限流时换下一个
-func fetchLatest(ctx context.Context, sources []string) (*release, error) {
+func fetchLatest(ctx context.Context, sources []string, cfg Config) (*release, error) {
 	var firstErr error
 	for _, src := range sources {
-		rel, err := fetchLatestFrom(ctx, src+latestAPI)
+		rel, err := fetchLatestFrom(ctx, src+latestAPI, cfg)
 		if err == nil {
 			return rel, nil
 		}
@@ -323,7 +464,7 @@ func fetchLatest(ctx context.Context, sources []string) (*release, error) {
 	return nil, firstErr
 }
 
-func fetchLatestFrom(ctx context.Context, url string) (*release, error) {
+func fetchLatestFrom(ctx context.Context, url string, cfg Config) (*release, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -331,9 +472,10 @@ func fetchLatestFrom(ctx context.Context, url string) (*release, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	// 走配置了代理的客户端（见 updateHTTPClient 的说明）
+	resp, err := updateHTTPClient(cfg).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("连不上 GitHub，检查一下网络或系统代理：%w", err)
+		return nil, fmt.Errorf("连不上 GitHub，检查一下网络或代理设置：%w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
@@ -659,7 +801,8 @@ func (r *UpdateRuntime) downloadFrom(url, tmp string, asset releaseAsset) error 
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	// 走配置了代理的客户端（见 updateHTTPClient 的说明）
+	resp, err := updateHTTPClient(r.configSnapshot()).Do(req)
 	if err != nil {
 		return fmt.Errorf("连不上：%w", err)
 	}

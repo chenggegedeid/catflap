@@ -103,6 +103,13 @@ export type UpdateSource = '' | 'official' | 'custom'
 export interface UpdateConfig {
   source: UpdateSource
   custom: string
+  /**
+   * 下载更新时走的代理，如 http://127.0.0.1:7890、socks5://127.0.0.1:1080。
+   * 留空 = 听环境变量的（HTTP_PROXY / HTTPS_PROXY）。
+   *
+   * 默认一定为空——代理是部署者自己的东西，不能写进代码。
+   */
+  proxy?: string
 }
 
 export interface UpdateStatus {
