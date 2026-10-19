@@ -434,6 +434,45 @@ function SoftwareUpdate() {
     }
   }, [apply])
 
+  /*
+   * 只要有任务在跑就持续轮询，**与 install() 里的循环分开**。
+   *
+   * # 为什么必须独立
+   *
+   * 原来只有 install() 里有轮询循环。那个循环属于"点更新"那一次调用：
+   * 组件一卸载（刷新页面、切走再回来）它就退出了，之后再没人拉状态 ——
+   * 于是刷新后进度条虽然显示了（条件已改成看 job.state），
+   * 数字却**永远停在那儿不动**，用户只能干等，不知道还要多久。
+   *
+   * 这里按 job.state 自己起一个循环，刷新页面重新挂载后会自动接着跑，
+   * 进度条持续更新，也能在下载失败/完成时及时反映出来。
+   */
+  const jobState = st?.job.state ?? ''
+  useEffect(() => {
+    if (jobState !== 'downloading' && jobState !== 'restarting') return
+    let stop = false
+
+    const poll = async () => {
+      while (!stop && alive.current) {
+        await sleep(1500)
+        if (stop || !alive.current) return
+        try {
+          const now = await getUpdateStatus()
+          if (stop || !alive.current) return
+          setSt(now)
+          // 任务结束了（失败 / 空闲）就停止轮询；restarting 继续等后端重启
+          if (now.job.state !== 'downloading' && now.job.state !== 'restarting') return
+        } catch {
+          return // 连不上多半是已经在重启了
+        }
+      }
+    }
+    poll()
+    return () => {
+      stop = true
+    }
+  }, [jobState])
+
   // saveSource 内置和官方点了就存；自定义要等填好地址点保存
   //
   // **必须把 proxy 一起带上**：后端 SetConfig 是整份覆盖，
