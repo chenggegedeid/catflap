@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -155,4 +156,101 @@ func TestSortBlocksManualFirst(t *testing.T) {
 	if list[2].IP != "auto-new" {
 		t.Fatalf("自动封禁应排最后，实际 %v", list[2].IP)
 	}
+}
+
+// ===================== 传输途中上报（来源流量） =====================
+
+// TestAddTrafficProgressOnlyAddsBytes
+// 途中上报只加字节，**不记请求数、不刷新 LastSeen**。
+//
+// 一次下载是一个请求。若按上报次数计请求，传一个大文件会把这个 IP 的
+// 请求数放大几十倍，列表上"请求数"就没法看了。
+func TestAddTrafficProgressOnlyAddsBytes(t *testing.T) {
+	dir := t.TempDir()
+	oldA, oldI := auditDir, ipStatsPath
+	auditDir = dir
+	ipStatsPath = filepath.Join(dir, "ipstats.json")
+	t.Cleanup(func() {
+		auditDir, ipStatsPath = oldA, oldI
+		Runtime.ipStats = map[string]*IPStat{}
+		dayStats = map[string]*DayStat{}
+		dayCache = map[string]*dayCacheEntry{}
+	})
+	Runtime.ipStats = map[string]*IPStat{}
+	setEnabledForTest(t, true)
+
+	t0 := time.Now().Add(-time.Minute)
+	AddTrafficProgress("203.0.113.5", 0, 1000)
+	AddTrafficProgress("203.0.113.5", 0, 2000)
+
+	st, ok := GetIPStat("203.0.113.5")
+	if !ok {
+		t.Fatal("途中上报应当建出 IPStat")
+	}
+	if st.Requests != 0 {
+		t.Errorf("途中上报不该记请求数，实际 %d", st.Requests)
+	}
+	if st.BytesOut != 3000 {
+		t.Errorf("字节应当累加到 3000，实际 %d", st.BytesOut)
+	}
+	if !st.LastSeen.Before(t0.Add(time.Second)) && st.LastSeen.After(time.Now()) {
+		t.Errorf("LastSeen 不该被途中上报改成未来时间：%v", st.LastSeen)
+	}
+}
+
+// TestRecordAccessProgressNoDoubleCount
+// 途中分段 + 结算 = 来源 IP 的流量不重不漏。
+//
+// 这是这次修复最容易出错的地方：结算时若直接加完整字节，
+// 来源 IP 的流量就会翻一倍。
+func TestRecordAccessProgressNoDoubleCount(t *testing.T) {
+	dir := t.TempDir()
+	oldA, oldI := auditDir, ipStatsPath
+	auditDir = dir
+	ipStatsPath = filepath.Join(dir, "ipstats.json")
+	t.Cleanup(func() {
+		auditDir, ipStatsPath = oldA, oldI
+		Runtime.ipStats = map[string]*IPStat{}
+		Runtime.accum = nil
+		dayStats = map[string]*DayStat{}
+		dayCache = map[string]*dayCacheEntry{}
+	})
+	Runtime.ipStats = map[string]*IPStat{}
+	Runtime.accum = nil
+	setEnabledForTest(t, true)
+
+	// 总共 5000 字节：途中报了 1000 + 2000，剩 2000
+	AddTrafficProgress("198.51.100.9", 0, 1000)
+	AddTrafficProgress("198.51.100.9", 0, 2000)
+	RecordAccessProgress(Record{
+		Time:     time.Now(),
+		IP:       "198.51.100.9",
+		BytesOut: 5000,
+	}, 0, 3000)
+
+	st, ok := GetIPStat("198.51.100.9")
+	if !ok {
+		t.Fatal("应当有 IPStat")
+	}
+	if st.BytesOut != 5000 {
+		t.Errorf("来源流量应当正好 5000（不重不漏），实际 %d", st.BytesOut)
+	}
+	if st.Requests != 1 {
+		t.Errorf("一次下载只能算 1 个请求，实际 %d", st.Requests)
+	}
+	// 明细里必须是完整值：一条记录 = 一次完整请求
+	if len(Runtime.accum) != 1 || Runtime.accum[0].BytesOut != 5000 {
+		t.Errorf("明细记录必须是完整字节 5000，实际 %v", Runtime.accum)
+	}
+}
+
+// setEnabledForTest 打开/关闭审计总开关。
+//
+// 直接改 Runtime.Config 而不是走 Runtime.Update：后者会顺带落盘配置文件，
+// 测试不需要那个副作用，也不该往临时目录外写东西。
+func setEnabledForTest(t *testing.T, on bool) {
+	t.Helper()
+	Runtime.mu.Lock()
+	Runtime.Config.Enabled = on
+	Runtime.mu.Unlock()
 }

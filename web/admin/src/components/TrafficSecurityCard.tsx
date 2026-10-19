@@ -137,7 +137,17 @@ export function TrafficSecurityCard() {
 
       <div className="px-5 pb-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Metric label="今日流量" value={fmtBytes(todayBytes)} hint={`实时 ${fmtBytes(rt?.inPerSec ?? 0)}/s 入站`} />
+          {/*
+            实时速率**入站和出站都给**：
+            原来只写"实时 X/s 入站"，而穿透下载看的是出站 ——
+            用户下载时看着这个数不动，会以为统计坏了。
+            这里两行都给，尺寸上仍是一张卡。
+          */}
+          <Metric
+            label="今日流量"
+            value={fmtBytes(todayBytes)}
+            hint={`实时 入 ${fmtBytes(rt?.inPerSec ?? 0)}/s · 出 ${fmtBytes(rt?.outPerSec ?? 0)}/s`}
+          />
           <Metric
             label="今日请求"
             value={fmtCount(overview?.requests ?? 0)}

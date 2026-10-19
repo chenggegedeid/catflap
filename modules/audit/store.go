@@ -257,6 +257,42 @@ func IsBlocked(ip string) (BlockEntry, bool) {
 // 走内存累加 + 每分钟落盘：被扫的时候一分钟能来几千个请求，
 // 每个都写盘会把磁盘打满（而且统计本来也不需要那么细的粒度）。
 func RecordAccess(r Record) {
+	recordAccess(r, r.BytesIn, r.BytesOut)
+}
+
+// RecordAccessProgress 结算一次访问：**途中的字节已经上报过了**时用这个。
+//
+// # 为什么要有第二个入口
+//
+// 审计页「来源流量」（每个 IP 的累计进出字节）原来只在请求结束时更新。
+// 普通网页几十毫秒结束看不出来，但一个传十几分钟的文件，这十几分钟里
+// 那个 IP 的流量**纹丝不动** —— 用户会以为审计没统计到。
+//
+// 现在传输途中就按 traffic 同样的阈值上报（见 proxy 的 statusRecorder），
+// 请求结束时用这里结算。
+//
+// # 三处数据的口径必须分开
+//
+//   - 明细（data/access/<日期>.jsonl）：一条记录 = 一次完整请求，写 r 的
+//     **完整**字节。如果写剩余值，明细里每条记录就是残缺的。
+//   - IPStat（来源 IP 累计值）：途中加过一部分，结算时只能补**剩余**，
+//     否则翻倍。这就是为什么字节要单独传进来。
+//   - DayStat（按天按小时聚合）：途中不上报它（趋势/指标卡用的是请求数和
+//     错误数，字节不参与展示），所以结算时加**完整**值即可。
+func RecordAccessProgress(r Record, reportedIn, reportedOut int64) {
+	restIn := r.BytesIn - reportedIn
+	restOut := r.BytesOut - reportedOut
+	if restIn < 0 {
+		restIn = 0
+	}
+	if restOut < 0 {
+		restOut = 0
+	}
+	recordAccess(r, restIn, restOut)
+}
+
+// recordAccess 内部实现。addIn/addOut 是**加进 IPStat** 的字节数。
+func recordAccess(r Record, addIn, addOut int64) {
 	if !Runtime.isEnabled() {
 		return
 	}
@@ -264,15 +300,56 @@ func RecordAccess(r Record) {
 		r.Time = time.Now()
 	}
 
-	updateIPStats(r)
+	updateIPStatsWith(r, addIn, addOut)
 
 	// 同时累加按天/按小时的聚合。两个维度在同一处更新，
-	// 分开写迟早会出现「明细里有、趋势图里没有」这种对不上的情况
+	// 分开写迟早会出现「明细里有、趋势图里没有」这种对不上的情况。
+	// 这里用 r 的完整值：DayStat 的字节在途中不上报（见上面注释）。
 	AddToDayStat(r)
 
 	Runtime.accumMu.Lock()
 	Runtime.accum = append(Runtime.accum, r)
 	Runtime.accumMu.Unlock()
+}
+
+// AddTrafficProgress 传输**途中**给来源 IP 累加字节。
+//
+// 与 traffic.RecordPartial 是同一个时机、同一套阈值，由 proxy 层同时调用。
+//
+// 刻意不更新的三项：
+//   - Requests：一次下载是一个请求，不能因为分段上报变成几十个
+//   - LastSeen：它表示"这个 IP 最后一次发起请求"，途中的续传不算新请求
+//   - 明细 / DayStat：明细要等请求结束才有完整的一条记录
+func AddTrafficProgress(ip string, bytesIn, bytesOut int64) {
+	if !Runtime.isEnabled() || ip == "" {
+		return
+	}
+	if bytesIn <= 0 && bytesOut <= 0 {
+		return
+	}
+
+	Runtime.mu.Lock()
+	defer Runtime.mu.Unlock()
+
+	st := Runtime.ipStats[ip]
+	if st == nil {
+		st = &IPStat{IP: ip, FirstSeen: time.Now()}
+		Runtime.ipStats[ip] = st
+	}
+	st.BytesIn += bytesIn
+	st.BytesOut += bytesOut
+	// 兜底成空数组：这条路径也可能建出新 IPStat，不兜住的话穿透 IP
+	// 落盘成 null，前端取 .length 会崩（见 updateIPStats 里的注释）
+	if st.Paths == nil {
+		st.Paths = []string{}
+	}
+	if st.Hosts == nil {
+		st.Hosts = []string{}
+	}
+	if st.UserAgents == nil {
+		st.UserAgents = []string{}
+	}
+	Runtime.ipStatsDirty = true
 }
 
 func (r *runtime) isEnabled() bool {
@@ -283,6 +360,16 @@ func (r *runtime) isEnabled() bool {
 
 // updateIPStats 更新按 IP 的聚合
 func updateIPStats(r Record) {
+	updateIPStatsWith(r, r.BytesIn, r.BytesOut)
+}
+
+// updateIPStatsWith 更新按 IP 的聚合，字节部分用 addIn/addOut 而不是 Record 里的值。
+//
+// 为什么要把字节单独传：加了「传输途中上报」之后，请求结束时 Record 里的
+// BytesIn/BytesOut 是这次请求的**完整**流量，但其中一部分已经在途中加进 IPStat 了。
+// 结算时只能补**剩余**，否则来源 IP 的流量会翻倍。
+// 见 RecordAccessProgress 的注释。
+func updateIPStatsWith(r Record, addIn, addOut int64) {
 	Runtime.mu.Lock()
 	defer Runtime.mu.Unlock()
 
@@ -293,8 +380,8 @@ func updateIPStats(r Record) {
 	}
 	st.LastSeen = r.Time
 	st.Requests++
-	st.BytesIn += r.BytesIn
-	st.BytesOut += r.BytesOut
+	st.BytesIn += addIn
+	st.BytesOut += addOut
 	if r.isError() {
 		st.Errors++
 	}
