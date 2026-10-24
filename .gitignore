@@ -85,3 +85,7 @@ gh_token*
 # Python
 __pycache__/
 *.pyc
+
+# 本地编译的产物，不入库（体积大且只是一次性交付给用户手动上传）
+catflap-*.bak-*
+/catflap-*-linux-*

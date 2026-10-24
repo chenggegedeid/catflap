@@ -42,6 +42,9 @@ export function Backup() {
   const [restorePicked, setRestorePicked] = useState<Record<string, boolean>>({})
   const [previewing, setPreviewing] = useState(false)
   const [restoring, setRestoring] = useState(false)
+  // 恢复成功但尚未重启的模块数。> 0 时顶部要挂醒目提示 ——
+  // 见 doRestore 里的说明：不重启界面就看不到恢复结果。
+  const [restoredCount, setRestoredCount] = useState(0)
 
   const say = (m: string) => {
     setToast(m)
@@ -117,7 +120,10 @@ export function Backup() {
     setRestoring(true)
     try {
       const r = await importBackup(file, mods)
-      say(`已恢复 ${r.restoredModules.length} 个模块`)
+      // 恢复只写磁盘：运行中的进程仍用内存里的旧配置，不重启界面上看不出变化，
+      // 会被当成"恢复坏了"。所以必须把这一步讲清楚。
+      setRestoredCount(r.restoredModules.length)
+      say(`已把 ${r.restoredModules.length} 个模块的配置写入磁盘`)
       setFile(null)
       setManifest(null)
     } catch (e) {
@@ -137,6 +143,35 @@ export function Backup() {
 
   return (
     <div className="space-y-4">
+      {/*
+        恢复成功但还没重启的醒目提示。
+        为什么要挂在页面顶部而不是只弹个 toast：
+        恢复只写磁盘，运行中的进程仍用内存里的旧配置 ——
+        界面上看着毫无变化，用户会以为"恢复坏了"。
+        不重启的话，之后在界面上改任何配置，模块还会把内存里的旧状态
+        写回磁盘，把刚恢复的内容盖掉。所以必须说清楚、并且要看得见。
+      */}
+      {restoredCount > 0 && (
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          <div className="font-semibold">
+            已把 {restoredCount} 个模块的配置写入磁盘，需要重启 Catflap 才能生效
+          </div>
+          <div className="mt-1">
+            在命令行执行：<code className="rounded bg-black/10 px-1 font-mono dark:bg-white/10">sudo systemctl restart catflap</code>
+          </div>
+          <div className="mt-1">
+            <strong>重启前请不要在本界面修改任何配置</strong>，否则运行中的旧配置会写回磁盘，把刚恢复的内容覆盖掉。
+          </div>
+          <button
+            type="button"
+            onClick={() => setRestoredCount(0)}
+            className="mt-2 text-[11px] font-semibold underline underline-offset-2"
+          >
+            已重启，知道了
+          </button>
+        </div>
+      )}
+
       {/* 定时备份放在最上面：多数人真正需要的是它自己会存，手动导出是补充 */}
       <ScheduleBackup />
 
@@ -263,30 +298,55 @@ export function Backup() {
                   要恢复哪些模块（被覆盖的是现有配置）
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {(manifest.modules ?? []).map((m) => (
-                    <button
-                      key={m.name}
-                      type="button"
-                      onClick={() =>
-                        setRestorePicked((p) => ({ ...p, [m.name]: !p[m.name] }))
-                      }
-                      disabled={!m.exists}
-                      title={m.exists ? undefined : '包里没有这个模块的内容'}
-                      className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${
-                        restorePicked[m.name]
-                          ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300'
-                          : 'bg-surface-2 text-muted hover:bg-fill'
-                      }`}
-                    >
-                      {restorePicked[m.name] && <Check className="h-3 w-3" />}
-                      {m.label || m.name}
-                    </button>
-                  ))}
+                  {(manifest.modules ?? []).map((m) => {
+                    // 空配置识别：一个模块的配置文件如果只有一两百字节，
+                    // 基本就是 {} 或 {"records":null} 这种空壳。
+                    //
+                    // 为什么必须标出来：恢复是**覆盖式**的，勾了一个空模块
+                    // 就等于用空配置把现有配置盖掉 —— 用户看到的是
+                    // "恢复成功了，但我的 DDNS/反代没了"，最难排查的那种。
+                    // 宁可在勾选前就警告，也别让人恢复完才发现。
+                    const empty = m.exists && m.size > 0 && m.size < 300
+                    const picked = restorePicked[m.name]
+                    return (
+                      <button
+                        key={m.name}
+                        type="button"
+                        onClick={() =>
+                          setRestorePicked((p) => ({ ...p, [m.name]: !p[m.name] }))
+                        }
+                        disabled={!m.exists}
+                        title={
+                          !m.exists
+                            ? '包里没有这个模块的内容'
+                            : empty
+                              ? `包里这个模块只有 ${m.size} 字节，很可能是空配置——勾选会把现有的覆盖成空的`
+                              : `包内 ${m.size} 字节`
+                        }
+                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${
+                          picked
+                            ? empty
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                              : 'bg-rose-50 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300'
+                            : empty
+                              ? 'bg-amber-50/60 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'
+                              : 'bg-surface-2 text-muted hover:bg-fill'
+                        }`}
+                      >
+                        {picked && <Check className="h-3 w-3" />}
+                        {m.label || m.name}
+                        {empty && <span className="text-[10px] font-normal">（可能是空的）</span>}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
               <div className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-[11px] leading-relaxed text-muted">
                 恢复前会自动给现有配置打快照，中途失败会自动回滚。
+                <br />
+                注意：证书分两处——<strong>配置在 config/，证书实体文件在 data/cert/</strong>。
+                手动搬配置时只拷 config 的话，程序找不到证书会自己签一张顶上。
               </div>
 
               <button
