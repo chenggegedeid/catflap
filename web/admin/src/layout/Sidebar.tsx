@@ -14,7 +14,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ active, onChange, open, onClose }: SidebarProps) {
-  const [version, setVersion] = useState('2.5.10')
+  const [version, setVersion] = useState('2.5.11')
   const [latest, setLatest] = useState('')
   // 导航来自页面注册表 + 组件开关：被「功能管理」关掉的功能不在这里出现
   const navGroups = useNavGroups()
