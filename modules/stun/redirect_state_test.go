@@ -117,10 +117,10 @@ func TestShouldSyncRedirectRetriesAfterCooldown(t *testing.T) {
 func TestRedirectTargetPort(t *testing.T) {
 	cases := map[string]uint16{
 		"https://example.com:26853": 26853,
-		"http://1.2.3.4:80":      80,
+		"http://1.2.3.4:80":         80,
 		"https://example.com":       0,
-		"":                       0,
-		"::not a url":            0,
+		"":                          0,
+		"::not a url":               0,
 	}
 	for in, want := range cases {
 		if got := redirectTargetPort(in); got != want {
